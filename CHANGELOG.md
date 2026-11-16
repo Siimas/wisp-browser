@@ -6,6 +6,12 @@ All notable changes to Wisp are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-16
+
+On Windows this version does not update itself: Windows Defender quarantined Wisp
+when 0.2.1 installed an update, and automatic updates stay off there until the fixed
+update path has been checked on Windows. Install 0.3.0 with the Setup file.
+
 ### Added
 
 - Ad blocking with real filter lists: EasyList and EasyPrivacy by default, and
@@ -47,7 +53,7 @@ All notable changes to Wisp are recorded here. The format follows
   History, Bookmarks, Downloads, Find in page, zoom, and quick switches for ad
   blocking, light or dark, and collapsing the bar, each with its hotkey.
 - Menus now float over the page on glass instead of hiding it while open.
-- Low-power mode (Settings > Behavior): solid surfaces instead of glass and no
+- Low-power mode (Settings > Tabs and browsing > Performance): solid surfaces instead of glass and no
   animation. Automatic, the default, turns it on in the system's power saving
   mode, on a low battery, or on a computer with 4 GB of memory or less or two
   cores or fewer. The system's "Reduce transparency" setting now turns glass
@@ -181,7 +187,8 @@ First release.
 - Installers: `.dmg` for macOS (Apple Silicon and Intel) and a setup program
   for Windows.
 
-[Unreleased]: https://github.com/Siimas/wisp-browser/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/Siimas/wisp-browser/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Siimas/wisp-browser/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/Siimas/wisp-browser/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Siimas/wisp-browser/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Siimas/wisp-browser/releases/tag/v0.1.0
