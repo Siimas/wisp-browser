@@ -21,6 +21,24 @@ use std::time::{Duration, Instant};
 /// With the bar not collapsed, the overlay view is released after this long unused,
 /// and created again on the next menu.
 pub const IDLE_RELEASE: Duration = Duration::from_secs(5 * 60);
+
+/// `IDLE_RELEASE`, or in debug builds `WISP_OVERLAY_IDLE=<seconds>` to watch it happen.
+fn idle_release() -> Duration {
+    #[cfg(debug_assertions)]
+    if let Some(secs) = std::env::var("WISP_OVERLAY_IDLE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+    {
+        return Duration::from_secs(secs);
+    }
+    IDLE_RELEASE
+}
+
+/// When an overlay last used at `used` may be released; `None` while it is needed:
+/// showing a menu, waiting to show one, or being the collapsed bar.
+fn release_at(needed: bool, used: Instant, idle: Duration) -> Option<Instant> {
+    (!needed).then_some(used + idle)
+}
 const MAX_ENTRIES: usize = 64;
 const MAX_BUTTONS: usize = 6;
 const MAX_TEXT: usize = 400;
@@ -149,6 +167,9 @@ pub struct Show {
     radius: f64,
     #[serde(default)]
     again: bool,
+    /// Which build of the menu this is; a choice made in an older one is dropped.
+    #[serde(default)]
+    generation: u32,
 }
 
 #[derive(Deserialize)]
@@ -162,6 +183,8 @@ pub enum Msg {
     /// Chosen in the overlay; passed to the main copy, which knows what `id` does.
     MenuPick {
         id: u32,
+        #[serde(default)]
+        generation: u32,
     },
     /// Close the overlay menu: Escape or a click elsewhere in the overlay, its view lost
     /// focus (a click on the page or anywhere else), or the main copy closed it.
@@ -214,14 +237,17 @@ impl App {
                 self.overlay.used = Instant::now();
             }
             Msg::Menu(show) => self.show_menu(show),
-            Msg::MenuPick { id } => {
+            Msg::MenuPick { id, generation } => {
                 if self.overlay.open {
-                    let _ = self.chrome.evaluate_script(&format!("wisp.menuPick({id})"));
+                    let js = format!("wisp.menuPick({id}, {generation})");
+                    let _ = self.chrome.evaluate_script(&js);
                 }
             }
             Msg::MenuClose { focus } => {
                 let was = self.overlay.open;
                 self.close_menu();
+                // Escape or a choice: the keyboard goes back to the page (or the
+                // interface). Not when the overlay lost focus: it went where the user clicked.
                 if was && focus {
                     let _ = match self.active_webview().filter(|_| self.page_visible()) {
                         Some(w) => w.focus(),
@@ -245,6 +271,7 @@ impl App {
         if self.floater.is_none() {
             return self.menu_fallback();
         }
+        self.overlay.used = Instant::now();
         if !self.overlay.ready {
             self.overlay.pending = Some(show);
             return;
@@ -257,7 +284,7 @@ impl App {
         let js = format!(
             "wisp.menu({})",
             json!({"menu": show.menu, "x": x - left, "y": y - top, "w": w,
-                   "origin": show.origin, "again": again})
+                   "origin": show.origin, "again": again, "generation": show.generation})
         );
         let Some(f) = &self.floater else { return };
         let _ = f.evaluate_script(&js);
@@ -301,16 +328,17 @@ impl App {
     /// Release the overlay view once it has gone unused for `IDLE_RELEASE`, unless the
     /// collapsed bar needs it. Gives when to look again.
     pub(crate) fn release_overlay(&mut self) -> Option<Instant> {
-        let idle = !self.cfg.layout.collapsed && !self.peek && !self.overlay.open;
-        if self.floater.is_none() || !idle {
-            return None;
-        }
-        let at = self.overlay.used + IDLE_RELEASE;
+        self.floater.as_ref()?;
+        let o = &self.overlay;
+        let needed = self.cfg.layout.collapsed || self.peek || o.open || o.pending.is_some();
+        let at = release_at(needed, o.used, idle_release())?;
         if Instant::now() < at {
             return Some(at);
         }
         self.floater = None;
         self.overlay.ready = false;
+        #[cfg(debug_assertions)]
+        eprintln!("wisp: overlay released after {:?} unused", idle_release());
         None
     }
 }
@@ -351,6 +379,14 @@ mod tests {
         // Defaults are left out again, so an empty menu stays tiny.
         let empty: Menu = serde_json::from_value(json!({"entries": []})).unwrap();
         assert_eq!(serde_json::to_string(&empty).unwrap(), r#"{"entries":[]}"#);
+    }
+
+    #[test]
+    fn the_overlay_is_released_only_when_unused() {
+        let (t, idle) = (Instant::now(), Duration::from_secs(300));
+        assert_eq!(release_at(false, t, idle), Some(t + idle));
+        // Showing a menu, a menu waiting for the view to load, or the collapsed bar: kept.
+        assert_eq!(release_at(true, t, idle), None);
     }
 
     #[test]

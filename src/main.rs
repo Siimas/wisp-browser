@@ -244,7 +244,9 @@ fn group_pinned(tabs: &mut [Tab]) {
 
 /// SETTINGS TAB: the one Settings tab, shown in workspace `ws`: created at the end of
 /// it, or moved there from another workspace. Gives its id.
-fn settings_tab(tabs: &mut Vec<Tab>, ws: u32, next_id: &mut u32) -> u32 {
+/// `private`: in a private window it is private like every other tab, so a page it
+/// turns into (see `settings_to_web`) never touches the saved data store.
+fn settings_tab(tabs: &mut Vec<Tab>, ws: u32, private: bool, next_id: &mut u32) -> u32 {
     match tabs.iter().position(|t| t.kind == Kind::Settings) {
         Some(pos) if tabs[pos].workspace == ws => tabs[pos].id,
         found => {
@@ -256,7 +258,7 @@ fn settings_tab(tabs: &mut Vec<Tab>, ws: u32, next_id: &mut u32) -> u32 {
                         id: *next_id - 1,
                         kind: Kind::Settings,
                         workspace: ws,
-                        private: false,
+                        private,
                         pinned: false,
                         webview: None,
                         title: "Settings".into(),
@@ -274,6 +276,12 @@ fn settings_tab(tabs: &mut Vec<Tab>, ws: u32, next_id: &mut u32) -> u32 {
             id
         }
     }
+}
+
+/// An address typed on the Settings tab: that tab becomes the page, as in other browsers.
+fn settings_to_web(tab: &mut Tab, url: String, zoom: f64, private_window: bool) {
+    (tab.kind, tab.url, tab.title, tab.zoom) = (Kind::Web, url, String::new(), zoom);
+    tab.private |= private_window;
 }
 
 /// Whether a tab goes into the saved session: not a private one, not Settings, not a blank.
@@ -1071,7 +1079,8 @@ impl App {
         if !self.settings_open() {
             self.settings_from = self.active;
         }
-        let id = settings_tab(&mut self.tabs, self.workspace, &mut self.next_id);
+        let (ws, private) = (self.workspace, self.private_window);
+        let id = settings_tab(&mut self.tabs, ws, private, &mut self.next_id);
         self.select(id);
     }
 
@@ -1382,11 +1391,11 @@ impl App {
                 Msg::Action { name } => self.action(&name),
                 Msg::Navigate { url } => {
                     let url = config::resolve_input(&url, &self.cfg.behavior.search_url);
-                    // From the Settings tab: that tab becomes the page, as in other browsers.
+                    let (zoom, private) = (self.cfg.behavior.default_zoom, self.private_window);
                     if let Some(tab) = self.active.and_then(|id| self.tab_mut(id))
                         && tab.kind == Kind::Settings
                     {
-                        (tab.kind, tab.url, tab.title) = (Kind::Web, url, String::new());
+                        settings_to_web(tab, url, zoom, private);
                         let id = tab.id;
                         self.settings_from = None;
                         return self.select(id);
@@ -1458,7 +1467,8 @@ impl App {
                     }
                 }
                 Msg::FloaterDone => {
-                    if let Some(f) = self.floater.as_ref().filter(|_| !self.peek) {
+                    let idle = !self.peek && !self.overlay.open;
+                    if let Some(f) = self.floater.as_ref().filter(|_| idle) {
                         let _ = f.set_visible(false);
                         if let Some(glass) = &self.glass {
                             glass.hide();
@@ -1755,7 +1765,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 mod tests {
     use super::{
         App, CLOSED_MAX, Kind, Side, Tab, Zone, ease_out, group_pinned, place_tab, remember_closed,
-        saved, settings_tab, zone,
+        saved, settings_tab, settings_to_web, zone,
     };
 
     fn tab(id: u32, workspace: u32, pinned: bool) -> Tab {
@@ -1873,14 +1883,14 @@ mod tests {
     fn there_is_one_settings_tab_and_it_is_never_kept() {
         let mut tabs = vec![tab(1, 1, false), tab(2, 2, false)];
         let mut next = 3;
-        let id = settings_tab(&mut tabs, 1, &mut next);
+        let id = settings_tab(&mut tabs, 1, false, &mut next);
         assert_eq!((id, next, tabs.len()), (3, 4, 3));
         assert_eq!(order(&tabs, 1), [1, 3]); // at the end of the workspace it was opened in
         // Opening Settings again selects the same tab.
-        assert_eq!(settings_tab(&mut tabs, 1, &mut next), 3);
+        assert_eq!(settings_tab(&mut tabs, 1, false, &mut next), 3);
         assert_eq!((next, tabs.len()), (4, 3));
         // From another workspace, it comes along rather than a second one appearing.
-        assert_eq!(settings_tab(&mut tabs, 2, &mut next), 3);
+        assert_eq!(settings_tab(&mut tabs, 2, false, &mut next), 3);
         assert_eq!((order(&tabs, 1), order(&tabs, 2)), (vec![1], vec![2, 3]));
         let settings = tabs.iter().find(|t| t.id == 3).unwrap();
         assert_eq!(settings.kind, Kind::Settings);
@@ -1889,6 +1899,23 @@ mod tests {
         let mut closed = Vec::new();
         remember_closed(&mut closed, settings, 1);
         assert!(closed.is_empty());
+    }
+
+    #[test]
+    fn in_a_private_window_settings_and_what_it_becomes_stay_private() {
+        let mut tabs = Vec::new();
+        let id = settings_tab(&mut tabs, 1, true, &mut 1);
+        assert!(tabs[0].private && tabs[0].id == id);
+        // Typing an address on it: a private web tab at the default zoom, never saved.
+        settings_to_web(&mut tabs[0], "https://example.com/".into(), 1.25, true);
+        let t = &tabs[0];
+        assert!(t.kind == Kind::Web && t.private && !saved(t));
+        assert_eq!((t.url.as_str(), t.zoom), ("https://example.com/", 1.25));
+        // Even if the Settings tab had somehow not been marked private.
+        let mut tabs = Vec::new();
+        settings_tab(&mut tabs, 1, false, &mut 1);
+        settings_to_web(&mut tabs[0], "https://example.com/".into(), 1.0, true);
+        assert!(tabs[0].private);
     }
 
     #[test]

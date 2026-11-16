@@ -1221,17 +1221,21 @@ function showMenu(again) {
   openPop(m.anchor, menuEls(desc, menuPick), again, g => {
     if (!m.overlay && (again || !overlayOk())) return false;
     m.overlay = true;
+    m.generation = (m.generation || 0) + 1;
     post({ cmd: 'menu', menu: desc, rect: [g.x, g.y, g.w, g.h], origin: [g.ox, g.oy], pad: 3 * px('--float-shadow'), /* the whole of --shadow-pop */
-      radius: parseFloat(getComputedStyle($('#pop')).borderTopLeftRadius) || 0, again });
+      radius: parseFloat(getComputedStyle($('#pop')).borderTopLeftRadius) || 0, again, generation: m.generation });
     return true;
   });
 }
 // The overlay draws a menu that spills over a page on screen; over a sheet this copy can.
 const overlayOk = () => !FLOATER && !S.peek && !S.settings && !customizing && !sheet;
-function menuPick(n) {
+// `generation`: from the overlay, which build of the menu was clicked. The menu may have
+// been rebuilt since (a download finished), and then the same number means another row.
+function menuPick(n, generation) {
+  if (generation !== undefined && generation !== curMenu?.generation) return;
   const h = curMenu?.fns[n];
   if (!h) return;
-  if (!h.keep) closePop();
+  if (!h.keep) closePop(true);
   h.fn?.();
 }
 wisp.menuPick = menuPick; // chosen in the overlay
@@ -1252,7 +1256,7 @@ wisp.menu = m => {
   if (!FLOATER) return;
   const pop = $('#pop'), was = [...pop.querySelectorAll('button')].indexOf(document.activeElement);
   pop.classList.toggle('wide', !!m.menu.wide);
-  pop.replaceChildren(...menuEls(m.menu, id => post({ cmd: 'menu_pick', id })));
+  pop.replaceChildren(...menuEls(m.menu, id => post({ cmd: 'menu_pick', id, generation: m.generation })));
   Object.assign(pop.style, { left: m.x + 'px', top: m.y + 'px', width: m.w + 'px' });
   pop.style.setProperty('--ox', m.origin[0] + 'px');
   pop.style.setProperty('--oy', m.origin[1] + 'px');
@@ -1272,7 +1276,7 @@ addEventListener('keydown', e => {
   if ((pop.hidden && !curMenu?.overlay) || !S || window.__wispRecording || e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === 'Escape') {
     e.preventDefault(); e.stopImmediatePropagation();
-    return FLOATER && overlayShown ? post({ cmd: 'menu_close', focus: true }) : closePop();
+    return FLOATER && overlayShown ? post({ cmd: 'menu_close', focus: true }) : closePop(true);
   }
   if (pop.hidden || e.target.matches?.('input, textarea')) return;
   const items = [...pop.querySelectorAll('button:not(:disabled)')], n = items.length, i = items.indexOf(document.activeElement);
@@ -1388,11 +1392,13 @@ function openPop(at, kids, again, overlay) {
   if (FLOATER) floaterGrow();
   if (!again) post({ cmd: 'busy', on: true });
 }
-function closePop() {
-  if (FLOATER && overlayShown) return post({ cmd: 'menu_close' }); // the app hides it
+// `chosen`: closed by a choice, so the keyboard goes back to the page rather than
+// staying in the hidden overlay.
+function closePop(chosen) {
+  if (FLOATER && overlayShown) return post({ cmd: 'menu_close', focus: true }); // the app hides it
   const m = curMenu;
   curMenu = null;
-  if (m?.overlay) { post({ cmd: 'menu_close' }); post({ cmd: 'busy', on: false }); }
+  if (m?.overlay) { post({ cmd: 'menu_close', focus: !!chosen }); post({ cmd: 'busy', on: false }); }
   if ($('#pop').hidden) return;
   $('#pop').hidden = true;
   popCovers = false;
