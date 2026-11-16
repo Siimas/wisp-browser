@@ -175,7 +175,7 @@ impl Default for Appearance {
             background: Vec::new(),
             gradient_angle: 160,
             background_opacity: 100,
-            texture: "none".into(),
+            texture: "grain".into(),
             texture_strength: 30,
             custom_css: String::new(),
         }
