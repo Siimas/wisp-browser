@@ -9,15 +9,22 @@ engine.
 
 ## Features
 
-- Tabs, with links that want a new window opening as tabs instead
-- Address bar that takes an address or a search
+- **Four layouts**: sidebar on the right (default) or left, or a top bar in
+  relaxed or compact size
+- **Collapsible bar**: tuck the sidebar or top bar away to a thin strip; it
+  comes back while the mouse is on that edge
+- **Workspaces**: your own named groups of tabs (Work, Shopping, ...), each
+  remembering its tabs
+- **Private tabs and private windows**: nothing from them is kept on disk or
+  saved in the session
+- **Theme editor**: presets, up to three background colors as a gradient,
+  textures (grain, dots, lines, grid), accent color, custom CSS
 - Ad and tracker blocking inside the engine's network layer
-- In-app settings (`Cmd/Ctrl + ,`), applied live:
-  - **Appearance**: theme, accent color, compact toolbar, corner roundness, text size, custom CSS
-  - **Behavior**: homepage, new-tab page, search engine, session restore, default zoom
-  - **Ad blocking**: on/off and your own extra hosts
-  - **Hotkeys**: every shortcut can be rebound
-- Session restore, saved as you browse
+- Every hotkey can be rebound
+- Session restore, saved as you browse; restored tabs load only when opened
+- Double-click an empty part of the bar to expand the window; drag it to move
+
+Everything is in Settings (`Cmd/Ctrl + ,`) and applies live.
 
 ## Install
 
@@ -43,7 +50,10 @@ The installers are not code-signed yet, so the first launch needs one extra step
 | Action | Keys |
 | --- | --- |
 | New tab / close tab | `Mod+T` / `Mod+W` |
+| New private tab / private window | `Mod+Shift+P` / `Mod+Shift+N` |
 | Next / previous tab | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
+| Next / previous workspace | `Mod+Alt+Right` / `Mod+Alt+Left` |
+| Collapse or show the bar | `Mod+Shift+B` |
 | Focus address bar | `Mod+L` |
 | Back / forward | `Mod+[` / `Mod+]` |
 | Reload / home | `Mod+R` / `Mod+Shift+H` |
@@ -89,6 +99,10 @@ the installers and publishes them.
 - Ad blocking is a host list (built-in plus your own). It does not yet read
   EasyList-style filter lists or hide leftover empty ad slots.
 - Linux builds are not provided, and network-level blocking is not wired up there.
+- Workspaces group tabs but share cookies and logins; tabs cannot be moved
+  between workspaces yet.
+- A private window runs as a second copy of the app, so it shows its own
+  Dock or taskbar icon.
 - No bookmarks, history view, or find-in-page yet.
 
 ## License

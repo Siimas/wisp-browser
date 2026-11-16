@@ -6,11 +6,33 @@ use std::{collections::BTreeMap, fs, path::PathBuf};
 #[derive(Serialize, Deserialize, Clone, Default, PartialEq)]
 #[serde(default)]
 pub struct Config {
+    pub layout: Layout,
     pub appearance: Appearance,
     pub behavior: Behavior,
     pub adblock: Adblock,
+    pub workspaces: Vec<Workspace>,
     /// action name -> key combo, e.g. "new_tab" -> "Mod+T". "Mod" is Cmd on macOS, Ctrl elsewhere.
     pub hotkeys: BTreeMap<String, String>,
+}
+
+pub const MODES: [&str; 4] = [
+    "sidebar-right",
+    "sidebar-left",
+    "top-relaxed",
+    "top-compact",
+];
+pub const TEXTURES: [&str; 5] = ["none", "grain", "dots", "lines", "grid"];
+
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
+#[serde(default)]
+pub struct Layout {
+    /// One of `MODES`.
+    pub mode: String,
+    /// The bar is tucked away to a thin strip at the window edge.
+    pub collapsed: bool,
+    /// While collapsed, moving the mouse onto the strip shows the bar until it leaves.
+    pub hover_expand: bool,
+    pub sidebar_width: u16,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
@@ -18,9 +40,14 @@ pub struct Config {
 pub struct Appearance {
     pub theme: String, // "system" | "light" | "dark"
     pub accent: String,
-    pub compact: bool,
     pub radius: u8,
     pub font_size: u8,
+    /// 0-3 colors painted behind the bar; empty = plain theme background.
+    pub background: Vec<String>,
+    pub gradient_angle: u16,
+    /// One of `TEXTURES`.
+    pub texture: String,
+    pub texture_strength: u8, // 0-100
     pub custom_css: String,
 }
 
@@ -42,14 +69,36 @@ pub struct Adblock {
     pub extra_hosts: Vec<String>,
 }
 
+/// A named group of tabs the user creates ("Work", "Shopping", ...).
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
+pub struct Workspace {
+    pub id: u32,
+    pub name: String,
+    pub color: String,
+}
+
+impl Default for Layout {
+    fn default() -> Self {
+        Self {
+            mode: MODES[0].into(),
+            collapsed: false,
+            hover_expand: true,
+            sidebar_width: 260,
+        }
+    }
+}
+
 impl Default for Appearance {
     fn default() -> Self {
         Self {
             theme: "system".into(),
             accent: "#6c8cff".into(),
-            compact: false,
             radius: 8,
             font_size: 13,
+            background: Vec::new(),
+            gradient_angle: 160,
+            texture: "none".into(),
+            texture_strength: 30,
             custom_css: String::new(),
         }
     }
@@ -85,9 +134,14 @@ pub fn default_hotkeys() -> BTreeMap<String, String> {
     };
     [
         ("new_tab", "Mod+T".to_string()),
+        ("new_private_tab", "Mod+Shift+P".to_string()),
+        ("private_window", "Mod+Shift+N".to_string()),
         ("close_tab", "Mod+W".to_string()),
         ("next_tab", format!("{ctrl}+Tab")),
         ("prev_tab", format!("{ctrl}+Shift+Tab")),
+        ("next_workspace", "Mod+Alt+ArrowRight".to_string()),
+        ("prev_workspace", "Mod+Alt+ArrowLeft".to_string()),
+        ("toggle_bar", "Mod+Shift+B".to_string()),
         ("focus_url", "Mod+L".to_string()),
         ("reload", "Mod+R".to_string()),
         ("back", "Mod+BracketLeft".to_string()),
@@ -103,6 +157,11 @@ pub fn default_hotkeys() -> BTreeMap<String, String> {
     .collect()
 }
 
+/// `#rrggbb` only: these values are placed into the browser UI's CSS.
+fn is_hex_color(s: &str) -> bool {
+    s.len() == 7 && s.starts_with('#') && s[1..].chars().all(|c| c.is_ascii_hexdigit())
+}
+
 impl Config {
     /// Fill in anything missing or out of range so the rest of the app can trust the values.
     pub fn sanitized(mut self) -> Self {
@@ -112,8 +171,45 @@ impl Config {
             self.hotkeys.entry(action).or_insert(combo);
         }
         self.behavior.default_zoom = clamp_zoom(self.behavior.default_zoom);
-        self.appearance.font_size = self.appearance.font_size.clamp(10, 20);
-        self.appearance.radius = self.appearance.radius.min(20);
+
+        let l = &mut self.layout;
+        if !MODES.contains(&l.mode.as_str()) {
+            l.mode = MODES[0].into();
+        }
+        l.sidebar_width = l.sidebar_width.clamp(180, 420);
+
+        let a = &mut self.appearance;
+        a.font_size = a.font_size.clamp(10, 20);
+        a.radius = a.radius.min(20);
+        a.gradient_angle %= 360;
+        a.texture_strength = a.texture_strength.min(100);
+        if !TEXTURES.contains(&a.texture.as_str()) {
+            a.texture = "none".into();
+        }
+        if !is_hex_color(&a.accent) {
+            a.accent = Appearance::default().accent;
+        }
+        a.background.retain(|c| is_hex_color(c));
+        a.background.truncate(3);
+
+        // Workspaces: unique non-zero ids, valid colors, never empty.
+        let mut seen = std::collections::HashSet::new();
+        self.workspaces.retain(|w| w.id != 0 && seen.insert(w.id));
+        for w in &mut self.workspaces {
+            if !is_hex_color(&w.color) {
+                w.color = Appearance::default().accent;
+            }
+            if w.name.trim().is_empty() {
+                w.name = format!("Workspace {}", w.id);
+            }
+        }
+        if self.workspaces.is_empty() {
+            self.workspaces.push(Workspace {
+                id: 1,
+                name: "Personal".into(),
+                color: Appearance::default().accent,
+            });
+        }
         self
     }
 
@@ -166,15 +262,32 @@ fn write(name: &str, contents: &str) {
     }
 }
 
-pub fn load_session() -> Vec<String> {
+/// Open tabs, saved as you browse and reopened on the next start.
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct Session {
+    pub workspace: u32,
+    pub tabs: Vec<SavedTab>,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct SavedTab {
+    pub url: String,
+    pub title: String,
+    pub workspace: u32,
+    pub active: bool,
+}
+
+pub fn load_session() -> Session {
     fs::read_to_string(dir().join("session.json"))
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default()
 }
 
-pub fn save_session(urls: &[String]) {
-    write("session.json", &serde_json::to_string(urls).unwrap());
+pub fn save_session(session: &Session) {
+    write("session.json", &serde_json::to_string(session).unwrap());
 }
 
 /// Turn what the user typed in the address bar into a URL: an address, or a search.
@@ -240,10 +353,24 @@ mod tests {
         c.hotkeys.insert("bogus".into(), "Mod+X".into());
         c.hotkeys.insert("new_tab".into(), "Mod+N".into());
         c.behavior.default_zoom = 99.0;
+        c.layout.mode = "diagonal".into();
+        c.appearance.background = vec!["#112233".into(), "red;}*{display:none".into()];
+        let ws = |id, name: &str| Workspace {
+            id,
+            name: name.into(),
+            color: "nope".into(),
+        };
+        c.workspaces = vec![ws(2, "Work"), ws(2, "Dup"), ws(0, "Zero"), ws(3, " ")];
         let c = c.sanitized();
         assert!(!c.hotkeys.contains_key("bogus"));
         assert_eq!(c.hotkeys["new_tab"], "Mod+N");
         assert_eq!(c.action_for("Mod+W"), Some("close_tab"));
         assert_eq!(c.behavior.default_zoom, 4.0);
+        assert_eq!(c.layout.mode, "sidebar-right");
+        assert_eq!(c.appearance.background, ["#112233"]);
+        let names: Vec<_> = c.workspaces.iter().map(|w| w.name.as_str()).collect();
+        assert_eq!(names, ["Work", "Workspace 3"]);
+        assert_eq!(c.workspaces[0].color, "#6c8cff");
+        assert_eq!(Config::default().sanitized().workspaces[0].name, "Personal");
     }
 }
