@@ -1,0 +1,1138 @@
+{
+ "machine": {
+  "model": "Mac16,1",
+  "chip": "Apple M4",
+  "cores": 10,
+  "memory_gb": 16,
+  "macos": "26.5.2",
+  "versions": {
+   "wisp": "73f906f",
+   "safari": "26.5.2",
+   "zen": "1.24.1b",
+   "chrome": "157.0.8103.78"
+  }
+ },
+ "coldstart": {
+  "measured_at": "2026-11-16 19:53",
+  "wisp": {
+   "first_run_fresh_profile_s": 0.363,
+   "seconds": {
+    "median": 0.37,
+    "min": 0.31,
+    "max": 0.45,
+    "runs": [
+     0.33,
+     0.31,
+     0.38,
+     0.45,
+     0.37
+    ]
+   }
+  },
+  "zen": {
+   "first_run_fresh_profile_s": 1.294,
+   "seconds": {
+    "median": 1.01,
+    "min": 0.99,
+    "max": 1.2,
+    "runs": [
+     1.0,
+     1.01,
+     1.05,
+     1.2,
+     0.99
+    ]
+   }
+  },
+  "chrome": {
+   "first_run_fresh_profile_s": 0.816,
+   "seconds": {
+    "median": 0.49,
+    "min": 0.46,
+    "max": 0.69,
+    "runs": [
+     0.49,
+     0.46,
+     0.51,
+     0.48,
+     0.69
+    ]
+   }
+  }
+ },
+ "onetab": {
+  "measured_at": "2026-11-16 21:15",
+  "wisp": {
+   "footprint_mb": {
+    "median": 188.1,
+    "min": 175.6,
+    "max": 188.2,
+    "runs": [
+     175.6,
+     188.2,
+     188.1
+    ]
+   },
+   "rss_mb": {
+    "median": 166.7,
+    "min": 166.5,
+    "max": 169.5,
+    "runs": [
+     166.5,
+     166.7,
+     169.5
+    ]
+   },
+   "processes": {
+    "median": 6,
+    "min": 6,
+    "max": 6,
+    "runs": [
+     6,
+     6,
+     6
+    ]
+   },
+   "cpu_percent_of_one_core": {
+    "median": 20.06,
+    "min": 17.04,
+    "max": 20.43,
+    "runs": [
+     17.04,
+     20.43,
+     20.06
+    ]
+   },
+   "wakeups_per_s": {
+    "median": 193.8,
+    "min": 192.5,
+    "max": 203.0,
+    "runs": [
+     192.5,
+     193.8,
+     203.0
+    ]
+   },
+   "by_kind_last_run": {
+    "wisp": {
+     "count": 1,
+     "footprint_mb": 22.2,
+     "rss_mb": 74.6
+    },
+    "com.apple.WebKit.GPU": {
+     "count": 1,
+     "footprint_mb": 73.6,
+     "rss_mb": 28.6
+    },
+    "com.apple.WebKit.Networking": {
+     "count": 1,
+     "footprint_mb": 8.0,
+     "rss_mb": 12.2
+    },
+    "com.apple.WebKit.WebContent": {
+     "count": 2,
+     "footprint_mb": 81.3,
+     "rss_mb": 46.2
+    },
+    "com.apple.audio.SandboxHelper": {
+     "count": 1,
+     "footprint_mb": 3.0,
+     "rss_mb": 7.9
+    }
+   }
+  },
+  "zen": {
+   "footprint_mb": {
+    "median": 716.4,
+    "min": 697.3,
+    "max": 747.0,
+    "runs": [
+     747.0,
+     716.4,
+     697.3
+    ]
+   },
+   "rss_mb": {
+    "median": 2217.7,
+    "min": 2209.1,
+    "max": 2271.6,
+    "runs": [
+     2209.1,
+     2217.7,
+     2271.6
+    ]
+   },
+   "processes": {
+    "median": 13,
+    "min": 13,
+    "max": 13,
+    "runs": [
+     13,
+     13,
+     13
+    ]
+   },
+   "cpu_percent_of_one_core": {
+    "median": 0.02,
+    "min": 0.02,
+    "max": 0.07,
+    "runs": [
+     0.07,
+     0.02,
+     0.02
+    ]
+   },
+   "wakeups_per_s": {
+    "median": 0.7,
+    "min": 0.5,
+    "max": 0.7,
+    "runs": [
+     0.7,
+     0.7,
+     0.5
+    ]
+   },
+   "by_kind_last_run": {
+    "zen": {
+     "count": 1,
+     "footprint_mb": 197.6,
+     "rss_mb": 439.8
+    },
+    "Zen GPU Helper": {
+     "count": 1,
+     "footprint_mb": 249.5,
+     "rss_mb": 51.0
+    },
+    "plugin-container": {
+     "count": 10,
+     "footprint_mb": 245.9,
+     "rss_mb": 1771.3
+    },
+    "VTDecoderXPCService": {
+     "count": 1,
+     "footprint_mb": 4.0,
+     "rss_mb": 9.4
+    }
+   }
+  },
+  "chrome": {
+   "footprint_mb": {
+    "median": 239.3,
+    "min": 234.4,
+    "max": 240.4,
+    "runs": [
+     239.3,
+     234.4,
+     240.4
+    ]
+   },
+   "rss_mb": {
+    "median": 607.9,
+    "min": 579.5,
+    "max": 702.2,
+    "runs": [
+     702.2,
+     607.9,
+     579.5
+    ]
+   },
+   "processes": {
+    "median": 8,
+    "min": 8,
+    "max": 8,
+    "runs": [
+     8,
+     8,
+     8
+    ]
+   },
+   "cpu_percent_of_one_core": {
+    "median": 0.25,
+    "min": 0.22,
+    "max": 0.31,
+    "runs": [
+     0.25,
+     0.22,
+     0.31
+    ]
+   },
+   "wakeups_per_s": {
+    "median": 4.0,
+    "min": 4.0,
+    "max": 4.2,
+    "runs": [
+     4.2,
+     4.0,
+     4.0
+    ]
+   },
+   "by_kind_last_run": {
+    "Google Chrome": {
+     "count": 1,
+     "footprint_mb": 103.0,
+     "rss_mb": 194.5
+    },
+    "chrome_crashpad_handler": {
+     "count": 1,
+     "footprint_mb": 2.7,
+     "rss_mb": 7.8
+    },
+    "Google Chrome Helper (Aperitif)": {
+     "count": 3,
+     "footprint_mb": 70.7,
+     "rss_mb": 155.9
+    },
+    "Google Chrome Helper (Aperitif Renderer)": {
+     "count": 3,
+     "footprint_mb": 64.1,
+     "rss_mb": 218.5
+    }
+   }
+  }
+ },
+ "tentabs": {
+  "measured_at": "2026-11-16 20:34",
+  "zen": {
+   "footprint_mb": {
+    "median": 2217.6,
+    "min": 2135.8,
+    "max": 2267.5,
+    "runs": [
+     2267.5,
+     2217.6,
+     2135.8
+    ]
+   },
+   "rss_mb": {
+    "median": 5613.5,
+    "min": 5294.4,
+    "max": 5840.7,
+    "runs": [
+     5840.7,
+     5294.4,
+     5613.5
+    ]
+   },
+   "processes": {
+    "median": 27,
+    "min": 26,
+    "max": 28,
+    "runs": [
+     28,
+     27,
+     26
+    ]
+   },
+   "cpu_percent_of_one_core": {
+    "median": 31.76,
+    "min": 28.67,
+    "max": 35.69,
+    "runs": [
+     35.69,
+     28.67,
+     31.76
+    ]
+   },
+   "wakeups_per_s": {
+    "median": 195.0,
+    "min": 168.0,
+    "max": 198.3,
+    "runs": [
+     195.0,
+     168.0,
+     198.3
+    ]
+   },
+   "by_kind_last_run": {
+    "zen": {
+     "count": 1,
+     "footprint_mb": 325.0,
+     "rss_mb": 443.4
+    },
+    "Zen GPU Helper": {
+     "count": 1,
+     "footprint_mb": 421.6,
+     "rss_mb": 72.8
+    },
+    "plugin-container": {
+     "count": 23,
+     "footprint_mb": 1385.3,
+     "rss_mb": 5075.5
+    },
+    "VTDecoderXPCService": {
+     "count": 1,
+     "footprint_mb": 4.0,
+     "rss_mb": 9.2
+    }
+   }
+  },
+  "chrome": {
+   "footprint_mb": {
+    "median": 1151.7,
+    "min": 1094.8,
+    "max": 1280.3,
+    "runs": [
+     1280.3,
+     1094.8,
+     1151.7
+    ]
+   },
+   "rss_mb": {
+    "median": 2122.1,
+    "min": 1942.8,
+    "max": 2769.1,
+    "runs": [
+     1942.8,
+     2769.1,
+     2122.1
+    ]
+   },
+   "processes": {
+    "median": 25,
+    "min": 25,
+    "max": 27,
+    "runs": [
+     27,
+     25,
+     25
+    ]
+   },
+   "cpu_percent_of_one_core": {
+    "median": 12.95,
+    "min": 11.65,
+    "max": 15.46,
+    "runs": [
+     11.65,
+     12.95,
+     15.46
+    ]
+   },
+   "wakeups_per_s": {
+    "median": 318.9,
+    "min": 295.6,
+    "max": 326.8,
+    "runs": [
+     318.9,
+     326.8,
+     295.6
+    ]
+   },
+   "by_kind_last_run": {
+    "Google Chrome": {
+     "count": 1,
+     "footprint_mb": 146.7,
+     "rss_mb": 227.5
+    },
+    "chrome_crashpad_handler": {
+     "count": 1,
+     "footprint_mb": 2.8,
+     "rss_mb": 7.1
+    },
+    "Google Chrome Helper (Aperitif)": {
+     "count": 5,
+     "footprint_mb": 124.8,
+     "rss_mb": 264.3
+    },
+    "Google Chrome Helper (Aperitif Renderer)": {
+     "count": 16,
+     "footprint_mb": 869.3,
+     "rss_mb": 1611.7
+    },
+    "VTEncoderXPCService": {
+     "count": 1,
+     "footprint_mb": 7.1,
+     "rss_mb": 9.2
+    },
+    "PlugInLibraryService": {
+     "count": 1,
+     "footprint_mb": 1.9,
+     "rss_mb": 1.9
+    }
+   }
+  },
+  "wisp_all_loaded": {
+   "footprint_mb": {
+    "median": 2447.9,
+    "min": 2437.8,
+    "max": 2541.2,
+    "runs": [
+     2541.2,
+     2437.8,
+     2447.9
+    ]
+   },
+   "rss_mb": {
+    "median": 763.3,
+    "min": 683.0,
+    "max": 809.0,
+    "runs": [
+     809.0,
+     683.0,
+     763.3
+    ]
+   },
+   "processes": {
+    "median": 20,
+    "min": 19,
+    "max": 21,
+    "runs": [
+     21,
+     20,
+     19
+    ]
+   },
+   "cpu_percent_of_one_core": {
+    "median": 32.02,
+    "min": 31.1,
+    "max": 32.36,
+    "runs": [
+     32.36,
+     31.1,
+     32.02
+    ]
+   },
+   "wakeups_per_s": {
+    "median": 452.5,
+    "min": 420.5,
+    "max": 469.7,
+    "runs": [
+     469.7,
+     452.5,
+     420.5
+    ]
+   },
+   "by_kind_last_run": {
+    "wisp": {
+     "count": 1,
+     "footprint_mb": 36.5,
+     "rss_mb": 90.7
+    },
+    "com.apple.WebKit.GPU": {
+     "count": 1,
+     "footprint_mb": 163.3,
+     "rss_mb": 49.4
+    },
+    "com.apple.WebKit.Networking": {
+     "count": 1,
+     "footprint_mb": 57.4,
+     "rss_mb": 23.6
+    },
+    "com.apple.WebKit.WebContent": {
+     "count": 14,
+     "footprint_mb": 2177.8,
+     "rss_mb": 511.8
+    },
+    "com.apple.audio.SandboxHelper": {
+     "count": 1,
+     "footprint_mb": 3.0,
+     "rss_mb": 7.7
+    },
+    "MTLCompilerService": {
+     "count": 1,
+     "footprint_mb": 11.7,
+     "rss_mb": 3.7
+    }
+   }
+  },
+  "wisp_restored_not_shown": {
+   "footprint_mb": {
+    "median": 280.6,
+    "min": 180.0,
+    "max": 281.5,
+    "runs": [
+     280.6,
+     281.5,
+     180.0
+    ]
+   },
+   "rss_mb": {
+    "median": 185.0,
+    "min": 170.3,
+    "max": 271.2,
+    "runs": [
+     185.0,
+     271.2,
+     170.3
+    ]
+   },
+   "processes": {
+    "median": 6,
+    "min": 6,
+    "max": 6,
+    "runs": [
+     6,
+     6,
+     6
+    ]
+   },
+   "cpu_percent_of_one_core": {
+    "median": 17.91,
+    "min": 0.22,
+    "max": 20.74,
+    "runs": [
+     20.74,
+     17.91,
+     0.22
+    ]
+   },
+   "wakeups_per_s": {
+    "median": 237.9,
+    "min": 20.0,
+    "max": 300.5,
+    "runs": [
+     300.5,
+     237.9,
+     20.0
+    ]
+   },
+   "by_kind_last_run": {
+    "wisp": {
+     "count": 1,
+     "footprint_mb": 25.0,
+     "rss_mb": 70.8
+    },
+    "com.apple.WebKit.GPU": {
+     "count": 1,
+     "footprint_mb": 20.5,
+     "rss_mb": 21.8
+    },
+    "com.apple.WebKit.Networking": {
+     "count": 1,
+     "footprint_mb": 15.4,
+     "rss_mb": 11.3
+    },
+    "com.apple.WebKit.WebContent": {
+     "count": 2,
+     "footprint_mb": 113.9,
+     "rss_mb": 52.4
+    },
+    "com.apple.audio.SandboxHelper": {
+     "count": 1,
+     "footprint_mb": 5.3,
+     "rss_mb": 7.7
+    }
+   }
+  }
+ },
+ "size": {
+  "measured_at": "2026-11-16 20:34",
+  "wisp_binary_mb": 1.52,
+  "wisp": {
+   "bundle_mb": 1.8,
+   "zip_mb": 0.91
+  },
+  "safari": {
+   "bundle_mb": 36.1
+  },
+  "zen": {
+   "bundle_mb": 590.8
+  },
+  "chrome": {
+   "bundle_mb": 2195.0
+  }
+ },
+ "speedometer": {
+  "measured_at": "2026-11-16 20:36",
+  "wisp": {
+   "score": {
+    "median": 45.2,
+    "min": 43.8,
+    "max": 45.7,
+    "runs": [
+     45.2,
+     43.8,
+     45.7
+    ]
+   },
+   "runs_detail": [
+    {
+     "score": "45.2",
+     "interval": "\u00b1 3.3",
+     "iterations": [
+      35.06415034538569,
+      47.865518950243874,
+      40.40590859471323,
+      46.70911173054058,
+      46.828660706128126,
+      48.775026195857606,
+      42.613756331927576,
+      45.13992109095721,
+      49.89525468352572,
+      48.40815954355698
+     ],
+     "hidden_events": 0,
+     "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.5.2 Safari/605.1.15"
+    },
+    {
+     "score": "43.8",
+     "interval": "\u00b1 2.2",
+     "iterations": [
+      37.713888866627,
+      46.01262976085493,
+      41.7464201045033,
+      47.36732713311942,
+      44.64524092318038,
+      46.02958264867431,
+      39.45191743252035,
+      44.03616308071418,
+      45.16420768714469,
+      45.53735083253925
+     ],
+     "hidden_events": 0,
+     "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.5.2 Safari/605.1.15"
+    },
+    {
+     "score": "45.7",
+     "interval": "\u00b1 3.1",
+     "iterations": [
+      37.557996983272346,
+      48.312976872515286,
+      40.96351317007918,
+      44.99273458387252,
+      49.26553065292343,
+      49.04080742235197,
+      47.76799892928803,
+      40.88930051976226,
+      48.34725919789354,
+      50.010031161559745
+     ],
+     "hidden_events": 0,
+     "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.5.2 Safari/605.1.15"
+    }
+   ]
+  },
+  "zen": {
+   "score": {
+    "median": 46.0,
+    "min": 40.0,
+    "max": 47.4,
+    "runs": [
+     40.0,
+     46.0,
+     47.4
+    ]
+   },
+   "runs_detail": [
+    {
+     "score": "40.0",
+     "interval": "\u00b1 5.6",
+     "iterations": [
+      25.471443665385788,
+      38.513384587372926,
+      45.993034012392044,
+      47.14696108171799,
+      48.375089845579204,
+      32.83585933625638,
+      45.565932971032176,
+      43.71916676264943,
+      31.027379528512654,
+      40.91606205938578
+     ],
+     "hidden_events": 0,
+     "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:159.0) Gecko/20100101 Firefox/159.0"
+    },
+    {
+     "score": "46.0",
+     "interval": "\u00b1 3.5",
+     "iterations": [
+      36.82045017835403,
+      50.43852551545394,
+      48.51034138614667,
+      40.11713665475041,
+      49.38574756802725,
+      50.16878706003748,
+      48.09607923042516,
+      47.203255504298895,
+      41.03032371947926,
+      48.58564455023217
+     ],
+     "hidden_events": 0,
+     "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:159.0) Gecko/20100101 Firefox/159.0"
+    },
+    {
+     "score": "47.4",
+     "interval": "\u00b1 3.9",
+     "iterations": [
+      35.68616566244053,
+      50.99405994204933,
+      41.05361529116667,
+      48.55618054262084,
+      52.57736089604112,
+      51.73043665728172,
+      49.73590883963078,
+      43.99636400851142,
+      49.77763032701795,
+      50.12223437458196
+     ],
+     "hidden_events": 0,
+     "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:159.0) Gecko/20100101 Firefox/159.0"
+    }
+   ]
+  },
+  "chrome": {
+   "score": {
+    "median": 59.8,
+    "min": 59.1,
+    "max": 60.6,
+    "runs": [
+     59.1,
+     59.8,
+     60.6
+    ]
+   },
+   "runs_detail": [
+    {
+     "score": "59.1",
+     "interval": "\u00b1 3.3",
+     "iterations": [
+      47.015918877259345,
+      56.21900999727361,
+      61.4874604001705,
+      62.33811029650392,
+      60.33769528977855,
+      60.312928450402985,
+      61.80372301108418,
+      62.05298548870736,
+      58.79502872669971,
+      61.011790206873705
+     ],
+     "hidden_events": 0,
+     "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36"
+    },
+    {
+     "score": "59.8",
+     "interval": "\u00b1 3.5",
+     "iterations": [
+      46.573639650442914,
+      60.65577848830091,
+      61.03356731899164,
+      61.90599381436093,
+      60.8023105951736,
+      62.71614087593997,
+      57.93710910510905,
+      62.331236765900314,
+      62.979650202768106,
+      61.3878618338402
+     ],
+     "hidden_events": 0,
+     "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36"
+    },
+    {
+     "score": "60.6",
+     "interval": "\u00b1 2.7",
+     "iterations": [
+      50.791375713291714,
+      60.64133056300553,
+      62.45433248033068,
+      61.51569021892372,
+      58.131246676251045,
+      61.306403364571274,
+      62.6129246822821,
+      62.52144657760653,
+      63.22306065624347,
+      62.512065395305164
+     ],
+     "hidden_events": 0,
+     "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36"
+    }
+   ]
+  }
+ },
+ "onetab_first_pass_superseded": {
+  "note": "Fresh profile per run, sampled 30 s after the page loaded, no idle measurement. Superseded by onetab: Zen was still doing first-run work.",
+  "measured_at": "2026-11-16 19:59",
+  "wisp": {
+   "footprint_mb": {
+    "median": 196.9,
+    "min": 195.9,
+    "max": 198.7,
+    "runs": [
+     198.7,
+     195.9,
+     196.9
+    ]
+   },
+   "rss_mb": {
+    "median": 198.4,
+    "min": 174.8,
+    "max": 206.8,
+    "runs": [
+     174.8,
+     198.4,
+     206.8
+    ]
+   },
+   "processes": {
+    "median": 6,
+    "min": 6,
+    "max": 6,
+    "runs": [
+     6,
+     6,
+     6
+    ]
+   },
+   "by_kind_last_run": {
+    "wisp": {
+     "count": 1,
+     "footprint_mb": 24.1,
+     "rss_mb": 86.2
+    },
+    "com.apple.WebKit.GPU": {
+     "count": 1,
+     "footprint_mb": 78.6,
+     "rss_mb": 31.9
+    },
+    "com.apple.WebKit.Networking": {
+     "count": 1,
+     "footprint_mb": 8.0,
+     "rss_mb": 17.7
+    },
+    "com.apple.WebKit.WebContent": {
+     "count": 2,
+     "footprint_mb": 81.0,
+     "rss_mb": 61.3
+    },
+    "com.apple.audio.SandboxHelper": {
+     "count": 1,
+     "footprint_mb": 5.3,
+     "rss_mb": 9.7
+    }
+   }
+  },
+  "zen": {
+   "footprint_mb": {
+    "median": 957.2,
+    "min": 931.8,
+    "max": 958.9,
+    "runs": [
+     931.8,
+     957.2,
+     958.9
+    ]
+   },
+   "rss_mb": {
+    "median": 2438.0,
+    "min": 2408.7,
+    "max": 2530.6,
+    "runs": [
+     2438.0,
+     2530.6,
+     2408.7
+    ]
+   },
+   "processes": {
+    "median": 13,
+    "min": 13,
+    "max": 14,
+    "runs": [
+     14,
+     13,
+     13
+    ]
+   },
+   "by_kind_last_run": {
+    "zen": {
+     "count": 1,
+     "footprint_mb": 619.2,
+     "rss_mb": 768.4
+    },
+    "Zen GPU Helper": {
+     "count": 1,
+     "footprint_mb": 257.4,
+     "rss_mb": 51.6
+    },
+    "plugin-container": {
+     "count": 10,
+     "footprint_mb": 250.0,
+     "rss_mb": 1721.7
+    },
+    "VTDecoderXPCService": {
+     "count": 1,
+     "footprint_mb": 4.0,
+     "rss_mb": 9.5
+    }
+   }
+  },
+  "chrome": {
+   "footprint_mb": {
+    "median": 241.9,
+    "min": 236.3,
+    "max": 251.0,
+    "runs": [
+     241.9,
+     251.0,
+     236.3
+    ]
+   },
+   "rss_mb": {
+    "median": 675.7,
+    "min": 666.4,
+    "max": 679.4,
+    "runs": [
+     679.4,
+     666.4,
+     675.7
+    ]
+   },
+   "processes": {
+    "median": 10,
+    "min": 9,
+    "max": 10,
+    "runs": [
+     10,
+     10,
+     9
+    ]
+   },
+   "by_kind_last_run": {
+    "Google Chrome": {
+     "count": 1,
+     "footprint_mb": 81.5,
+     "rss_mb": 206.0
+    },
+    "chrome_crashpad_handler": {
+     "count": 1,
+     "footprint_mb": 2.8,
+     "rss_mb": 7.7
+    },
+    "Google Chrome Helper (Aperitif)": {
+     "count": 3,
+     "footprint_mb": 71.6,
+     "rss_mb": 167.7
+    },
+    "Google Chrome Helper (Aperitif Renderer)": {
+     "count": 3,
+     "footprint_mb": 61.6,
+     "rss_mb": 228.9
+    },
+    "PlugInLibraryService": {
+     "count": 1,
+     "footprint_mb": 1.9,
+     "rss_mb": 1.9
+    }
+   }
+  }
+ },
+ "diagnostics": {
+  "note": "Ad-hoc checks behind docs/PERFORMANCE.md \"Idle cost\"; one simple tab.",
+  "progress_bar_ab_debug_build_30s": {
+   "as_shipped_tree_pct": 19.33,
+   "progress_hidden_tree_pct": 1.51,
+   "as_shipped_wisp_process_pct": [
+    5.31,
+    5.72,
+    5.12
+   ],
+   "progress_hidden_wisp_process_pct": [
+    0.48,
+    0.53,
+    0.48
+   ]
+  },
+  "release_cpu_by_process_pct": {
+   "interface_webcontent": 6.51,
+   "gpu": 6.24,
+   "wisp": 4.01,
+   "page_webcontent": 0.02
+  },
+  "collapsed_bar_release_60s_tree_pct": {
+   "default": [
+    14.62,
+    12.82
+   ],
+   "collapsed": [
+    15.6,
+    14.02
+   ]
+  }
+ },
+ "wisp_on_main": {
+  "note": "Wisp rebuilt from main at 6b110d9 (everything else in this file is 73f906f); size and onetab only.",
+  "size": {
+   "bundle_mb": 2.0,
+   "zip_mb": 0.98
+  },
+  "binary_mb": 1.69,
+  "onetab": {
+   "footprint_mb": {
+    "median": 268.6,
+    "min": 268.3,
+    "max": 268.9,
+    "runs": [
+     268.6,
+     268.3,
+     268.9
+    ]
+   },
+   "rss_mb": {
+    "median": 166.6,
+    "min": 162.0,
+    "max": 169.4,
+    "runs": [
+     166.6,
+     162.0,
+     169.4
+    ]
+   },
+   "processes": {
+    "median": 6,
+    "min": 6,
+    "max": 6,
+    "runs": [
+     6,
+     6,
+     6
+    ]
+   },
+   "cpu_percent_of_one_core": {
+    "median": 10.33,
+    "min": 10.29,
+    "max": 16.62,
+    "runs": [
+     16.62,
+     10.33,
+     10.29
+    ]
+   },
+   "wakeups_per_s": {
+    "median": 205.0,
+    "min": 200.1,
+    "max": 212.4,
+    "runs": [
+     200.1,
+     205.0,
+     212.4
+    ]
+   },
+   "by_kind_last_run": {
+    "wisp": {
+     "count": 1,
+     "footprint_mb": 24.0,
+     "rss_mb": 70.5
+    },
+    "com.apple.WebKit.GPU": {
+     "count": 1,
+     "footprint_mb": 75.4,
+     "rss_mb": 28.5
+    },
+    "com.apple.WebKit.Networking": {
+     "count": 1,
+     "footprint_mb": 8.0,
+     "rss_mb": 13.7
+    },
+    "com.apple.WebKit.WebContent": {
+     "count": 2,
+     "footprint_mb": 156.3,
+     "rss_mb": 49.1
+    },
+    "com.apple.audio.SandboxHelper": {
+     "count": 1,
+     "footprint_mb": 5.3,
+     "rss_mb": 7.9
+    }
+   }
+  },
+  "measured_at": "2026-11-16 21:32"
+ }
+}
