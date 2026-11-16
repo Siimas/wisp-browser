@@ -202,6 +202,9 @@ i.dot { display: block; width: 8px; height: 8px; border-radius: 50%; background:
 .tab.loading .fav::before { content: ""; width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--accent); border-right-color: transparent; animation: spin .7s linear infinite; }
 .tab.loading .fav > * { display: none; }
 @keyframes spin { to { transform: rotate(1turn); } }
+/* An unloaded tab: its icon rests faded and colorless until the tab is opened again. */
+.fav { transition: opacity var(--d-2), filter var(--d-2); }
+.tab.asleep:not(.active) .fav { opacity: .5; filter: grayscale(1); }
 #new { display: flex; align-items: center; gap: var(--sp-2); color: var(--mute); flex: none; }
 #new:hover { color: var(--fg); }
 #ws-head { display: none; align-items: center; gap: var(--sp-2); height: var(--ctl); padding: 0 var(--sp-2); font-weight: 500; text-align: left; color: var(--mute); flex: none; }
@@ -630,6 +633,12 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
         <label class="row">Reopen last session's tabs on start <input type="checkbox" data-k="behavior.restore_session"></label>
         <label class="row"><span>Keep history<small>Remembers the pages you visit, on this computer only, to suggest them in the address bar. Off: nothing new is recorded; clear what is there from History</small></span>
           <input type="checkbox" data-k="behavior.keep_history"></label>
+        <label class="row"><span>Unload tabs not looked at for<small>They give their memory back and reload when you return. Tabs playing sound or video, in a call, with typed text, or private stay loaded</small></span>
+          <select data-k="behavior.unload_after" data-num>
+            <option value="0">Never</option><option value="5">5 minutes</option><option value="15">15 minutes</option>
+            <option value="30">30 minutes</option><option value="60">1 hour</option><option value="120">2 hours</option><option value="240">4 hours</option>
+          </select></label>
+        <label class="row">Unload pinned tabs too <input type="checkbox" data-k="behavior.unload_pinned"></label>
         <label class="row">Default page zoom <input type="number" min="0.3" max="4" step="0.1" data-k="behavior.default_zoom"></label>
       </div>
 
@@ -915,8 +924,8 @@ function makeTab(id) {
 }
 function updateTab(node, t) {
   const host = hostOf(t.url), name = t.title || host || 'New Tab';
-  for (const [cls, on] of Object.entries({ active: t.id === S.active, private: t.private, loading: t.loading })) node.classList.toggle(cls, on);
-  node.title = name;
+  for (const [cls, on] of Object.entries({ active: t.id === S.active, private: t.private, loading: t.loading, asleep: t.asleep })) node.classList.toggle(cls, on);
+  node.title = t.asleep && t.id !== S.active ? name + '\nAsleep: reloads when you open it' : name;
   node.setAttribute('aria-selected', t.id === S.active);
   node.children[1].textContent = name;
   const key = t.private ? 'private' : host;
@@ -1099,7 +1108,10 @@ function tabMenu(id, e) {
   const others = cfg.workspaces.filter(w => w.id !== S.workspace), t = S.tabs.find(t => t.id === id) || {};
   openPop(e, [
     ...(t.private ? [] : [mi(t.pinned ? 'Unpin tab' : 'Pin tab', () => post({ cmd: 'pin_tab', id, pinned: !t.pinned }))]),
-    mi('Duplicate tab', () => post({ cmd: 'duplicate_tab', id })), el('hr'),
+    mi('Duplicate tab', () => post({ cmd: 'duplicate_tab', id })),
+    ...(!t.asleep && id !== S.active ? [mi('Unload tab', () => post({ cmd: 'unload_tab', id }))] : []),
+    ...(S.tabs.some(o => o.id !== id && o.id !== S.active && !o.asleep && !o.pinned && !o.private) ? [mi('Unload other tabs', () => post({ cmd: 'unload_other_tabs', id }))] : []),
+    el('hr'),
     ...(S.private ? [] : others.map(w => mi([wsMark(w), 'Move to ' + w.name], () => post({ cmd: 'move_tab', id, workspace: w.id })))),
     ...(others.length && !S.private ? [el('hr')] : []),
     ...(S.tabs.some(o => o.id !== id && !o.pinned) ? [mi('Close other tabs', () => post({ cmd: 'close_other_tabs', id }))] : []),
@@ -1632,7 +1644,7 @@ for (const [type, on] of [['focusin', true], ['focusout', false]])
 function onField(e) {
   const f = e.target, k = f.dataset.k;
   if (!k || !cfg) return;
-  let v = f.type === 'checkbox' ? f.checked : f.type === 'number' || f.type === 'range' ? Number(f.value) : f.value;
+  let v = f.type === 'checkbox' ? f.checked : f.type === 'number' || f.type === 'range' || 'num' in f.dataset ? Number(f.value) : f.value;
   if (k === 'adblock.extra_hosts') v = v.split('\n').map(s => s.trim()).filter(Boolean);
   set(cfg, k, v);
   if (e.type === 'input') { applyLook(); reportPage(); } else save();

@@ -176,6 +176,33 @@ mod imp {
     /// Nothing to end: WebKit's find leaves the last match selected, as Safari does.
     pub fn find_stop(_webview: &WebView) {}
 
+    /// Is the page playing sound or video, or using the camera or microphone? The
+    /// answer comes through `done`, a moment later. A system too old to say (before
+    /// macOS 12) answers yes, so nothing is unloaded that might be playing.
+    pub fn media_busy(webview: &WebView, done: impl Fn(bool) + 'static) {
+        let view = webview.webview();
+        // SAFETY: main-thread messages to a live WKWebView; each is checked to exist
+        // first (all since macOS 12).
+        unsafe {
+            let ask = sel!(requestMediaPlaybackStateWithCompletionHandler:);
+            if !msg_send![&*view, respondsToSelector: ask] {
+                return done(true);
+            }
+            // WKMediaCaptureState: 0 none, 1 active, 2 muted (still in the call).
+            let camera: isize = msg_send![&*view, cameraCaptureState];
+            let microphone: isize = msg_send![&*view, microphoneCaptureState];
+            if camera != 0 || microphone != 0 {
+                return done(true);
+            }
+            // WKMediaPlaybackState: 0 none, 1 playing, 2 paused, 3 suspended.
+            let reply = block2::RcBlock::new(move |state: usize| done(state == 1));
+            let _: () = msg_send![&*view, requestMediaPlaybackStateWithCompletionHandler: &*reply];
+        }
+    }
+
+    /// WebKit lowers a hidden page's priority by itself.
+    pub fn set_background(_webview: &WebView, _background: bool) {}
+
     thread_local! {
         /// The page view whose right-click menu was opened last.
         static MENU_VIEW: Cell<usize> = const { Cell::new(0) };
@@ -327,8 +354,8 @@ mod imp {
         Microsoft::Web::WebView2::Win32::{
             COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_COMMAND,
             COREWEBVIEW2_CONTEXT_MENU_TARGET_KIND_IMAGE,
-            COREWEBVIEW2_CONTEXT_MENU_TARGET_KIND_PAGE, ICoreWebView2_11, ICoreWebView2_28,
-            ICoreWebView2Environment9, ICoreWebView2Environment15,
+            COREWEBVIEW2_CONTEXT_MENU_TARGET_KIND_PAGE, ICoreWebView2_8, ICoreWebView2_11,
+            ICoreWebView2_28, ICoreWebView2Environment9, ICoreWebView2Environment15,
         },
         take_pwstr,
     };
@@ -410,6 +437,28 @@ mod imp {
                 let _ = find.Stop();
             }
         }
+    }
+
+    /// Is the page making sound? WebView2 does not say whether the camera or
+    /// microphone is in use, so a call where everyone is silent counts as idle.
+    /// Untested: written without a Windows machine at hand.
+    pub fn media_busy(webview: &WebView, done: impl Fn(bool) + 'static) {
+        let mut playing = BOOL(1);
+        // SAFETY: COM call on the live webview, on its own thread.
+        let asked = unsafe {
+            webview
+                .webview()
+                .cast::<ICoreWebView2_8>()
+                .and_then(|w| w.IsDocumentPlayingAudio(&mut playing))
+        };
+        done(asked.is_err() || playing.as_bool()); // unknown counts as playing
+    }
+
+    /// A hidden page asks WebView2 to keep less in memory (it may page some out); a
+    /// cheap first step before unloading. Untested, like `media_busy`.
+    pub fn set_background(webview: &WebView, background: bool) {
+        use wry::MemoryUsageLevel::{Low, Normal};
+        let _ = webview.set_memory_usage_level(if background { Low } else { Normal });
     }
 
     /// Add link and image entries to the top of WebView2's right-click menu. A chosen
@@ -494,6 +543,10 @@ mod imp {
     ) {
     }
     pub fn find_stop(_webview: &WebView) {}
+    pub fn media_busy(_webview: &WebView, done: impl Fn(bool)) {
+        done(true)
+    }
+    pub fn set_background(_webview: &WebView, _background: bool) {}
     pub fn page_menu(_webview: &WebView, _pick: impl Fn(String, bool)) {}
     pub fn take_private(_webview: &WebView) -> bool {
         false
@@ -522,4 +575,7 @@ impl Glass {
 
 #[cfg(target_os = "macos")]
 pub use imp::Glass;
-pub use imp::{find, find_stop, page_menu, raise, round_corners, take_private, user_agent};
+pub use imp::{
+    find, find_stop, media_busy, page_menu, raise, round_corners, set_background, take_private,
+    user_agent,
+};

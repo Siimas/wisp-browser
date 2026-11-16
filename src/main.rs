@@ -92,6 +92,13 @@ enum Msg {
     CloseOtherTabs {
         id: u32,
     },
+    /// Give a background tab's memory back; it reloads when shown again.
+    UnloadTab {
+        id: u32,
+    },
+    UnloadOtherTabs {
+        id: u32,
+    },
     /// Where things go, as distances from each window edge (left, top, right, bottom):
     /// the gap left for the page, and the area a floating bar would take.
     PageRect {
@@ -169,7 +176,60 @@ enum UserEvent {
     /// Chosen in the right-click menu of the page in tab `.0`: open this address in a
     /// (private, if `.2`) tab. Sent by the native menu only, never by the page.
     MenuTab(u32, String, bool),
+    /// Tab `.0` is (`.1`) or is not playing media or in a call: see `App::check_media`.
+    MediaChecked(u32, bool, Why),
+    /// What the page in tab `.0` reported before unloading: typed-in text, and where
+    /// it was scrolled to. `None`: it did not answer.
+    Probed(u32, Option<(bool, f64, f64)>, Why),
 }
+
+/// Why a tab is being unloaded, which decides what may keep it loaded.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Why {
+    /// Not looked at for a while: anything in use keeps it.
+    Idle,
+    /// "Unload other tabs": the same checks, without the wait.
+    Others,
+    /// "Unload tab": the user picked this one, so it goes.
+    Asked,
+}
+
+/// Unload or keep, from what is known so far: `busy` = playing media or in a call,
+/// `edited` = text typed into the page (no answer counts as typed), `idle` = still not
+/// looked at since it became due.
+fn keeps(why: Why, busy: bool, edited: bool, idle: bool) -> bool {
+    match why {
+        Why::Asked => false,
+        Why::Others => busy || edited,
+        Why::Idle => busy || edited || !idle,
+    }
+}
+
+/// When background tab `t` becomes due for unloading, `after` it was last on screen,
+/// or `None` if it never does. Never: the tab on screen; one not loaded or already
+/// being checked; a private one, whose cookies live only as long as its page (on
+/// macOS each private tab has its own), so unloading would sign it out; a pinned one,
+/// unless `pinned_too`.
+fn unload_due(
+    t: &Tab,
+    loaded: bool,
+    active: Option<u32>,
+    after: Option<Duration>,
+    pinned_too: bool,
+) -> Option<Instant> {
+    let may =
+        loaded && !t.checking && active != Some(t.id) && !t.private && (pinned_too || !t.pinned);
+    after.filter(|_| may).map(|a| t.seen + a)
+}
+
+/// Asks a page, before it is unloaded, whether text was typed into it (a changed field
+/// or a focused editor, top frame only) and where it is scrolled to.
+const PROBE: &str = r#"(() => {
+  const skip = ['hidden', 'checkbox', 'radio', 'submit', 'button', 'reset', 'image', 'file', 'range', 'color'];
+  const typed = [...document.querySelectorAll('input, textarea')]
+    .some(e => !skip.includes(e.type) && e.value !== e.defaultValue);
+  return [typed || !!(document.activeElement && document.activeElement.isContentEditable), scrollX, scrollY];
+})()"#;
 
 struct Tab {
     id: u32,
@@ -183,6 +243,21 @@ struct Tab {
     url: String,
     loading: bool,
     zoom: f64,
+    /// When it was last on screen (or opened).
+    seen: Instant,
+    /// Being checked before unloading (see `App::check_media`).
+    checking: bool,
+    /// Set when the tab is unloaded, used when it comes back.
+    wake: Option<Wake>,
+}
+
+/// An unloaded tab, waiting to be shown again.
+struct Wake {
+    /// The page it showed, and where it was scrolled to.
+    url: String,
+    scroll: Option<(f64, f64)>,
+    /// When it was asked to come back.
+    since: Option<Instant>,
 }
 
 /// A closed tab, remembered for this run so it can be reopened.
@@ -498,7 +573,8 @@ impl App {
             .filter(|t| t.workspace == self.workspace)
             .map(|t| {
                 json!({"id": t.id, "title": t.title, "url": t.url, "loading": t.loading,
-                       "private": t.private, "pinned": t.pinned})
+                       "private": t.private, "pinned": t.pinned,
+                       "asleep": t.webview.is_none()})
             })
             .collect();
         let state = json!({
@@ -595,7 +671,9 @@ impl App {
                     let _ = p5.send_event(UserEvent::MenuTab(id, url, private));
                 });
                 native::round_corners(&webview, self.page_radius);
-                let zoom = self.cfg.behavior.default_zoom;
+                let zoom = self
+                    .tab(id)
+                    .map_or(self.cfg.behavior.default_zoom, |t| t.zoom);
                 if zoom != 1.0 {
                     let _ = webview.zoom(zoom);
                 }
@@ -628,6 +706,9 @@ impl App {
             title: String::new(),
             url: url.to_string(),
             loading: false,
+            seen: Instant::now(),
+            checking: false,
+            wake: None,
             zoom: self.cfg.behavior.default_zoom,
         });
         self.select(id);
@@ -641,11 +722,30 @@ impl App {
             tab.private,
             tab.webview.is_none(),
         );
+        let now = Instant::now();
+        if let Some(prev) = self
+            .active
+            .filter(|&p| p != id)
+            .and_then(|p| self.tab_mut(p))
+        {
+            prev.seen = now;
+            if let Some(w) = &prev.webview {
+                native::set_background(w, true);
+            }
+        }
         if unloaded {
             let webview = self.build_webview(id, &url, private);
             if let Some(tab) = self.tab_mut(id) {
                 tab.webview = webview;
+                if let Some(wake) = &mut tab.wake {
+                    wake.since = Some(now);
+                }
             }
+        } else if let Some(w) = self.tab(id).and_then(|t| t.webview.as_ref()) {
+            native::set_background(w, false);
+        }
+        if let Some(tab) = self.tab_mut(id) {
+            tab.seen = now;
         }
         self.workspace = ws;
         self.active = Some(id);
@@ -748,6 +848,9 @@ impl App {
             title: src.title.clone(),
             url: src.url.clone(),
             loading: false,
+            seen: Instant::now(),
+            checking: false,
+            wake: None,
             zoom: self.cfg.behavior.default_zoom,
         };
         self.insert_tab(copy, after);
@@ -794,6 +897,9 @@ impl App {
             title: closed.title,
             url: closed.url,
             loading: false,
+            seen: Instant::now(),
+            checking: false,
+            wake: None,
             zoom: self.cfg.behavior.default_zoom,
         };
         self.insert_tab(tab, closed.index);
@@ -812,6 +918,149 @@ impl App {
         match self.tabs.iter().find(unpinned).map(|t| t.id) {
             Some(next) => self.select(next),
             None => self.open_blank(),
+        }
+    }
+
+    // ---- unloading: background tabs give their memory back ----
+
+    /// How long a background tab stays loaded unseen, or `None` for always.
+    fn unload_after(&self) -> Option<Duration> {
+        // Development: WISP_UNLOAD_SECS=<n> uses seconds instead of the setting.
+        #[cfg(debug_assertions)]
+        if let Some(secs) = std::env::var("WISP_UNLOAD_SECS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
+            return Some(Duration::from_secs(secs));
+        }
+        let minutes = self.cfg.behavior.unload_after as u64;
+        (minutes > 0).then(|| Duration::from_secs(60 * minutes))
+    }
+
+    fn unload_due(&self, t: &Tab) -> Option<Instant> {
+        let (after, pinned) = (self.unload_after(), self.cfg.behavior.unload_pinned);
+        unload_due(t, t.webview.is_some(), self.active, after, pinned)
+    }
+
+    /// When the next background tab becomes due for unloading, if any: the event loop
+    /// wakes then, and not at all for this when nothing is loaded in the background.
+    fn next_unload(&self) -> Option<Instant> {
+        if !self.started || self.downloads.borrow().running() {
+            return None;
+        }
+        self.tabs.iter().filter_map(|t| self.unload_due(t)).min()
+    }
+
+    /// Check every tab that is due, and unload those not in use.
+    fn unload_idle(&mut self) {
+        let now = Instant::now();
+        let due: Vec<u32> = self
+            .tabs
+            .iter()
+            .filter(|t| self.unload_due(t).is_some_and(|at| at <= now))
+            .map(|t| t.id)
+            .collect();
+        for id in due {
+            self.check_media(id, Why::Idle);
+        }
+    }
+
+    /// "Unload other tabs": every other loaded tab of the workspace, except pinned and
+    /// private ones, and those in use (as when unloading for being idle).
+    fn unload_other_tabs(&mut self, keep: u32) {
+        let Some(ws) = self.tab(keep).map(|t| t.workspace) else {
+            return;
+        };
+        let others: Vec<u32> = self
+            .tabs
+            .iter()
+            .filter(|t| t.workspace == ws && t.id != keep && !t.pinned && !t.private)
+            .filter(|t| t.webview.is_some() && self.active != Some(t.id))
+            .map(|t| t.id)
+            .collect();
+        for id in others {
+            self.check_media(id, Why::Others);
+        }
+    }
+
+    /// First check: is the page playing media or in a call? (`UserEvent::MediaChecked`)
+    fn check_media(&mut self, id: u32, why: Why) {
+        let proxy = self.proxy.clone();
+        let Some(tab) = self.tab_mut(id).filter(|t| t.webview.is_some()) else {
+            return;
+        };
+        tab.checking = true;
+        if let Some(w) = &tab.webview {
+            native::media_busy(w, move |busy| {
+                let _ = proxy.send_event(UserEvent::MediaChecked(id, busy, why));
+            });
+        }
+    }
+
+    /// Then ask the page itself (`PROBE`, answered as `UserEvent::Probed`).
+    fn probe(&mut self, id: u32, why: Why) {
+        let proxy = self.proxy.clone();
+        let Some(tab) = self.tab_mut(id) else { return };
+        let Some(w) = &tab.webview else { return };
+        tab.checking = true;
+        let p = proxy.clone();
+        let asked = w.evaluate_script_with_callback(PROBE, move |out| {
+            let found = serde_json::from_str(&out).ok();
+            let _ = p.send_event(UserEvent::Probed(id, found, why));
+        });
+        if asked.is_err() {
+            let _ = proxy.send_event(UserEvent::Probed(id, None, why));
+        }
+    }
+
+    /// In use: keep it loaded, and look again after another full wait.
+    fn keep(&mut self, id: u32) {
+        #[cfg(debug_assertions)]
+        eprintln!("wisp: tab {id} kept loaded (in use)");
+        if let Some(tab) = self.tab_mut(id) {
+            tab.checking = false;
+            tab.seen = Instant::now();
+        }
+    }
+
+    /// Drop the tab's page, keeping its address, title and place. Never the tab on
+    /// screen, and nothing while a download runs.
+    fn unload(&mut self, id: u32, scroll: Option<(f64, f64)>) {
+        let blocked = self.active == Some(id) || self.downloads.borrow().running();
+        let Some(tab) = self.tab_mut(id) else { return };
+        tab.checking = false;
+        if blocked || tab.webview.take().is_none() {
+            return;
+        }
+        #[cfg(debug_assertions)]
+        eprintln!("wisp: tab {id} unloaded");
+        tab.loading = false;
+        tab.wake = Some(Wake {
+            url: tab.url.clone(),
+            scroll,
+            since: None,
+        });
+        if self.find_last.as_ref().is_some_and(|f| f.0 == id) {
+            self.find_last = None;
+        }
+        self.sync();
+    }
+
+    /// An unloaded tab has loaded again: put it back where it was scrolled to.
+    fn woke(&mut self, id: u32, wake: Wake) {
+        #[cfg(debug_assertions)]
+        if let Some(since) = wake.since {
+            eprintln!("wisp: tab {id} back in {} ms", since.elapsed().as_millis());
+        }
+        let Some(w) = self
+            .tab(id)
+            .filter(|t| t.url == wake.url)
+            .and_then(|t| t.webview.as_ref())
+        else {
+            return;
+        };
+        if let Some((x, y)) = wake.scroll.filter(|&(x, y)| x != 0.0 || y != 0.0) {
+            let _ = w.evaluate_script(&format!("scrollTo({x}, {y})"));
         }
     }
 
@@ -1213,6 +1462,9 @@ impl App {
                 title: saved.title,
                 url: saved.url,
                 loading: false,
+                seen: Instant::now(),
+                checking: false,
+                wake: None,
                 zoom: self.cfg.behavior.default_zoom,
             });
         }
@@ -1285,6 +1537,8 @@ impl App {
                 Msg::PinTab { id, pinned } => self.set_pinned(id, pinned),
                 Msg::DuplicateTab { id } => self.duplicate_tab(id),
                 Msg::CloseOtherTabs { id } => self.close_other_tabs(id),
+                Msg::UnloadTab { id } => self.probe(id, Why::Asked),
+                Msg::UnloadOtherTabs { id } => self.unload_other_tabs(id),
                 Msg::PageRect {
                     page,
                     float,
@@ -1373,10 +1627,15 @@ impl App {
                 if let Some(tab) = self.tab_mut(id) {
                     tab.loading = started;
                     tab.url = url;
+                    let woke = if started { None } else { tab.wake.take() };
                     self.sync();
                     if !started {
                         self.save_session(); // saved as you browse, so a crash loses nothing
-                        self.visited(id);
+                        match woke {
+                            // Coming back to an unloaded tab is not a new visit.
+                            Some(wake) => self.woke(id, wake),
+                            None => self.visited(id),
+                        }
                     }
                 }
             }
@@ -1401,6 +1660,26 @@ impl App {
                 if let Some(opener) = self.tab(opener).filter(|_| web) {
                     let private = private || opener.private;
                     self.new_tab(&url, private);
+                }
+            }
+            UserEvent::MediaChecked(id, busy, why) => {
+                if keeps(why, busy, false, true) {
+                    self.keep(id);
+                } else {
+                    self.probe(id, why);
+                }
+            }
+            UserEvent::Probed(id, found, why) => {
+                let after = self.unload_after();
+                let idle = self
+                    .tab(id)
+                    .zip(after)
+                    .is_some_and(|(t, a)| t.seen.elapsed() >= a);
+                let edited = found.is_none_or(|f| f.0);
+                if keeps(why, false, edited, idle) {
+                    self.keep(id);
+                } else {
+                    self.unload(id, found.map(|f| (f.1, f.2)));
                 }
             }
             UserEvent::Found(id, found) => self.found(id, found),
@@ -1559,6 +1838,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Event::MainEventsCleared => {
                 app.tick();
                 app.poll_cursor();
+                if app.next_unload().is_some_and(|at| Instant::now() >= at) {
+                    app.unload_idle();
+                }
                 if app.started && Instant::now() >= next_update_check {
                     next_update_check = Instant::now() + UPDATE_EVERY;
                     app.check_update(false);
@@ -1566,7 +1848,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Development: WISP_PEEK=1 reveals the collapsed bar after 3s and holds it;
                 // WISP_ACT=<action> runs an action after 3s; WISP_JS=<script> runs in the
                 // interface after 4s;
-                // WISP_SHOT=/path.png saves a picture of the window after 6s and quits.
+                // WISP_SHOT=/path.png saves a picture of the window after 6s (or
+                // WISP_SHOT_AT=<secs>) and quits.
                 #[cfg(all(target_os = "macos", debug_assertions))]
                 {
                     let after = |secs| launched.elapsed() > Duration::from_secs(secs);
@@ -1574,17 +1857,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         app.hold_peek = true;
                         app.set_peek(true);
                     }
-                    if let Some(name) = std::env::var("WISP_ACT").ok().filter(|_| after(3)) {
+                    // WISP_ACT may also list actions with when to run them: "next_tab@5,back@9".
+                    if let Ok(acts) = std::env::var("WISP_ACT") {
+                        let mut left = Vec::new();
+                        for act in acts.split(',') {
+                            let (name, at) = act.split_once('@').unwrap_or((act, "3"));
+                            if after(at.parse().unwrap_or(3)) {
+                                app.action(name);
+                            } else {
+                                left.push(act);
+                            }
+                        }
                         // SAFETY: single-threaded here; nothing else reads the environment.
-                        unsafe { std::env::remove_var("WISP_ACT") };
-                        app.action(&name);
+                        unsafe { std::env::set_var("WISP_ACT", left.join(",")) };
+                        if left.is_empty() {
+                            unsafe { std::env::remove_var("WISP_ACT") };
+                        }
                     }
                     if let Some(js) = std::env::var("WISP_JS").ok().filter(|_| after(4)) {
                         // SAFETY: as above.
                         unsafe { std::env::remove_var("WISP_JS") };
                         let _ = app.chrome.evaluate_script(&js);
                     }
-                    if let Some(path) = std::env::var_os("WISP_SHOT").filter(|_| after(6)) {
+                    let shot_at = std::env::var("WISP_SHOT_AT")
+                        .ok()
+                        .and_then(|s| s.parse().ok());
+                    let shot_at = shot_at.unwrap_or(6);
+                    if let Some(path) = std::env::var_os("WISP_SHOT").filter(|_| after(shot_at)) {
                         use tao::platform::macos::WindowExtMacOS;
                         let ok = debug_shot::save(app.window.ns_window(), &path.to_string_lossy());
                         eprintln!("wisp: screenshot {}", if ok { "saved" } else { "FAILED" });
@@ -1611,7 +1910,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else if app.cfg.layout.collapsed || cfg!(debug_assertions) {
             ControlFlow::WaitUntil(Instant::now() + POLL)
         } else {
-            ControlFlow::WaitUntil(next_update_check)
+            let unload = app.next_unload().unwrap_or(next_update_check);
+            ControlFlow::WaitUntil(unload.min(next_update_check))
         };
     });
 }
@@ -1619,8 +1919,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        App, CLOSED_MAX, Side, Tab, Zone, ease_out, group_pinned, place_tab, remember_closed, zone,
+        App, CLOSED_MAX, Side, Tab, Why, Zone, ease_out, group_pinned, keeps, place_tab,
+        remember_closed, unload_due, zone,
     };
+    use std::time::{Duration, Instant};
 
     fn tab(id: u32, workspace: u32, pinned: bool) -> Tab {
         Tab {
@@ -1632,6 +1934,9 @@ mod tests {
             title: String::new(),
             url: format!("https://example.com/{id}"),
             loading: false,
+            seen: Instant::now(),
+            checking: false,
+            wake: None,
             zoom: 1.0,
         }
     }
@@ -1766,5 +2071,50 @@ mod tests {
         assert_eq!(ease_out(1.0), 1.0);
         assert_eq!(ease_out(7.0), 1.0);
         assert!(ease_out(0.25) > 0.6);
+    }
+
+    #[test]
+    fn which_tabs_may_be_unloaded_and_when() {
+        let min = Duration::from_secs(60);
+        let after = Some(30 * min);
+        let mut t = tab(1, 1, false);
+        t.seen = Instant::now() - 10 * min;
+        let due = |t: &Tab, loaded, active, after, pinned_too| {
+            unload_due(t, loaded, active, after, pinned_too)
+        };
+        // A loaded background tab is due 30 minutes after it was last seen.
+        assert_eq!(
+            due(&t, true, Some(2), after, false),
+            Some(t.seen + 30 * min)
+        );
+        assert_eq!(due(&t, true, None, after, false), Some(t.seen + 30 * min));
+        // Never: unloading switched off, the tab on screen, not loaded, being checked.
+        assert_eq!(due(&t, true, Some(2), None, false), None);
+        assert_eq!(due(&t, true, Some(1), after, false), None);
+        assert_eq!(due(&t, false, Some(2), after, false), None);
+        t.checking = true;
+        assert_eq!(due(&t, true, Some(2), after, false), None);
+        t.checking = false;
+        // Private: never on its own (its sign-ins live only in its page).
+        t.private = true;
+        assert_eq!(due(&t, true, Some(2), after, true), None);
+        t.private = false;
+        // Pinned: only when the setting allows it.
+        t.pinned = true;
+        assert_eq!(due(&t, true, Some(2), after, false), None);
+        assert_eq!(due(&t, true, Some(2), after, true), Some(t.seen + 30 * min));
+    }
+
+    #[test]
+    fn what_keeps_a_tab_loaded() {
+        // keeps(why, busy, edited, idle)
+        assert!(!keeps(Why::Idle, false, false, true));
+        assert!(keeps(Why::Idle, true, false, true)); // playing, or in a call
+        assert!(keeps(Why::Idle, false, true, true)); // typed text (or no answer)
+        assert!(keeps(Why::Idle, false, false, false)); // looked at while being checked
+        assert!(!keeps(Why::Others, false, false, false)); // no wait for the menu command
+        assert!(keeps(Why::Others, true, false, false));
+        assert!(keeps(Why::Others, false, true, false));
+        assert!(!keeps(Why::Asked, true, true, false)); // the user picked this tab
     }
 }

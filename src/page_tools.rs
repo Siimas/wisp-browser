@@ -59,6 +59,12 @@ fn unique_path(dir: &Path, name: &str, taken: impl Fn(&Path) -> bool) -> PathBuf
 }
 
 impl Downloads {
+    /// A download is in progress. Tabs are not unloaded then: the engine may tie a
+    /// download to the page that started it, and which tab that was is not recorded.
+    pub fn running(&self) -> bool {
+        self.items.iter().any(|d| d.state == State::Active)
+    }
+
     /// A download of `url` is starting. `suggested` is where the web engine would put
     /// it; only its last part, the file name, is believed (the server has a say in it).
     fn start(&mut self, url: &str, suggested: &Path) -> PathBuf {
