@@ -725,6 +725,17 @@ impl App {
             "private_window" => return open_private_window(),
             "check_update" => return self.check_update(true),
             "restart_update" => return self.restart_into_update(),
+            "licenses" => {
+                // The notices as they were for this exact version.
+                let notices = concat!(
+                    env!("CARGO_PKG_REPOSITORY"),
+                    "/blob/v",
+                    env!("CARGO_PKG_VERSION"),
+                    "/THIRD-PARTY-NOTICES"
+                );
+                self.new_tab(notices, false);
+                return self.set_settings_open(false);
+            }
             "next_tab" | "prev_tab" => {
                 let step = if name == "next_tab" { 1 } else { -1 };
                 if let Some(id) = Self::cycle(&self.workspace_tabs(), self.active, step) {
