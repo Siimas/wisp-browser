@@ -46,9 +46,13 @@ pub fn fetch() -> Result<Option<Ready>, String> {
     let pubkey = PUBKEY
         .filter(|_| supported())
         .ok_or("updates are not set up in this build")?;
-    // The address may be overridden (for testing against a local server); what is
-    // downloaded must still carry a signature made with the release key.
-    let endpoint = std::env::var("WISP_UPDATE_ENDPOINT").unwrap_or_else(|_| ENDPOINT.into());
+    // Development builds may point at a local test server; a released build only ever
+    // asks the project's own releases. Either way the file must carry a signature made
+    // with the release key, and only a version newer than this one is accepted.
+    let endpoint = std::env::var("WISP_UPDATE_ENDPOINT")
+        .ok()
+        .filter(|_| cfg!(debug_assertions))
+        .unwrap_or_else(|| ENDPOINT.into());
     let config = Config {
         endpoints: vec![endpoint.parse().map_err(|e| fail(&e))?],
         pubkey: pubkey.trim().into(),
