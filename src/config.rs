@@ -228,6 +228,7 @@ pub fn default_hotkeys() -> BTreeMap<String, String> {
         ("private_window", "Mod+Shift+N".to_string()),
         ("close_tab", "Mod+W".to_string()),
         ("reopen_tab", "Mod+Shift+T".to_string()),
+        ("split_view", "Mod+Shift+S".to_string()),
         ("next_tab", format!("{ctrl}+Tab")),
         ("prev_tab", format!("{ctrl}+Shift+Tab")),
         ("next_workspace", "Mod+Alt+ArrowRight".to_string()),
@@ -372,6 +373,8 @@ fn write(name: &str, contents: &str) {
 pub struct Session {
     pub workspace: u32,
     pub tabs: Vec<SavedTab>,
+    /// Split view groups, naming tabs by their place in `tabs`.
+    pub splits: Vec<crate::split::Node>,
 }
 
 #[derive(Serialize, Deserialize, Default)]

@@ -4,7 +4,8 @@
 //! The window holds three kinds of webview, bottom to top:
 //! 1. the interface ("chrome"), filling the whole window: hotbar, sidebar, settings;
 //! 2. one webview per tab. The interface reports the gap it leaves for the page
-//!    (`Msg::PageRect`) and the active tab is placed exactly there, as a rounded card;
+//!    (`Msg::PageRect`) and the active tab is placed exactly there, as a rounded card
+//!    (or, in split view, its split's tabs are tiled there: see split.rs);
 //! 3. the "floater": a second copy of the interface, shown only while a collapsed
 //!    bar is revealed, so that the bar can float over the page.
 
@@ -14,6 +15,7 @@ mod config;
 mod debug_shot;
 mod native;
 mod page_tools;
+mod split;
 mod store;
 mod update;
 
@@ -113,6 +115,9 @@ enum Msg {
         lights_peek: Option<[f64; 2]>,
         /// Glide to the new size (a layout change) instead of jumping.
         animate: bool,
+        /// Space between split tiles.
+        #[serde(default)]
+        gap: f64,
     },
     /// The interface needs the page area for itself (a menu or sheet is open).
     Cover {
@@ -146,6 +151,38 @@ enum Msg {
         id: u32,
         op: String,
     },
+    // Split view (see split.rs).
+    /// Show tab `id` beside `target`: on `edge`, or along the target's longer side.
+    SplitWith {
+        id: u32,
+        target: u32,
+        #[serde(default)]
+        edge: Option<split::Edge>,
+    },
+    /// Tab `id` is dragged over the page: preview it landing on `edge` of `target`.
+    SplitPreview {
+        id: u32,
+        target: Option<u32>,
+        #[serde(default)]
+        edge: Option<split::Edge>,
+    },
+    /// Take tab `id` out of its split, or end its split (`all`).
+    Unsplit {
+        id: u32,
+        #[serde(default)]
+        all: bool,
+    },
+    /// A divider moved: new shares for the split at `path`. `done` = let go.
+    SplitSizes {
+        path: Vec<usize>,
+        sizes: Vec<f64>,
+        #[serde(default)]
+        animate: bool,
+        #[serde(default)]
+        done: bool,
+    },
+    /// From a page: it was clicked (checked with the system before it counts).
+    Focus,
     /// History, bookmarks and suggestions: see `store::Msg`.
     #[serde(untagged)]
     Library(store::Msg),
@@ -155,6 +192,8 @@ enum UserEvent {
     Ui(Msg),
     /// Hotkey reported by the page in tab `.0`.
     PageKey(u32, String),
+    /// The page in tab `.0` was clicked.
+    PageFocus(u32),
     Title(u32, String),
     Load(u32, bool, String),
     /// A page in tab `.0` asked for a new window.
@@ -304,8 +343,12 @@ struct App {
     /// Gap the interface leaves for the page: left, top, right, bottom. `None` until
     /// the interface has laid itself out once.
     insets: Option<[f64; 4]>,
-    /// A glide in progress: the gap it started from, and when.
-    glide: Option<([f64; 4], Instant)>,
+    /// A glide in progress: where each visible tab started from, and when.
+    glide: Option<(HashMap<u32, [f64; 4]>, Instant)>,
+    /// Split view: the groups of tabs shown together, a drag's preview, tile spacing.
+    groups: Vec<split::Node>,
+    preview: Option<split::Node>,
+    gap: f64,
     /// Area the floating bar takes, same form as `insets`.
     float_insets: [f64; 4],
     page_radius: f64,
@@ -350,6 +393,10 @@ fn rect(x: f64, y: f64, w: f64, h: f64) -> Rect {
         size: LogicalSize::new(w.max(1.0), h.max(1.0)).into(),
     }
 }
+
+/// Pages say when they are clicked; the app then asks the system which view has the focus.
+const FOCUS_SCRIPT: &str =
+    "addEventListener('pointerdown', () => window.ipc.postMessage('{\"cmd\":\"focus\"}'), true);";
 
 fn keys_script(cfg: &Config) -> String {
     let combos: Vec<&String> = cfg.hotkeys.values().collect();
@@ -416,14 +463,26 @@ impl App {
         rect(l, t, s.width - l - r, s.height - t - b)
     }
 
-    /// The page gap right now: mid-glide, somewhere between the old and the new one.
-    fn page_insets(&self) -> [f64; 4] {
-        let target = self.insets.unwrap_or_default();
-        let Some((from, start)) = self.glide else {
-            return target;
-        };
-        let k = ease_out(start.elapsed().as_secs_f64() / PAGE_GLIDE.as_secs_f64());
-        std::array::from_fn(|i| from[i] + (target[i] - from[i]) * k)
+    /// Where the visible tabs are right now: mid-glide, somewhere between where they
+    /// were and where they are going.
+    fn frames(&self) -> Vec<(u32, [f64; 4])> {
+        let mut frames = self.targets();
+        if let Some((from, start)) = &self.glide {
+            let k = ease_out(start.elapsed().as_secs_f64() / PAGE_GLIDE.as_secs_f64());
+            for (id, to) in &mut frames {
+                if let Some(a) = from.get(id) {
+                    *to = std::array::from_fn(|i| a[i] + (to[i] - a[i]) * k);
+                }
+            }
+        }
+        frames
+    }
+
+    /// The layout is about to change: glide from where the tabs are now.
+    fn start_glide(&mut self) {
+        if self.insets.is_some() {
+            self.glide = Some((self.frames().into_iter().collect(), Instant::now()));
+        }
     }
 
     fn page_visible(&self) -> bool {
@@ -431,11 +490,16 @@ impl App {
     }
 
     fn layout_pages(&self) {
-        let page = self.inset_rect(self.page_insets());
+        let (frames, visible) = (self.frames(), self.page_visible());
         for tab in &self.tabs {
             if let Some(w) = &tab.webview {
-                let _ = w.set_bounds(page);
-                let _ = w.set_visible(self.active == Some(tab.id) && self.page_visible());
+                match frames.iter().find(|f| f.0 == tab.id) {
+                    Some(&(_, [x, y, width, height])) => {
+                        let _ = w.set_bounds(rect(x, y, width, height));
+                        let _ = w.set_visible(visible);
+                    }
+                    None => drop(w.set_visible(false)),
+                }
             }
         }
     }
@@ -504,6 +568,8 @@ impl App {
         let state = json!({
             "tabs": tabs,
             "active": self.active,
+            "split": self.shown_tree(),
+            "groups": self.groups_json(),
             "workspace": self.workspace,
             "config": self.cfg,
             "settings": self.settings_open,
@@ -555,20 +621,22 @@ impl App {
         );
         let mut builder = WebViewBuilder::new()
             .with_url(url)
-            .with_bounds(self.inset_rect(self.page_insets()))
+            .with_bounds(self.inset_rect(self.insets.unwrap_or_default()))
             .with_visible(self.page_visible())
             .with_incognito(private)
             .with_back_forward_navigation_gestures(true)
             .with_initialization_script(keys_script(&self.cfg))
+            // A click tells the app to check (natively) which split tile has the focus.
+            .with_initialization_script(FOCUS_SCRIPT)
             // Pages are untrusted: the only message accepted from them is a hotkey press,
             // and only while their tab is the active one (see `PageKey`).
             // ponytail: the active page can still fake a press (e.g. close its own tab)
             // or swallow hotkeys while focused. Upgrade path: native key capture per
             // platform instead of the injected listener.
-            .with_ipc_handler(move |req| {
-                if let Ok(Msg::Key { combo }) = serde_json::from_str(req.body()) {
-                    let _ = p1.send_event(UserEvent::PageKey(id, combo));
-                }
+            .with_ipc_handler(move |req| match serde_json::from_str(req.body()) {
+                Ok(Msg::Key { combo }) => drop(p1.send_event(UserEvent::PageKey(id, combo))),
+                Ok(Msg::Focus) => drop(p1.send_event(UserEvent::PageFocus(id))),
+                _ => {}
             })
             .with_document_title_changed_handler(move |title| {
                 let _ = p2.send_event(UserEvent::Title(id, title));
@@ -634,22 +702,20 @@ impl App {
     }
 
     fn select(&mut self, id: u32) {
-        let Some(tab) = self.tab(id) else { return };
-        let (ws, url, private, unloaded) = (
-            tab.workspace,
-            tab.url.clone(),
-            tab.private,
-            tab.webview.is_none(),
-        );
-        if unloaded {
-            let webview = self.build_webview(id, &url, private);
-            if let Some(tab) = self.tab_mut(id) {
-                tab.webview = webview;
-            }
-        }
+        let Some(ws) = self.tab(id).map(|t| t.workspace) else {
+            return;
+        };
+        let before: Vec<u32> = self.targets().iter().map(|f| f.0).collect();
+        self.preview = None;
         self.workspace = ws;
         self.active = Some(id);
         self.last_active.insert(ws, id);
+        // Every tile of its split is shown with it.
+        let shown: Vec<u32> = self.targets().iter().map(|f| f.0).collect();
+        shown.iter().for_each(|&t| self.ensure_webview(t));
+        if !shown.iter().any(|t| before.contains(t)) {
+            self.glide = None; // another tab entirely: no glide from the old one
+        }
         self.settings_open = false;
         self.layout_pages();
         if let Some(w) = self.active_webview() {
@@ -675,11 +741,15 @@ impl App {
     }
 
     fn close_tab(&mut self, id: u32) {
+        let tile = self.leave_split(id); // the rest of its split stays on screen
         let Some((ws, pos)) = self.remove_tab(id) else {
             return;
         };
         if self.active == Some(id) {
-            self.show_neighbor(ws, pos);
+            match tile {
+                Some(next) => self.select(next),
+                None => self.show_neighbor(ws, pos),
+            }
         } else {
             self.sync();
         }
@@ -692,6 +762,7 @@ impl App {
     /// workspace and the list position it had.
     fn remove_tab(&mut self, id: u32) -> Option<(u32, usize)> {
         let pos = self.tabs.iter().position(|t| t.id == id)?;
+        self.leave_split(id);
         let ws = self.tabs[pos].workspace;
         let index = self.tabs[..pos]
             .iter()
@@ -725,6 +796,9 @@ impl App {
             return;
         };
         tab.pinned = pinned;
+        if pinned {
+            self.leave_split(id); // pinned tabs keep to their own box, out of splits
+        }
         // To the border between the groups: last of the pinned, or first of the rest.
         self.reorder_tab(id, if pinned { usize::MAX } else { 0 });
     }
@@ -824,6 +898,7 @@ impl App {
         if !known || from == to {
             return;
         }
+        let tile = self.leave_split(id);
         self.tabs[pos].workspace = to;
         self.last_active.insert(to, id);
         if self.active == Some(id) {
@@ -831,7 +906,10 @@ impl App {
             if let Some(w) = &self.tabs[pos].webview {
                 let _ = w.set_visible(false);
             }
-            self.show_neighbor(from, pos);
+            match tile {
+                Some(next) => self.select(next),
+                None => self.show_neighbor(from, pos),
+            }
         } else {
             self.sync();
         }
@@ -1049,6 +1127,7 @@ impl App {
             "settings" => return self.set_settings_open(!self.settings_open),
             "close_tab" => return self.close_active(),
             "reopen_tab" => return self.reopen_tab(),
+            "split_view" => return self.toggle_split(),
             _ => {}
         }
         let home = self.cfg.behavior.homepage.clone();
@@ -1195,6 +1274,7 @@ impl App {
         let start_ws = Some(session.workspace)
             .filter(|&w| known(w))
             .unwrap_or(first_ws);
+        let (first_id, saved) = (self.next_id, session.tabs.len() as u32);
         for saved in session.tabs {
             let workspace = Some(saved.workspace)
                 .filter(|&w| known(w))
@@ -1217,6 +1297,8 @@ impl App {
             });
         }
         group_pinned(&mut self.tabs);
+        self.groups = split::load(session.splits, |i| (i < saved).then_some(first_id + i));
+        self.tidy_groups();
         if self.tabs.is_empty() {
             let home = self.cfg.behavior.homepage.clone();
             self.new_tab(&home, false);
@@ -1238,10 +1320,15 @@ impl App {
         if self.private_window || !self.started {
             return;
         }
-        let tabs = self
+        let kept: Vec<&Tab> = self
             .tabs
             .iter()
             .filter(|t| !t.private && t.url.starts_with("http"))
+            .collect();
+        let index_of = |id| kept.iter().position(|t| t.id == id).map(|i| i as u32);
+        let splits = split::save(&self.groups, index_of);
+        let tabs = kept
+            .iter()
             .map(|t| SavedTab {
                 url: t.url.clone(),
                 title: t.title.clone(),
@@ -1253,6 +1340,7 @@ impl App {
         config::save_session(&Session {
             workspace: self.workspace,
             tabs,
+            splits,
         });
     }
 
@@ -1294,15 +1382,19 @@ impl App {
                     lights,
                     lights_peek,
                     animate,
+                    gap,
                 } => {
                     let sane = |v: &[f64]| v.iter().all(|n| n.is_finite() && *n >= 0.0);
                     if !sane(&page) || !sane(&float) || !sane(&[radius]) {
                         return;
                     }
                     if animate && self.insets.is_some_and(|old| old != page) {
-                        self.glide = Some((self.page_insets(), Instant::now()));
+                        self.start_glide();
                     } else if !animate {
                         self.glide = None;
+                    }
+                    if sane(&[gap]) {
+                        self.gap = gap;
                     }
                     if sane(&lights) {
                         self.lights = lights;
@@ -1350,6 +1442,24 @@ impl App {
                 Msg::Find { query, back } => self.find(query, back),
                 Msg::FindClose => self.find_close(),
                 Msg::Download { id, op } => self.download_op(id, &op),
+                Msg::SplitWith { id, target, edge } => self.split_with(id, target, edge),
+                Msg::SplitPreview { id, target, edge } => {
+                    self.split_preview(id, target.zip(edge));
+                }
+                Msg::Unsplit { id, all } => self.unsplit(id, all),
+                Msg::SplitSizes {
+                    path,
+                    sizes,
+                    animate,
+                    done,
+                } => {
+                    self.split_sizes(&path, sizes, animate);
+                    if done {
+                        self.sync();
+                        self.save_session();
+                    }
+                }
+                Msg::Focus => {}
                 Msg::Library(msg) => self.library(msg),
             },
             UserEvent::PageKey(id, combo) => {
@@ -1359,6 +1469,7 @@ impl App {
                     self.handle(UserEvent::Ui(Msg::Key { combo }));
                 }
             }
+            UserEvent::PageFocus(id) => self.page_focus(id),
             UserEvent::Title(id, title) => {
                 if let Some(tab) = self.tab_mut(id) {
                     tab.title = title;
@@ -1515,6 +1626,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         next_id: 1,
         insets: None,
         glide: None,
+        groups: Vec::new(),
+        preview: None,
+        gap: 8.0,
         float_insets: [0.0; 4],
         page_radius: 0.0,
         panel_insets: [0.0; 4],

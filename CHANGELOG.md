@@ -6,6 +6,17 @@ All notable changes to Wisp are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Split view: show two to four tabs of a workspace side by side, in rows and
+  columns. Drag a tab from the list onto any side of the page (the tiles make
+  room to show where it lands), choose "Split with current tab" in a tab's menu,
+  or press Cmd/Ctrl+Shift+S. Drag the gap between tiles to resize, double-click
+  it to even them out, and drag a tile's tab onto another tile to rearrange. The
+  tile you click in gets the address bar, find and page hotkeys. A split reads
+  as one row in the tab list, survives workspace switches and restarts, and
+  "Remove from split" or "Unsplit tabs" in a tab's menu take it apart.
+
 ### Changed
 
 - Google is the default search engine and home page for new profiles. Existing

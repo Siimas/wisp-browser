@@ -390,6 +390,47 @@ input[type=color] { width: 40px; height: var(--ctl); padding: 0; border: 1px sol
 .wsrow input[type=text] { flex: 1; width: auto; min-width: 0; }
 .wsrow .btn.icon { flex: none; width: 40px; padding: 0; display: grid; place-items: center; }
 
+/* ================= SPLIT VIEW =================
+   Several tabs in the page area. Each tile is a page card of its own (the tab's view
+   covers it exactly, like the single card); the gaps between tiles are dividers that
+   resize. The window places the views with the same arithmetic (split.rs). */
+#tiles { display: none; position: absolute; inset: 0; }
+:root[data-split]:not([data-settings]):not([data-customizing]):not([data-sheet]) #page { overflow: visible; background: none; box-shadow: none; }
+:root[data-split]:not([data-settings]):not([data-customizing]):not([data-sheet]) #tiles { display: flex; }
+#tiles .split { display: flex; flex: 1; min-width: 0; min-height: 0; }
+#tiles .split.stacked { flex-direction: column; }
+.tile { min-width: 0; min-height: 0; border-radius: var(--page-r); box-shadow: var(--shadow-card); background: color-mix(in srgb, var(--fg) 3%, transparent);
+  transition: box-shadow var(--d-2) var(--ease-out); }
+/* the focused tile: the address bar, find and page hotkeys act on it */
+.tile.focus { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--accent) 55%, transparent), var(--shadow-card); }
+/* where a dragged tab would land */
+.tile.landing { background: color-mix(in srgb, var(--accent) 12%, transparent); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 50%, transparent);
+  animation: drop-in var(--d-2) var(--ease-out); }
+@keyframes drop-in { from { opacity: 0; transform: scale(.97); } }
+.divider { flex: none; position: relative; touch-action: none; }
+.beside > .divider { width: var(--gap); cursor: col-resize; }
+.stacked > .divider { height: var(--gap); cursor: row-resize; }
+.divider::after { content: ""; position: absolute; border-radius: var(--r-full); background: var(--accent); opacity: 0; transition: opacity var(--d-1); }
+.beside > .divider::after { top: var(--sp-2); bottom: var(--sp-2); left: calc(50% - 1px); width: 2px; }
+.stacked > .divider::after { left: var(--sp-2); right: var(--sp-2); top: calc(50% - 1px); height: 2px; }
+.divider:hover::after, .divider.dragging::after { opacity: .7; }
+/* In the tab list a split reads as one unit: its tabs share a row, the focused one in full color. */
+.group { display: flex; gap: var(--sp-0); min-width: 0; border-radius: var(--r-md); transition: background var(--d-1), box-shadow var(--d-1); }
+.group { box-shadow: var(--shadow-0); }  /* at rest: joined by a hairline */
+.group:hover { background: var(--hover); }
+.group.active { background: var(--surface); box-shadow: var(--shadow-1); }
+.group .tab.active, .group .tab:hover { background: none; box-shadow: none; }
+.group .tab + .tab::before { content: ""; position: absolute; left: 0; top: var(--sp-2); bottom: var(--sp-2); width: 1px; background: var(--line); }
+:root:not([data-side=top]) .group { flex: none; height: var(--row); }
+:root:not([data-side=top]) .group .tab { flex: 1 1 0; height: auto; }
+:root[data-side=top] .group { flex: var(--n) 1 0; max-width: calc(220px * var(--n)); height: calc(var(--tabs-h) - var(--sp-2)); }
+:root[data-side=top] .group .tab { max-width: none; height: auto; }
+/* three or four in a sidebar row: the others shrink to their icons */
+:root:not([data-side=top]) .group.many .tab:not(.active) { justify-content: center; padding: 0; }
+:root:not([data-side=top]) .group.many .tab:not(.active) :is(.title, .x) { display: none; }
+:root:not([data-side=top]) .group.many .tab.active { flex-grow: 3; }
+#sidebar .tab.splitting { opacity: .5; }
+
 /* ================= THEME EDITOR =================
    Drag the dots: direction from the center picks the hue, distance the vividness. */
 .ted { align-self: center; width: 320px; max-width: 100%; display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-2); border-radius: var(--r-lg); background: var(--field); box-shadow: var(--shadow-1); }
@@ -552,6 +593,7 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
     <button class="ib" id="find-close" title="Close" aria-label="Close find"></button>
   </div>
   <main id="page">
+    <div id="tiles"></div>
     <section id="customize" class="sheet"><div>
       <h1>Customize toolbar
         <span class="chips"><button class="btn" id="cz-reset">Reset</button><button class="btn primary" id="cz-done">Done</button></span></h1>
@@ -937,23 +979,45 @@ function updateTab(node, t) {
     else { const img = el('img', { alt: '', src: `https://${host}/favicon.ico` }); img.onerror = () => fav.replaceChildren(letter); fav.replaceChildren(img); }
   }
 }
+// A split's tabs, in one row of the list (keyed by their ids).
+const groupEls = new Map();
+function groupEl(ids) {
+  const key = ids.join();
+  let g = groupEls.get(key);
+  if (!g) { g = el('div', { className: 'group', role: 'group', ariaLabel: 'Split view' }); groupEls.set(key, g); }
+  g.style.setProperty('--n', ids.length);
+  g.classList.toggle('active', ids.includes(S.active));
+  g.classList.toggle('many', ids.length > 2);
+  ids.forEach((id, i) => { const n = tabEls.get(id); if (n && g.children[i] !== n) g.insertBefore(n, g.children[i] || null); });
+  return g;
+}
+const unitIds = n => n.classList.contains('group') ? [...n.children].map(c => c.dataset.id) : [n.dataset.id];
 function renderTabs() {
   const boxes = [$('#tabs'), $('#pins')], swapped = lastWs !== null && lastWs !== S.workspace, seen = new Set();
+  const groups = S.groups || [], groupOf = new Map(groups.flatMap(g => g.map(id => [id, g])));
   const place = () => {
     const cursor = boxes.map(b => b.firstElementChild); // walk each list, stepping over tabs that are animating out
     for (const t of S.tabs) {
       let node = tabEls.get(t.id);
-      if (!node) { node = makeTab(t.id); tabEls.set(t.id, node); if (lastWs !== null && !swapped) node.classList.add('enter'); }
+      if (!node) { node = makeTab(t.id); tabEls.set(t.id, node); if (lastWs !== null && !swapped && !groupOf.has(t.id)) node.classList.add('enter'); }
       updateTab(node, t);
+    }
+    const placed = new Set();
+    for (const t of S.tabs) {
+      seen.add(t.id);
+      const g = groupOf.get(t.id); // a split goes where its first tab is, as one unit
+      if (placed.has(g)) continue;
+      if (g) placed.add(g);
+      const node = g ? groupEl(g) : tabEls.get(t.id);
       const k = +!!t.pinned;
       while (cursor[k] && cursor[k].classList.contains('leave')) cursor[k] = cursor[k].nextElementSibling;
       if (cursor[k] === node) cursor[k] = node.nextElementSibling;
       else { if (cursor[1 - k] === node) cursor[1 - k] = node.nextElementSibling; boxes[k].insertBefore(node, cursor[k]); }
-      seen.add(t.id);
     }
+    for (const [key, g] of groupEls) if (!groups.some(ids => ids.join() === key)) { groupEls.delete(key); g.remove(); }
   };
-  // The same tabs in a new order (dragged, pinned, unpinned): glide to it, do not jump.
-  const order = S.tabs.map(t => t.id + (t.pinned ? 'p' : '')).join();
+  // The same tabs in a new order (dragged, pinned, unpinned, split): glide to it, do not jump.
+  const order = S.tabs.map(t => t.id + (t.pinned ? 'p' : '')).join() + JSON.stringify(groups);
   const moved = !swapped && order !== tabOrder && S.tabs.length === tabEls.size && S.tabs.every(t => tabEls.has(t.id));
   if (moved) glideTabs(place); else place();
   tabOrder = order;
@@ -996,6 +1060,7 @@ addEventListener('pointermove', e => {
   if (!d) return;
   if (!d.slots) { // not a drag until the pointer has really moved: a click still selects
     if (Math.hypot(e.clientX - d.x, e.clientY - d.y) < 5) return;
+    d.member = d.node.parentNode.classList.contains('group'); // a tile: it can only move in the page
     d.box = d.node.parentNode;
     d.tabs = liveTabs(d.box);
     d.slots = d.tabs.map(n => n.getBoundingClientRect());
@@ -1008,6 +1073,7 @@ addEventListener('pointermove', e => {
     post({ cmd: 'busy', on: true }); // a revealed bar stays while dragging
   }
   if (liveTabs(d.box).length !== d.tabs.length) return tabDragEnd(false); // a tab came or went: let go
+  if (splitDrag(d, e) || d.member) return; // over the page it splits instead
   // Travel is held to the span of the slots: along the list, or across the grid.
   const s = d.slots, home = s[d.from], xs = s.map(r => r.left - home.left), ys = s.map(r => r.top - home.top);
   const dx = Math.max(Math.min(...xs), Math.min(e.clientX - d.x, Math.max(...xs)));
@@ -1021,22 +1087,59 @@ addEventListener('pointermove', e => {
     n.style.transform = j === i ? '' : `translate(${s[j].left - s[i].left}px, ${s[j].top - s[i].top}px)`;
   });
 });
-function tabDragEnd(drop) {
+function tabDragEnd(drop, e) {
   const d = tabDrag;
   tabDrag = null;
   if (!d || !d.slots) return;
   try { d.node.releasePointerCapture(d.pointer); } catch {}
   post({ cmd: 'busy', on: false });
-  const moved = drop && d.to !== d.from;
+  d.node.classList.remove('splitting');
+  const moved = drop && !d.over && !d.member && d.to !== d.from;
   glideTabs(() => { if (moved) d.box.insertBefore(d.node, d.to > d.from ? d.tabs[d.to].nextSibling : d.tabs[d.to]); });
   const eat = ev => { ev.stopPropagation(); ev.preventDefault(); }; // the release is not a click on the tab
   addEventListener('click', eat, true);
   setTimeout(() => removeEventListener('click', eat, true));
+  if (d.over && drop && d.target) return post({ cmd: 'split_with', id: d.id, target: d.target, edge: d.edge });
+  if (d.hover) post({ cmd: 'split_preview', id: d.id, target: null });
+  // A tile dragged out onto the tab list leaves its split.
+  if (d.member && drop && !d.over && e && document.elementFromPoint(e.clientX, e.clientY)?.closest('#sidebar')) post({ cmd: 'unsplit', id: d.id });
   if (!moved) return;
-  tabOrder = [$('#pins'), $('#tabs')].flatMap((box, i) => liveTabs(box).map(n => n.dataset.id + (i ? '' : 'p'))).join(); // Rust will say the same
-  post({ cmd: 'reorder_tab', id: d.id, index: (d.box.id === 'tabs' ? liveTabs($('#pins')).length : 0) + d.to });
+  tabOrder = [$('#pins'), $('#tabs')].flatMap((box, i) => liveTabs(box).flatMap(unitIds).map(id => id + (i ? '' : 'p'))).join() + JSON.stringify(S.groups || []); // Rust will say the same
+  const before = d.box.id === 'tabs' ? liveTabs($('#pins')).length : 0;
+  post({ cmd: 'reorder_tab', id: d.id, index: before + liveTabs(d.box).flatMap(unitIds).indexOf(String(d.id)) });
 }
-addEventListener('pointerup', () => tabDragEnd(true));
+// Dragging a tab over the page splits: it lands on the side of the tile under the
+// pointer, and the window shows where (the tiles make room) before it is let go.
+const inside = (r, e) => e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+function splitDrag(d, e) {
+  const page = $('#page').getBoundingClientRect();
+  const over = !FLOATER && !S.settings && !customizing && !sheet && !d.node.closest('#pins') && inside(page, e);
+  if (!over) {
+    if (d.over) { d.over = false; d.node.classList.remove('splitting'); splitHover(d, null, null); }
+    return false;
+  }
+  if (!d.over) { // the list settles back while the tab is over the page
+    d.over = true;
+    for (const n of d.tabs) n.style.transform = '';
+    d.to = d.from;
+    d.node.classList.add('splitting');
+    // Where the tiles are now; kept for the whole drag so the preview does not move them under the pointer.
+    d.zones ||= S.split ? [...$('#tiles').querySelectorAll('.tile')].filter(t => +t.dataset.id).map(t => ({ id: +t.dataset.id, r: t.getBoundingClientRect() }))
+      : [{ id: S.active, r: page }];
+  }
+  const z = d.zones.find(z => inside(z.r, e) && z.id !== d.id);
+  if (!z) { splitHover(d, null, null); return true; }
+  const x = (e.clientX - z.r.left) / z.r.width - .5, y = (e.clientY - z.r.top) / z.r.height - .5;
+  splitHover(d, z.id, Math.abs(x) > Math.abs(y) ? (x < 0 ? 'left' : 'right') : (y < 0 ? 'top' : 'bottom'));
+  return true;
+}
+function splitHover(d, target, edge) {
+  const key = target ? target + edge : '';
+  if (key === (d.hover || '')) return;
+  Object.assign(d, { hover: key, target, edge });
+  post({ cmd: 'split_preview', id: d.id, target, edge });
+}
+addEventListener('pointerup', e => tabDragEnd(true, e));
 addEventListener('pointercancel', () => tabDragEnd(false));
 
 // ---------- parts that change with every state ----------
@@ -1108,12 +1211,78 @@ function tabMenu(id, e) {
   const others = cfg.workspaces.filter(w => w.id !== S.workspace), t = S.tabs.find(t => t.id === id) || {};
   openPop(e, [
     ...(t.private ? [] : [mi(t.pinned ? 'Unpin tab' : 'Pin tab', () => post({ cmd: 'pin_tab', id, pinned: !t.pinned }))]),
-    mi('Duplicate tab', () => post({ cmd: 'duplicate_tab', id })), el('hr'),
+    mi('Duplicate tab', () => post({ cmd: 'duplicate_tab', id })), ...splitItems(t), el('hr'),
     ...(S.private ? [] : others.map(w => mi([wsMark(w), 'Move to ' + w.name], () => post({ cmd: 'move_tab', id, workspace: w.id })))),
     ...(others.length && !S.private ? [el('hr')] : []),
     ...(S.tabs.some(o => o.id !== id && !o.pinned) ? [mi('Close other tabs', () => post({ cmd: 'close_other_tabs', id }))] : []),
     mi('Close tab', () => post({ cmd: 'close_tab', id }), { danger: true }),
   ]);
+}
+// Split view in a tab's menu: join the current tab, or leave (or end) a split.
+function splitItems(t) {
+  const groups = S.groups || [], of = id => groups.find(g => g.includes(id)) || [], cur = S.tabs.find(o => o.id === S.active);
+  const mine = of(t.id), here = of(S.active);
+  const can = cur && !cur.pinned && !t.pinned && t.id !== S.active && !here.includes(t.id) && here.length < 4;
+  return [
+    ...(can ? [mi('Split with current tab', () => post({ cmd: 'split_with', id: t.id, target: S.active }))] : []),
+    ...(mine.length ? [mi('Remove from split', () => post({ cmd: 'unsplit', id: t.id })), mi('Unsplit tabs', () => post({ cmd: 'unsplit', id: t.id, all: true }))] : []),
+  ];
+}
+// The tiles in the page area, drawn from the tree the window sends (`S.split`).
+let splitKey = '', divDrag = false;
+function renderSplit() {
+  const t = !FLOATER && S.split;
+  flag('split', t);
+  const key = JSON.stringify([t, S.active]);
+  if (key === splitKey || divDrag) return;
+  splitKey = key;
+  $('#tiles').replaceChildren(...(t ? [tileNode(t, [])] : []));
+}
+function tileNode(n, path) {
+  if (typeof n === 'number') {
+    const tile = el('div', { className: 'tile' + (n === 0 ? ' landing' : n === S.active ? ' focus' : '') });
+    tile.dataset.id = n;
+    return tile;
+  }
+  const box = el('div', { className: 'split ' + (n.row ? 'beside' : 'stacked') });
+  n.kids.forEach((k, i) => {
+    if (i) box.append(divider(box, path, i, n.row, n.sizes));
+    const kid = tileNode(k, [...path, i]);
+    kid.style.flex = `${n.sizes[i]} 1 0`;
+    box.append(kid);
+  });
+  return box;
+}
+// Drag a divider to resize the tiles on either side (like the sidebar's edge); double-click it to even them out.
+function divider(box, path, i, row, sizes) {
+  const d = el('div', { className: 'divider', title: 'Drag to resize; double-click to even out' });
+  d.onpointerdown = e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    d.setPointerCapture(e.pointerId);
+    d.classList.add('dragging');
+    divDrag = true;
+    const kids = [...box.children].filter(k => !k.classList.contains('divider')), a = kids[i - 1], b = kids[i];
+    const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect(), gap = px('--gap');
+    const start = row ? ra.left : ra.top, span = (row ? rb.right : rb.bottom) - start - gap; // both tiles together
+    const min = Math.min(160, span / 2), pair = sizes[i - 1] + sizes[i], now = [...sizes];
+    let frame = 0;
+    const send = done => post({ cmd: 'split_sizes', path, sizes: now, done });
+    const move = ev => {
+      const len = Math.max(min, Math.min(span - min, (row ? ev.clientX : ev.clientY) - start - gap / 2));
+      now[i - 1] = pair * len / span; now[i] = pair - now[i - 1];
+      a.style.flexGrow = now[i - 1]; b.style.flexGrow = now[i];
+      frame ||= requestAnimationFrame(() => { frame = 0; send(false); }); // at most once a frame
+    };
+    const up = () => {
+      d.removeEventListener('pointermove', move); d.removeEventListener('pointerup', up);
+      cancelAnimationFrame(frame); d.classList.remove('dragging'); divDrag = false;
+      send(true);
+    };
+    d.addEventListener('pointermove', move); d.addEventListener('pointerup', up);
+  };
+  d.ondblclick = () => post({ cmd: 'split_sizes', path, sizes: sizes.map(() => 1), animate: true, done: true });
+  return d;
 }
 // Open Settings at the About card (version, check for updates, restart to update).
 function showAbout() {
@@ -1574,7 +1743,7 @@ function reportPage(animate = false) {
   const m = { cmd: 'page_rect', panel: panel.map(v => Math.max(0, v)), panel_radius: px('--radius') * 1.5 + px('--sp-1'), page: [r.left, r.top, innerWidth - r.right, innerHeight - r.bottom],
     lights: [lx, (side === 'top' ? (hidden ? px('--strip') : px('--tabs-h')) : px('--hotbar-h')) / 2],
     lights_peek: side === 'top' && hidden ? [pad + lx, pad + px('--tabs-h') / 2] : null,
-    float: float.map(v => Math.max(0, v)), radius: parseFloat(getComputedStyle($('#page')).borderTopLeftRadius) || 0, animate };
+    float: float.map(v => Math.max(0, v)), radius: parseFloat(getComputedStyle($('#page')).borderTopLeftRadius) || 0, gap: px('--gap'), animate };
   const key = JSON.stringify({ ...m, animate: 0 });
   if (key !== lastRect) { lastRect = key; post(m); }
 }
@@ -1603,6 +1772,7 @@ function render() {
   renderLibrary();
   if (S.settings && !FLOATER) renderSettings();
   renderTools();
+  renderSplit();
   reportPage(true);
 }
 
