@@ -1040,7 +1040,8 @@ impl App {
             }
             "focus_url" => return self.focus_url(),
             "find" => {
-                if self.page_visible() && self.active_webview().is_some() {
+                // With Settings open, Mod+F goes to its own search box.
+                if self.settings_open || (self.page_visible() && self.active_webview().is_some()) {
                     let _ = self.chrome.focus();
                     let _ = self.chrome.evaluate_script("wisp.find()");
                 }
@@ -1485,6 +1486,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_title("Wisp")
         .with_inner_size(LogicalSize::new(1280.0, 820.0))
         .with_min_inner_size(LogicalSize::new(560.0, 360.0));
+    // Development: WISP_SIZE=<width>x<height> opens the window at that size.
+    #[cfg(debug_assertions)]
+    let builder = match std::env::var("WISP_SIZE").ok().and_then(|v| {
+        let (w, h) = v.split_once('x')?;
+        Some((w.parse::<f64>().ok()?, h.parse::<f64>().ok()?))
+    }) {
+        Some((w, h)) => builder.with_inner_size(LogicalSize::new(w, h)),
+        None => builder,
+    };
     #[cfg(target_os = "macos")]
     let builder = {
         // The interface runs under the title bar; the traffic lights sit on top of it
