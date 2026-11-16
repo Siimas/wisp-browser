@@ -1517,9 +1517,8 @@ function renderTiles() {
 function pickTile(b) {
   const k = b.parentNode.dataset.tiles;
   if (b.tileCustom) { // the value came from the advanced field: go there rather than replace it
-    setAdvanced(true);
     const f = $(`#settings [data-k="${k}"]`);
-    f.scrollIntoView({ block: 'center' }); f.focus();
+    if (f) { setAdvanced(true); f.scrollIntoView({ block: 'center' }); f.focus(); }
     return;
   }
   set(cfg, k, b.tileValue);
