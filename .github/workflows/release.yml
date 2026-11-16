@@ -35,7 +35,7 @@ jobs:
       tag: ${{ steps.read.outputs.tag }}
       release: ${{ steps.read.outputs.release }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: read
         run: |
           version=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
@@ -82,7 +82,7 @@ jobs:
       SIGN_UPDATES: ${{ secrets.WISP_UPDATE_PRIVATE_KEY != '' && vars.WISP_UPDATE_PUBKEY != '' }}
       PACKAGE: cargo packager --release --formats ${{ matrix.formats }} --target ${{ matrix.target }} --binaries-dir target/${{ matrix.target }}/release --out-dir dist
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
@@ -125,7 +125,7 @@ jobs:
             mv ./*-setup.exe "$name-Setup.exe"
           fi
           ls -l
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.target }}
           path: |
@@ -144,8 +144,8 @@ jobs:
     env:
       TAG: ${{ needs.version.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
