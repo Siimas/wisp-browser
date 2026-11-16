@@ -329,7 +329,8 @@ struct App {
     /// Where the window buttons go, at rest and while the bar floats in.
     lights: [f64; 4],
     lights_peek: Option<[f64; 4]>,
-    /// Where they were last put.
+    /// macOS: where they were last put.
+    #[cfg(target_os = "macos")]
     lights_at: [f64; 4],
     /// Windows: lies over the interface's maximize button so the system knows it is there.
     #[cfg(windows)]
@@ -908,12 +909,9 @@ impl App {
             Some(l) if self.peek => l,
             _ => self.lights,
         };
-        if at == self.lights_at {
-            return;
-        }
-        self.lights_at = at;
         #[cfg(target_os = "macos")]
-        {
+        if at != self.lights_at {
+            self.lights_at = at;
             use tao::platform::macos::WindowExtMacOS;
             // The library takes "extra title bar height", from which the buttons
             // end up 2px above the value given (measured on macOS 26).
@@ -921,7 +919,9 @@ impl App {
             let at = LogicalPosition::new(at[0], at[1] + at[3] / 2.0 + 2.0);
             self.window.set_traffic_light_inset(at);
         }
-        // Windows: the interface draws them; the system is shown where maximize is.
+        // Windows: the interface draws them; the system is shown where maximize is. Always
+        // placed, not only on a change: it goes in physical pixels (the scale may have
+        // changed under the same logical box) and back on top of a floater just raised.
         #[cfg(windows)]
         if let Some(snap) = &self.snap {
             let w = at[2] / 3.0;
@@ -1576,6 +1576,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         glass: native::Glass::new(),
         lights: [0.0; 4],
         lights_peek: None,
+        #[cfg(target_os = "macos")]
         lights_at: [0.0; 4],
         #[cfg(windows)]
         snap: None,
@@ -1617,12 +1618,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ..
             } => {
                 app.layout();
+                app.place_lights(); // Windows: in physical pixels, so again after a scale change
                 let max = app.window.is_maximized();
                 if max != app.maximized {
                     app.maximized = max;
                     app.sync(); // the restore/maximize button changes
                 }
             }
+            Event::WindowEvent {
+                event: WindowEvent::ScaleFactorChanged { .. },
+                ..
+            } => app.place_lights(),
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
                 ..

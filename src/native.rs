@@ -359,6 +359,8 @@ mod imp {
         static SNAP_SEND: RefCell<SnapSend> = const { RefCell::new(None) };
         static SNAP_HOVER: Cell<bool> = const { Cell::new(false) };
         static SNAP_PRESSED: Cell<bool> = const { Cell::new(false) };
+        /// It lies along the window's top edge (not on a floating bar further down).
+        static SNAP_AT_TOP: Cell<bool> = const { Cell::new(false) };
     }
 
     /// Windows 11 offers its snap layouts while the pointer rests on a window's maximize
@@ -408,6 +410,7 @@ mod imp {
         pub fn place(&self, [l, t, w, h]: [f64; 4], scale: f64) {
             let p = |v: f64| (v * scale).round() as i32;
             let (x, y) = (p(l), p(t));
+            SNAP_AT_TOP.set(y == 0);
             // SAFETY: plain Win32 call on our own live window.
             let _ = unsafe {
                 SetWindowPos(
@@ -430,7 +433,8 @@ mod imp {
             match msg {
                 WM_NCHITTEST => {
                     // Its top few pixels are still the window's top edge, as everywhere else
-                    // along the top (see #rim in ui.html), unless maximized.
+                    // along the top (see #rim in ui.html), unless maximized or it is not
+                    // at the top (on a revealed top bar).
                     let mut pt = POINT {
                         x: (l.0 & 0xffff) as i16 as i32,
                         y: ((l.0 >> 16) & 0xffff) as i16 as i32,
@@ -438,7 +442,7 @@ mod imp {
                     let _ = ScreenToClient(hwnd, &mut pt);
                     let parent = GetParent(hwnd).unwrap_or_default();
                     let rim = (5 * windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd)) as i32 / 96;
-                    let top = pt.y < rim && !IsZoomed(parent).as_bool();
+                    let top = SNAP_AT_TOP.get() && pt.y < rim && !IsZoomed(parent).as_bool();
                     LRESULT((if top { HTTOP } else { HTMAXBUTTON }) as isize)
                 }
                 WM_NCLBUTTONDOWN if w.0 == HTTOP as usize => {

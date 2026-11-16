@@ -1592,7 +1592,8 @@ function reportPage(animate = false) {
   if (FLOATER) return;
   const r = $('#page').getBoundingClientRect(), side = root.dataset.side;
   const pad = px('--float-pad'), bar = cfg.layout.sidebar_width + pad + px('--float-shadow');
-  const top = Math.max(0, px('--hotbar-h') - pad - 2); // tucks just under the hotbar
+  // Tucks just under the hotbar; on Windows starts below it, clear of the window buttons.
+  const top = S.win ? px('--hotbar-h') : Math.max(0, px('--hotbar-h') - pad - 2);
   const float = side === 'right' ? [innerWidth - bar, top, 0, 0] : side === 'left' ? [0, top, innerWidth - bar, 0]
     : [0, 0, 0, innerHeight - (px('--tabs-h') + px('--hotbar-h') + pad + px('--float-shadow'))];
   const sh = px('--float-shadow'), panel = side === 'right' ? [float[0] + sh, float[1] + pad, pad, pad]
