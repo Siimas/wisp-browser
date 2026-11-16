@@ -7,7 +7,7 @@
 //! places each tab's view on its tile, so both use the same arithmetic: share of
 //! (length - gaps), children separated by one gap.
 
-use crate::{App, Tab, native, place_tab};
+use crate::{App, Kind, Tab, native, place_tab};
 use serde::{Deserialize, Serialize};
 
 /// Most tiles one split holds: past four, pages get too small to use.
@@ -265,9 +265,9 @@ pub fn load(saved: Vec<Node>, id_of: impl Fn(u32) -> Option<u32>) -> Vec<Node> {
 // ---------------------------------------------------------------- the window's side
 
 /// Can this tab be a tile at all? Pinned tabs keep to their own box in the tab list,
-/// so they stay out of splits.
+/// so they stay out of splits, and so does the Settings tab (it has no page).
 fn can_tile(tab: &Tab) -> bool {
-    !tab.pinned
+    !tab.pinned && tab.kind == Kind::Web
 }
 
 impl App {
@@ -311,7 +311,10 @@ impl App {
 
     /// Give tab `id` its view if it has none yet (restored tabs load when first shown).
     pub(crate) fn ensure_webview(&mut self, id: u32) {
-        let Some(tab) = self.tab(id).filter(|t| t.webview.is_none()) else {
+        let Some(tab) = self
+            .tab(id)
+            .filter(|t| t.webview.is_none() && t.kind == Kind::Web)
+        else {
             return;
         };
         let (url, private) = (tab.url.clone(), tab.private);

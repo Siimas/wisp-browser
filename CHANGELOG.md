@@ -16,6 +16,10 @@ All notable changes to Wisp are recorded here. The format follows
   tile you click in gets the address bar, find and page hotkeys. A split reads
   as one row in the tab list, survives workspace switches and restarts, and
   "Remove from split" or "Unsplit tabs" in a tab's menu take it apart.
+- The settings button in the toolbar opens an app menu: new tabs and windows,
+  History, Bookmarks, Downloads, Find in page, zoom, and quick switches for ad
+  blocking, light or dark, and collapsing the bar, each with its hotkey.
+- Menus now float over the page on glass instead of hiding it while open.
 - Low-power mode (Settings > Behavior): solid surfaces instead of glass and no
   animation. Automatic, the default, turns it on in the system's power saving
   mode, on a low battery, or on a computer with 4 GB of memory or less or two
@@ -30,6 +34,8 @@ All notable changes to Wisp are recorded here. The format follows
 
 ### Changed
 
+- Settings opens as a tab of its own, which you can leave and come back to.
+  It is not restored after a restart.
 - The interface uses about 50 MB less memory: the background texture is drawn
   without a separate window-sized layer, and looks the same.
 - With the bar collapsed, the cursor is checked less often while it is far from
