@@ -159,6 +159,7 @@ Rules:
 | Menu or workspace editor | Scales from 96% at its anchor, `--d-2` |
 | Settings / Customize / History / Bookmarks sheet | Rises 6 px and fades in, `--d-3` |
 | Suggestions under the address bar | Scales from 96% at the bar, `--d-2`; the chosen row is raised (`--surface`, `--shadow-1`) |
+| Find bar opened (Mod+F) or closed | A row appears between the hotbar and the page: it drops 8 px and fades in over `--d-2` while the page card glides down to make room |
 | Address bar focus | Lifts to `--surface`, accent ring grows, `--d-2` |
 | Page loading | Spinner in the tab, sweep under the hotbar |
 | Hover, press | Background `--d-1`; press scale as above |
