@@ -6,6 +6,15 @@ All notable changes to Wisp are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- A media player at the bottom of the sidebar while another tab plays audio or
+  video: title and artist, previous, play/pause, next, mute, and a progress line
+  you can drag to seek. Click the title to go to the tab; close it to hide it
+  until playback starts again. In the top-bar layouts it is a button beside
+  "New tab" that opens the same player. A playing tab shows a speaker you can
+  click to mute it.
+
 ### Changed
 
 - Google is the default search engine and home page for new profiles. Existing
