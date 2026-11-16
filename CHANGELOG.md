@@ -10,6 +10,13 @@ Planned as 0.2.0.
 
 ### Added
 
+- Find in page (Cmd/Ctrl+F): a find bar above the page, with next and previous
+  match. On Windows it also shows how many matches there are.
+- Downloads: files are saved to the Downloads folder without replacing existing
+  ones, and a toolbar button lists this session's downloads, with Open and Show
+  in folder for finished files.
+- Right-clicking a link or image in a page offers to open it in a new tab, and
+  links in a private tab.
 - Automatic updates: installed copies look for a newer release shortly after
   start and every six hours, download it in the background, and install it as
   the app quits. The next launch opens the release notes in a tab. Every update

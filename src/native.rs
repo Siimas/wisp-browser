@@ -184,12 +184,10 @@ mod imp {
         static MENU_TARGET: Retained<MenuTarget> = unsafe { msg_send![MenuTarget::class(), new] };
     }
 
-    /// How long after "Open Link in Private Tab" a tab opened by that page is private.
-    /// WebKit does not tell us which link the menu was for; it opens the link as a
-    /// new-window request a moment later, and this is how that request is recognized.
-    /// ponytail: while it lasts, a popup the page opens by itself is private too
-    /// (harmless), and a link taking longer than this to arrive would open as a normal
-    /// tab. Upgrade path: WebKit's (private) context-menu element info.
+    /// How long a choice of "Open Link in Private Tab" waits for its link. WebKit does
+    /// not tell us which link the menu was for; it opens the link as a new-window
+    /// request a moment later, and the first such request from that page is taken to
+    /// be it (see `take_private`).
     const PRIVATE_PICK_LASTS: Duration = Duration::from_secs(1);
 
     define_class!(
@@ -275,7 +273,7 @@ mod imp {
     }
 
     /// Adjust the right-click menu of pages. `_pick` is unused here: the menu's items
-    /// reach the app as ordinary new-window requests (see `wants_private`).
+    /// reach the app as ordinary new-window requests (see `take_private`).
     pub fn page_menu(webview: &WebView, _pick: impl Fn(String, bool) + 'static) {
         static ONCE: std::sync::Once = std::sync::Once::new();
         let view = webview.webview();
@@ -299,12 +297,23 @@ mod imp {
         });
     }
 
-    /// True when the user just chose "Open Link in Private Tab" in this page's menu.
-    pub fn wants_private(webview: &WebView) -> bool {
+    /// A page asked for a new window: is this the link the user just chose "Open Link
+    /// in Private Tab" for? The choice is used up by the first request from that page,
+    /// so it never makes a second, unrelated tab private.
+    /// ponytail: what remains is a race. A page that opens a popup by itself in the
+    /// instant between the click and WebKit delivering the link takes the choice: the
+    /// popup opens private and the link as a normal tab. The page cannot see the click,
+    /// so it would have to be opening popups constantly. Upgrade path: WebKit's
+    /// (private) context-menu element info, which names the link.
+    pub fn take_private(webview: &WebView) -> bool {
         let view = Retained::as_ptr(&webview.webview()) as usize;
-        PRIVATE_PICK
-            .get()
-            .is_some_and(|(v, at)| v == view && at.elapsed() < PRIVATE_PICK_LASTS)
+        match PRIVATE_PICK.get() {
+            Some((v, at)) if v == view => {
+                PRIVATE_PICK.set(None);
+                at.elapsed() < PRIVATE_PICK_LASTS
+            }
+            _ => false,
+        }
     }
 }
 
@@ -463,7 +472,7 @@ mod imp {
     }
 
     /// Private tabs are asked for through `page_menu`'s callback here.
-    pub fn wants_private(_webview: &WebView) -> bool {
+    pub fn take_private(_webview: &WebView) -> bool {
         false
     }
 }
@@ -486,7 +495,7 @@ mod imp {
     }
     pub fn find_stop(_webview: &WebView) {}
     pub fn page_menu(_webview: &WebView, _pick: impl Fn(String, bool)) {}
-    pub fn wants_private(_webview: &WebView) -> bool {
+    pub fn take_private(_webview: &WebView) -> bool {
         false
     }
 }
@@ -513,4 +522,4 @@ impl Glass {
 
 #[cfg(target_os = "macos")]
 pub use imp::Glass;
-pub use imp::{find, find_stop, page_menu, raise, round_corners, user_agent, wants_private};
+pub use imp::{find, find_stop, page_menu, raise, round_corners, take_private, user_agent};

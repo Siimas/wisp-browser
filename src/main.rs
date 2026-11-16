@@ -1350,10 +1350,15 @@ impl App {
                 let opener = self.tab(opener);
                 // Private if the opener is, or if the user just chose "Open Link in
                 // Private Tab" in its right-click menu (which the app itself observed).
-                let private = opener.is_some_and(|t| {
-                    t.private || t.webview.as_ref().is_some_and(native::wants_private)
-                });
-                self.new_tab(&url, private);
+                let picked = opener
+                    .and_then(|t| t.webview.as_ref())
+                    .is_some_and(native::take_private);
+                let private = picked || opener.is_some_and(|t| t.private);
+                // The address is the page's choice: web addresses only, so a page
+                // cannot have the app open a local file or a script address.
+                if url.starts_with("http://") || url.starts_with("https://") {
+                    self.new_tab(&url, private);
+                }
             }
             UserEvent::MenuTab(opener, url, private) => {
                 let web = url.starts_with("http://") || url.starts_with("https://");

@@ -241,15 +241,15 @@ mod tests {
         let dir = Path::new("/d");
         let none = |_: &Path| false;
         assert_eq!(unique_path(dir, "a.pdf", none), dir.join("a.pdf"));
-        let taken = |p: &Path| ["/d/a.pdf", "/d/a (1).pdf"].contains(&p.to_str().unwrap());
+        let taken = |p: &Path| p == dir.join("a.pdf") || p == dir.join("a (1).pdf");
         assert_eq!(unique_path(dir, "a.pdf", taken), dir.join("a (2).pdf"));
-        let taken = |p: &Path| p == Path::new("/d/x.tar.gz") || p == Path::new("/d/noext");
+        let taken = |p: &Path| p == dir.join("x.tar.gz") || p == dir.join("noext");
         assert_eq!(
             unique_path(dir, "x.tar.gz", taken),
             dir.join("x (1).tar.gz")
         );
         assert_eq!(unique_path(dir, "noext", taken), dir.join("noext (1)"));
-        let taken = |p: &Path| p == Path::new("/d/.env");
+        let taken = |p: &Path| p == dir.join(".env");
         assert_eq!(unique_path(dir, ".env", taken), dir.join(".env (1)"));
         // a hostile name stays inside the folder
         assert_eq!(
