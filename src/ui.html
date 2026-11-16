@@ -1925,13 +1925,15 @@ $('#ted-dial').onkeydown = e => { const step = { ArrowUp: 10, ArrowRight: 10, Ar
 $('#cz-done').onclick = () => setCustomizing(false);
 $('#cz-reset').onclick = () => { cfg.layout.areas = structuredClone(DEFAULT_AREAS); areasKey = ''; renderAreas(); renderDynamic(); save(); };
 
-// Empty parts of the bar behave like a title bar: drag to move, double-click to expand,
-// right-click for layout options.
+// Empty parts of the bar behave like a title bar: drag to move, right-click for layout
+// options. A double-click expands the window from the hotbar, and opens a new tab (at
+// the end of the list) from the empty space around the tabs, in a sidebar or a tab row.
 const EMPTY = '#hotbar, #sidebar, #tabs, #pins, .area, .spacer';
 addEventListener('mousedown', e => {
   if (!$('#pop').hidden && !e.target.closest('#pop')) closePop();
   if (customizing || e.button !== 0 || !e.target.matches(EMPTY)) return;
-  post({ cmd: e.detail === 2 ? 'maximize' : 'drag' });
+  if (e.detail !== 2) return post({ cmd: 'drag' });
+  if (e.target.closest('#sidebar')) act('new_tab'); else post({ cmd: 'maximize' });
 });
 addEventListener('contextmenu', e => {
   if (e.target.matches('input, textarea')) return;
