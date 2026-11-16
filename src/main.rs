@@ -12,6 +12,7 @@ mod adblock;
 mod config;
 #[cfg(all(target_os = "macos", debug_assertions))]
 mod debug_shot;
+mod filters; // adblock: filter lists
 mod native;
 mod page_tools;
 mod store;
@@ -133,6 +134,8 @@ enum Msg {
     SaveSettings {
         config: Box<Config>,
     },
+    /// adblock: Settings > Ad blocking > Update now.
+    AdblockUpdate,
     // Page tools (see page_tools.rs).
     /// Search the page: a new query, or the next/previous match of the same one.
     Find {
@@ -381,7 +384,7 @@ fn build_ui(
                 .any(|p| url.starts_with(p))
         })
         .build_as_child(window)?;
-    adblock::attach(&webview); // it loads site icons; hold it to the same block list
+    adblock::attach(&webview, ""); // it loads site icons; hold it to the same block list
     Ok(webview)
 }
 
@@ -514,6 +517,7 @@ impl App {
             "glass": self.glass.is_some(),
             "version": env!("CARGO_PKG_VERSION"),
             "downloads": self.downloads.borrow().json(),
+            "adblock": adblock::status(),
             "update": {
                 "supported": update::supported(),
                 "ready": self.update.as_ref().map(|u| u.version.as_str()),
@@ -590,7 +594,7 @@ impl App {
         let (builder, p5) = (self.with_downloads(builder), self.proxy.clone());
         match builder.build_as_child(&self.window) {
             Ok(webview) => {
-                adblock::attach(&webview);
+                adblock::attach(&webview, url);
                 native::page_menu(&webview, move |url, private| {
                     let _ = p5.send_event(UserEvent::MenuTab(id, url, private));
                 });
@@ -1133,7 +1137,7 @@ impl App {
 
     fn recompile_adblock(&self) {
         let proxy = self.proxy.clone();
-        adblock::compile(adblock::configure(&self.cfg.adblock), move || {
+        adblock::configure(&self.cfg.adblock, move || {
             let _ = proxy.send_event(UserEvent::AdblockReady);
         });
     }
@@ -1347,6 +1351,7 @@ impl App {
                     }
                 }
                 Msg::SaveSettings { config } => self.apply_config(*config),
+                Msg::AdblockUpdate => adblock::update_now(),
                 Msg::Find { query, back } => self.find(query, back),
                 Msg::FindClose => self.find_close(),
                 Msg::Download { id, op } => self.download_op(id, &op),
@@ -1369,6 +1374,13 @@ impl App {
             UserEvent::Load(id, started, url) => {
                 if started && self.find_last.as_ref().is_some_and(|f| f.0 == id) {
                     self.find_last = None; // a new page: the next search starts over
+                }
+                // adblock: a page of a site with blocking turned off (or back on).
+                if let Some(w) = self.tab(id).and_then(|t| t.webview.as_ref())
+                    && started
+                    && adblock::attach(w, &url)
+                {
+                    let _ = w.reload();
                 }
                 if let Some(tab) = self.tab_mut(id) {
                     tab.loading = started;
@@ -1420,12 +1432,21 @@ impl App {
                 self.sync();
             }
             UserEvent::AdblockReady => {
-                if adblock::REATTACH_AFTER_COMPILE {
-                    let pages = self.tabs.iter().filter_map(|t| t.webview.as_ref());
-                    pages.chain(self.uis()).for_each(adblock::attach);
+                // adblock: new rules, a list fetched, or a site switched on or off.
+                for tab in &self.tabs {
+                    if let Some(w) = &tab.webview
+                        && adblock::attach(w, &tab.url)
+                    {
+                        let _ = w.reload();
+                    }
+                }
+                for w in self.uis() {
+                    adblock::attach(w, "");
                 }
                 if !self.started {
                     self.start();
+                } else {
+                    self.sync();
                 }
             }
         }

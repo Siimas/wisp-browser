@@ -3410,10 +3410,12 @@ version = "0.2.0"
 dependencies = [
  "block2",
  "cargo-packager-updater",
+ "dispatch2",
  "muda",
  "objc2",
  "objc2-foundation",
  "objc2-web-kit",
+ "reqwest",
  "serde",
  "serde_json",
  "tao",

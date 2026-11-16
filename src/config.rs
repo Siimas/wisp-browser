@@ -149,6 +149,10 @@ pub struct Behavior {
 pub struct Adblock {
     pub enabled: bool,
     pub extra_hosts: Vec<String>,
+    /// Filter lists in use, by id (see `adblock::LISTS`).
+    pub lists: Vec<String>,
+    /// Sites (host names) where blocking is turned off from the shield button.
+    pub off_sites: Vec<String>,
 }
 
 /// A named group of tabs the user creates ("Work", "Shopping", ...).
@@ -211,6 +215,8 @@ impl Default for Adblock {
         Self {
             enabled: true,
             extra_hosts: Vec::new(),
+            lists: vec!["easylist".into(), "easyprivacy".into()],
+            off_sites: Vec::new(),
         }
     }
 }
