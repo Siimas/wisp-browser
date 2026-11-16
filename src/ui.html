@@ -168,8 +168,11 @@ i.dot { display: block; width: 8px; height: 8px; border-radius: 50%; background:
 :root[data-hotbar-empty]:not([data-customizing]) #hotbar { height: var(--gap); }
 #progress { position: absolute; left: var(--gap); right: var(--gap); bottom: 1px; height: 2px; border-radius: 2px; overflow: hidden; opacity: 0; transition: opacity var(--d-2); }
 #progress.on { opacity: 1; }
-#progress::after { content: ""; position: absolute; height: 100%; width: 30%; border-radius: 2px; background: var(--accent); animation: sweep 1.1s var(--ease-move) infinite; }
-@keyframes sweep { from { left: -30%; } to { left: 100%; } }
+/* Runs only while a page is loading: an endless animation on a hidden element still
+   costs CPU. It moves with transform, which the compositor handles without layout. */
+#progress::after { content: ""; position: absolute; left: 0; height: 100%; width: 30%; border-radius: 2px; background: var(--accent); transform: translateX(-100%); }
+#progress.on::after { animation: sweep 1.1s var(--ease-move) infinite; }
+@keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(334%); } }
 
 /* ================= SIDEBAR (a column) / TAB ROW (top-bar layouts) ================= */
 #sidebar { display: flex; min-width: 0; min-height: 0; }
