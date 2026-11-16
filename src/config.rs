@@ -143,6 +143,10 @@ pub struct Behavior {
     pub auto_update: bool,
     /// Record visited pages. Off: nothing new is recorded (what is there stays until cleared).
     pub keep_history: bool,
+    /// Unload a background tab not looked at for this many minutes; 0 = never.
+    pub unload_after: u32,
+    /// Pinned tabs may be unloaded too (by default they stay loaded).
+    pub unload_pinned: bool,
     /// Settings shows every setting; off, only the simple ones.
     pub advanced_settings: bool,
     /// Low-power mode: one of `LOW_POWER` ("auto" decides from the system, see main.rs).
@@ -207,6 +211,8 @@ impl Default for Behavior {
             default_zoom: 1.0,
             auto_update: true,
             keep_history: true,
+            unload_after: 30,
+            unload_pinned: false,
             advanced_settings: false,
             low_power: "auto".into(),
         }
@@ -273,6 +279,7 @@ impl Config {
             self.hotkeys.entry(action).or_insert(combo);
         }
         self.behavior.default_zoom = clamp_zoom(self.behavior.default_zoom);
+        self.behavior.unload_after = self.behavior.unload_after.min(24 * 60);
         if !LOW_POWER.contains(&self.behavior.low_power.as_str()) {
             self.behavior.low_power = LOW_POWER[0].into();
         }

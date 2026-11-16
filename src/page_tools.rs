@@ -22,6 +22,8 @@ enum State {
 
 struct Download {
     id: u32,
+    /// The tab whose page started it.
+    tab: u32,
     url: String,
     path: PathBuf,
     state: State,
@@ -59,9 +61,17 @@ fn unique_path(dir: &Path, name: &str, taken: impl Fn(&Path) -> bool) -> PathBuf
 }
 
 impl Downloads {
+    /// A download started by tab `tab` is in progress. That tab is not unloaded
+    /// then: the engine may tie a download to the page that started it.
+    pub fn running_in(&self, tab: u32) -> bool {
+        self.items
+            .iter()
+            .any(|d| d.tab == tab && d.state == State::Active)
+    }
+
     /// A download of `url` is starting. `suggested` is where the web engine would put
     /// it; only its last part, the file name, is believed (the server has a say in it).
-    fn start(&mut self, url: &str, suggested: &Path) -> PathBuf {
+    fn start(&mut self, tab: u32, url: &str, suggested: &Path) -> PathBuf {
         let home = std::env::home_dir().unwrap_or_default();
         // The folder is ours to choose. On Windows the Downloads folder can be moved,
         // and WebView2 itself (not the page) says where it is; elsewhere it is fixed.
@@ -70,11 +80,11 @@ impl Downloads {
             _ => home.join("Downloads"),
         };
         let name = suggested.file_name().and_then(|n| n.to_str());
-        self.start_in(&dir, url, name.unwrap_or("download"))
+        self.start_in(tab, &dir, url, name.unwrap_or("download"))
     }
 
     /// The download goes into `dir`, under a name no file or running download has.
-    fn start_in(&mut self, dir: &Path, url: &str, name: &str) -> PathBuf {
+    fn start_in(&mut self, tab: u32, dir: &Path, url: &str, name: &str) -> PathBuf {
         let _ = std::fs::create_dir_all(dir);
         let path = unique_path(dir, name, |p| {
             p.exists() || self.items.iter().any(|d| d.path == p)
@@ -82,6 +92,7 @@ impl Downloads {
         self.next_id += 1;
         self.items.push(Download {
             id: self.next_id,
+            tab,
             url: url.to_string(),
             path: path.clone(),
             state: State::Active,
@@ -151,13 +162,17 @@ fn open_file(path: &Path, reveal: bool) {
 // ---------------------------------------------------------------- the app's side
 
 impl App {
-    /// Give a tab's webview its downloads handling.
-    pub(crate) fn with_downloads<'a>(&self, builder: WebViewBuilder<'a>) -> WebViewBuilder<'a> {
+    /// Give the webview of tab `tab` its downloads handling.
+    pub(crate) fn with_downloads<'a>(
+        &self,
+        builder: WebViewBuilder<'a>,
+        tab: u32,
+    ) -> WebViewBuilder<'a> {
         let (list, list2) = (self.downloads.clone(), self.downloads.clone());
         let (p1, p2) = (self.proxy.clone(), self.proxy.clone());
         builder
             .with_download_started_handler(move |url, path| {
-                *path = list.borrow_mut().start(&url, path);
+                *path = list.borrow_mut().start(tab, &url, path);
                 let _ = p1.send_event(UserEvent::Downloads);
                 true
             })
@@ -271,10 +286,12 @@ mod tests {
         let url = "https://files.example.com/report.pdf";
         // Two downloads of the same file while one copy is on disk: neither has
         // written anything yet, and still each gets its own name.
-        let first = list.start_in(&dir, url, "report.pdf");
-        let second = list.start_in(&dir, url, "../report.pdf");
+        let first = list.start_in(1, &dir, url, "report.pdf");
+        let second = list.start_in(1, &dir, url, "../report.pdf");
         assert_eq!(first, dir.join("report (1).pdf"));
         assert_eq!(second, dir.join("report (2).pdf"));
+        // Only the tab that started a download is kept loaded for it.
+        assert!(list.running_in(1) && !list.running_in(2));
         assert_eq!(
             std::fs::read_to_string(dir.join("report.pdf")).unwrap(),
             "already here"
@@ -283,6 +300,7 @@ mod tests {
         // They end in the order they started; a stray "finished" changes nothing.
         list.finish(url, true);
         list.finish(url, false);
+        assert!(!list.running_in(1));
         list.finish(url, true);
         list.finish("https://other.example.com/x", true);
         let shown = list.json();

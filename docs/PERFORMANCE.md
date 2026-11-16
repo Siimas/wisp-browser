@@ -186,6 +186,17 @@ Not like-for-like:
 - **User agents differ.** Wisp presents itself as Safari 26.5.2, so sites may serve it different pages from the ones Chrome and Zen get.
 - **Wisp's 14 web-content processes for ten tabs** are one for the interface, one per site, and a few WebKit keeps for cross-site navigations; all counted.
 
+#### Ten real sites with tab unloading
+
+Measured after the report above, on the tab-unloading change (#33): the same ten sites, loaded the same way (`window.open` from a local page), in the release `Wisp.app` with the same process accounting. Unloading was set to 1 minute so the sample at 150 s falls after the nine background tabs became due. Other Wisp benchmarks ran on the machine at the same time, so treat single runs with some care.
+
+| | Footprint, three runs | Page processes |
+|---|---|---|
+| Wisp, all ten loaded (unloading off) | 2,357 / 2,303 / 2,422 MB | 12-14 WebContent |
+| Wisp, nine unloaded | **497 / 519 / 516 MB** | 2 WebContent |
+
+Coming back to an unloaded tab, from selecting it to the page's `load` event (warm disk cache): Wikipedia 3.6 s, GitHub 0.80, Hacker News 0.28, BBC 0.40, The Guardian 0.21, Stack Overflow 0.68, MDN 0.16, The New York Times 1.15, Amazon 1.45, YouTube 0.99 s; median about 0.74 s. Pages draw before `load`. The default is 30 minutes, and tabs making sound, in a call, with typed text, private or pinned stay loaded (see `unload_due` and `keeps` in `src/main.rs`). The feature table below describes the code before this change.
+
 ### Idle cost
 
 CPU of the whole tree over one minute with the ten tabs open and nothing happening, right after the memory sample.
