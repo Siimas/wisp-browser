@@ -475,6 +475,7 @@ mod platform {
     use std::{
         cell::{Cell, RefCell},
         collections::{BTreeMap, HashMap},
+        rc::Rc,
         time::Instant,
     };
     use wry::{WebView, WebViewExtMacOS};
@@ -482,6 +483,8 @@ mod platform {
     /// Rules per compiled list. WebKit takes up to 150,000 on current systems; smaller
     /// parts compile faster and stay under the 50,000 that older versions allowed.
     const PART: usize = 50_000;
+    /// Parts kept per list: 200,000 rules, over three times EasyList's.
+    const MAX_PARTS: usize = 4;
 
     thread_local! {
         /// Compiled rule lists in use, by name (`<source>.<part>`).
@@ -546,29 +549,27 @@ mod platform {
             want.chain(missing.iter().map(|s| (s.name.clone(), usize::MAX)))
                 .collect(),
         );
-        let Some(store) = store() else {
-            return notify();
-        };
+        // Look the parts up by name, all at once; listing the store first would cost a
+        // round trip at every launch. Unused versions are deleted afterwards.
         hold(1);
-        let handler = RcBlock::new(move |ids: *mut NSArray<NSString>| {
+        for s in missing {
+            let found = Rc::new(Cell::new((0, 0)));
+            for i in 0..MAX_PARTS {
+                look_up(format!("{}.{i}", s.name), s.clone(), found.clone());
+            }
+        }
+        release(1);
+        let handler = RcBlock::new(|ids: *mut NSArray<NSString>| {
             // SAFETY: WebKit passes an array of strings, or null.
             let ids: Vec<String> = unsafe { ids.as_ref() }
                 .map(|a| a.iter().map(|s| s.to_string()).collect())
                 .unwrap_or_default();
             remove_unused(&ids);
-            for s in &missing {
-                let parts: Vec<&String> = ids.iter().filter(|i| source_of(i) == s.name).collect();
-                if parts.is_empty() {
-                    build(s.clone());
-                } else {
-                    set_parts(&s.name, parts.len());
-                    parts.into_iter().for_each(|id| look_up(id, s.clone()));
-                }
-            }
-            release(1);
         });
-        // SAFETY: main thread, live store; the block lives until WebKit calls it.
-        unsafe { store.getAvailableContentRuleListIdentifiers(Some(&handler)) };
+        if let Some(store) = store() {
+            // SAFETY: main thread, live store; the block lives until WebKit calls it.
+            unsafe { store.getAvailableContentRuleListIdentifiers(Some(&handler)) };
+        }
     }
 
     /// The first `notify` (when tabs start) waits for work held here: looking up
@@ -590,31 +591,28 @@ mod platform {
         });
     }
 
-    fn look_up(id: &str, source: Source) {
+    /// Look up one stored part. `found` counts (answers, hits) over the source's
+    /// `MAX_PARTS` lookups: with all answered, no hit means it was never compiled
+    /// (or was stored by another WebKit version), so it is built now.
+    fn look_up(id: String, source: Source, found: Rc<Cell<(usize, usize)>>) {
         let Some(store) = store() else { return };
-        let id_owned = id.to_string();
         hold(1);
+        let name = NSString::from_str(&id);
         let handler = RcBlock::new(move |list: *mut WKContentRuleList, _: *mut NSError| {
+            let (answers, hits) = found.get();
             // SAFETY: WebKit hands us a valid rule list or null.
-            match unsafe { Retained::retain(list) } {
-                Some(list) => loaded(&id_owned, list),
-                // Stored by another WebKit version, say: build it again (once).
-                None => {
-                    let building = WANT.with_borrow(|w| w.get(&source.name) == Some(&usize::MAX));
-                    if !building {
-                        set_parts(&source.name, usize::MAX);
-                        build(source.clone());
-                    }
-                }
+            let hit = unsafe { Retained::retain(list) }.map(|list| loaded(&id, list));
+            found.set((answers + 1, hits + hit.is_some() as usize));
+            match found.get() {
+                (MAX_PARTS, 0) => build(source.clone()),
+                (MAX_PARTS, _) => set_parts(&source.name, 0),
+                _ => {}
             }
             release(1);
         });
         // SAFETY: as above.
         unsafe {
-            store.lookUpContentRuleListForIdentifier_completionHandler(
-                Some(&NSString::from_str(id)),
-                Some(&handler),
-            )
+            store.lookUpContentRuleListForIdentifier_completionHandler(Some(&name), Some(&handler))
         };
     }
 
@@ -626,7 +624,8 @@ mod platform {
         }
         std::thread::spawn(move || {
             let started = Instant::now();
-            let parts = filters::to_webkit(s.rules().into_iter(), PART);
+            let mut parts = filters::webkit::to_webkit(s.rules().into_iter(), PART);
+            parts.truncate(MAX_PARTS);
             let took = started.elapsed();
             DispatchQueue::main().exec_async(move || {
                 eprintln!(

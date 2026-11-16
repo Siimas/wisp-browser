@@ -5,9 +5,6 @@
 //! not fully understand is skipped rather than guessed at, nothing here panics on any
 //! input, and the only things a rule can do are block a request or hide elements.
 
-use serde_json::{Value, json};
-use std::collections::BTreeMap;
-
 // Request types, as bits.
 pub const SCRIPT: u16 = 1;
 pub const IMAGE: u16 = 1 << 1;
@@ -308,175 +305,184 @@ fn pure_host(n: &Net) -> Option<&str> {
 
 // ---------------------------------------------------------------- WebKit (macOS)
 
-/// The rule's address pattern in WebKit's regular-expression subset (no alternation:
-/// "a separator or the end" is written as an optional group running to the end).
-fn url_filter(n: &Net) -> String {
-    let mut s = String::with_capacity(n.body.len() + 24);
-    if n.host {
-        // The host, or a part of it after a dot or a user name (`user@host`).
-        s.push_str("^[^:]+://+([^/]*[.@])?");
-    } else if n.start {
-        s.push('^');
-    }
-    let last = n.body.len().wrapping_sub(1);
-    for (i, c) in n.body.chars().enumerate() {
-        match c {
-            '*' => s.push_str(".*"),
-            // After a host name the next character is always `/` or `:` (a port).
-            '^' if i == last && !n.end && pure_host(n).is_some() => s.push_str("[/:]"),
-            '^' if i == last && !n.end => s.push_str("([^a-zA-Z0-9_.%-].*)?$"),
-            '^' => s.push_str("[^a-zA-Z0-9_.%-]"),
-            '.' | '?' | '+' | '(' | ')' | '[' | ']' | '{' | '}' | '\\' | '$' | '|' => {
-                s.push('\\');
-                s.push(c);
-            }
-            c => s.push(c),
+#[cfg(any(target_os = "macos", test))]
+pub mod webkit {
+    use super::*;
+    use serde_json::{Value, json};
+    use std::collections::BTreeMap;
+
+    /// The rule's address pattern in WebKit's regular-expression subset (no alternation:
+    /// "a separator or the end" is written as an optional group running to the end).
+    fn url_filter(n: &Net) -> String {
+        let mut s = String::with_capacity(n.body.len() + 24);
+        if n.host {
+            // The host, or a part of it after a dot or a user name (`user@host`).
+            s.push_str("^[^:]+://+([^/]*[.@])?");
+        } else if n.start {
+            s.push('^');
         }
-    }
-    if n.end {
-        s.push('$');
-    }
-    if s.is_empty() {
-        s.push_str(".*");
-    }
-    s
-}
-
-fn wk_types(types: u16) -> Vec<&'static str> {
-    let map: [(u16, &[&str]); 9] = [
-        (SCRIPT, &["script"]),
-        (IMAGE, &["image", "svg-document"]),
-        (STYLE, &["style-sheet"]),
-        (FONT, &["font"]),
-        (MEDIA, &["media"]),
-        (XHR | SOCKET | OTHER, &["raw"]),
-        (FRAME | DOC, &["document"]),
-        (PING, &["ping"]),
-        (POPUP, &["popup"]),
-    ];
-    let mut out: Vec<&str> = Vec::new();
-    for (bits, names) in map {
-        if types & bits != 0 {
-            out.extend(names);
-        }
-    }
-    out
-}
-
-fn star(domains: &[String]) -> Value {
-    domains.iter().map(|d| format!("*{d}")).collect()
-}
-
-/// WebKit takes either sites to apply to or sites to skip, not both: the first wins.
-fn add_domains(trigger: &mut Value, on: &[String], off: &[String]) {
-    if !on.is_empty() {
-        trigger["if-domain"] = star(on);
-    } else if !off.is_empty() {
-        trigger["unless-domain"] = star(off);
-    }
-}
-
-fn net_rule(n: &Net) -> Option<Value> {
-    if n.allow && n.types & DOC != 0 {
-        // `@@||site^$document`: no blocking at all on that site's pages.
-        let site = pure_host(n)?;
-        let trigger = json!({"url-filter": ".*", "if-domain": [format!("*{site}")]});
-        return Some(json!({"trigger": trigger, "action": {"type": "ignore-previous-rules"}}));
-    }
-    let mut trigger = json!({"url-filter": url_filter(n)});
-    if n.case {
-        trigger["url-filter-is-case-sensitive"] = json!(true);
-    }
-    // A plain `||host^` also stops frames and popups from that host; a path pattern
-    // without types must not stop the page you opened (ABP semantics).
-    let types = match n.types {
-        0 if pure_host(n).is_some() => 0,
-        0 => DEFAULT & !FRAME,
-        t => t,
-    };
-    if types != 0 {
-        trigger["resource-type"] = json!(wk_types(types));
-    }
-    if let Some(third) = n.party {
-        trigger["load-type"] = json!([if third { "third-party" } else { "first-party" }]);
-    }
-    add_domains(&mut trigger, &n.domains, &n.not_domains);
-    let action = if n.allow {
-        "ignore-previous-rules"
-    } else {
-        "block"
-    };
-    Some(json!({"trigger": trigger, "action": {"type": action}}))
-}
-
-fn hide_rules(selectors: &[String], on: &[String], off: &[String], out: &mut Vec<Value>) {
-    // Selectors go in groups (fewer rules); WebKit skips a rule whose selector it
-    // cannot parse, so the groups are kept small to lose little to one bad entry.
-    for group in selectors.chunks(64) {
-        let mut trigger = json!({"url-filter": ".*"});
-        add_domains(&mut trigger, on, off);
-        let action = json!({"type": "css-display-none", "selector": group.join(", ")});
-        out.push(json!({"trigger": trigger, "action": action}));
-    }
-}
-
-/// Convert a list into WebKit content-rule JSON, split into parts of at most `max`
-/// rules (WebKit's limit per rule list). Each part ends with the list's exceptions,
-/// since an exception only reaches rules before it in the same rule list.
-pub fn to_webkit(rules: impl Iterator<Item = Rule>, max: usize) -> Vec<String> {
-    let (mut generic, mut blocks, mut allows) = (Vec::new(), Vec::new(), Vec::new());
-    let mut specific: BTreeMap<(Vec<String>, Vec<String>), Vec<String>> = BTreeMap::new();
-    let mut hide_off: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    let mut hidden = std::collections::HashSet::new();
-    for rule in rules {
-        match rule {
-            Rule::Net(n) => {
-                if let Some(r) = net_rule(&n) {
-                    (if n.allow { &mut allows } else { &mut blocks }).push(r);
+        let last = n.body.len().wrapping_sub(1);
+        for (i, c) in n.body.chars().enumerate() {
+            match c {
+                '*' => s.push_str(".*"),
+                // After a host name the next character is always `/` or `:` (a port).
+                '^' if i == last && !n.end && pure_host(n).is_some() => s.push_str("[/:]"),
+                '^' if i == last && !n.end => s.push_str("([^a-zA-Z0-9_.%-].*)?$"),
+                '^' => s.push_str("[^a-zA-Z0-9_.%-]"),
+                '.' | '?' | '+' | '(' | ')' | '[' | ']' | '{' | '}' | '\\' | '$' | '|' => {
+                    s.push('\\');
+                    s.push(c);
                 }
+                c => s.push(c),
             }
-            Rule::Hide(h) if h.allow => hide_off.entry(h.selector).or_default().extend(h.domains),
-            Rule::Hide(h) if h.domains.is_empty() && h.not_domains.is_empty() => {
-                if hidden.insert(h.selector.clone()) {
-                    generic.push(h.selector);
+        }
+        if n.end {
+            s.push('$');
+        }
+        if s.is_empty() {
+            s.push_str(".*");
+        }
+        s
+    }
+
+    fn wk_types(types: u16) -> Vec<&'static str> {
+        let map: [(u16, &[&str]); 9] = [
+            (SCRIPT, &["script"]),
+            (IMAGE, &["image", "svg-document"]),
+            (STYLE, &["style-sheet"]),
+            (FONT, &["font"]),
+            (MEDIA, &["media"]),
+            (XHR | SOCKET | OTHER, &["raw"]),
+            (FRAME | DOC, &["document"]),
+            (PING, &["ping"]),
+            (POPUP, &["popup"]),
+        ];
+        let mut out: Vec<&str> = Vec::new();
+        for (bits, names) in map {
+            if types & bits != 0 {
+                out.extend(names);
+            }
+        }
+        out
+    }
+
+    fn star(domains: &[String]) -> Value {
+        domains.iter().map(|d| format!("*{d}")).collect()
+    }
+
+    /// WebKit takes either sites to apply to or sites to skip, not both: the first wins.
+    fn add_domains(trigger: &mut Value, on: &[String], off: &[String]) {
+        if !on.is_empty() {
+            trigger["if-domain"] = star(on);
+        } else if !off.is_empty() {
+            trigger["unless-domain"] = star(off);
+        }
+    }
+
+    fn net_rule(n: &Net) -> Option<Value> {
+        if n.allow && n.types & DOC != 0 {
+            // `@@||site^$document`: no blocking at all on that site's pages.
+            let site = pure_host(n)?;
+            let trigger = json!({"url-filter": ".*", "if-domain": [format!("*{site}")]});
+            return Some(json!({"trigger": trigger, "action": {"type": "ignore-previous-rules"}}));
+        }
+        let mut trigger = json!({"url-filter": url_filter(n)});
+        if n.case {
+            trigger["url-filter-is-case-sensitive"] = json!(true);
+        }
+        // A plain `||host^` also stops frames and popups from that host; a path pattern
+        // without types must not stop the page you opened (ABP semantics).
+        let types = match n.types {
+            0 if pure_host(n).is_some() => 0,
+            0 => DEFAULT & !FRAME,
+            t => t,
+        };
+        if types != 0 {
+            trigger["resource-type"] = json!(wk_types(types));
+        }
+        if let Some(third) = n.party {
+            trigger["load-type"] = json!([if third { "third-party" } else { "first-party" }]);
+        }
+        add_domains(&mut trigger, &n.domains, &n.not_domains);
+        let action = if n.allow {
+            "ignore-previous-rules"
+        } else {
+            "block"
+        };
+        Some(json!({"trigger": trigger, "action": {"type": action}}))
+    }
+
+    fn hide_rules(selectors: &[String], on: &[String], off: &[String], out: &mut Vec<Value>) {
+        // Selectors go in groups (fewer rules); WebKit skips a rule whose selector it
+        // cannot parse, so the groups are kept small to lose little to one bad entry.
+        for group in selectors.chunks(64) {
+            let mut trigger = json!({"url-filter": ".*"});
+            add_domains(&mut trigger, on, off);
+            let action = json!({"type": "css-display-none", "selector": group.join(", ")});
+            out.push(json!({"trigger": trigger, "action": action}));
+        }
+    }
+
+    /// Convert a list into WebKit content-rule JSON, split into parts of at most `max`
+    /// rules (WebKit's limit per rule list). Each part ends with the list's exceptions,
+    /// since an exception only reaches rules before it in the same rule list.
+    pub fn to_webkit(rules: impl Iterator<Item = Rule>, max: usize) -> Vec<String> {
+        let (mut generic, mut blocks, mut allows) = (Vec::new(), Vec::new(), Vec::new());
+        let mut specific: BTreeMap<(Vec<String>, Vec<String>), Vec<String>> = BTreeMap::new();
+        let mut hide_off: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        let mut hidden = std::collections::HashSet::new();
+        for rule in rules {
+            match rule {
+                Rule::Net(n) => {
+                    if let Some(r) = net_rule(&n) {
+                        (if n.allow { &mut allows } else { &mut blocks }).push(r);
+                    }
                 }
+                Rule::Hide(h) if h.allow => {
+                    hide_off.entry(h.selector).or_default().extend(h.domains)
+                }
+                Rule::Hide(h) if h.domains.is_empty() && h.not_domains.is_empty() => {
+                    if hidden.insert(h.selector.clone()) {
+                        generic.push(h.selector);
+                    }
+                }
+                Rule::Hide(h) => specific
+                    .entry((h.domains, h.not_domains))
+                    .or_default()
+                    .push(h.selector),
             }
-            Rule::Hide(h) => specific
-                .entry((h.domains, h.not_domains))
-                .or_default()
-                .push(h.selector),
         }
-    }
-    // A generic rule with exceptions applies everywhere except the excepted sites;
-    // an exception with no sites turns the rule off.
-    let mut everywhere = Vec::new();
-    for sel in generic {
-        match hide_off.get(&sel) {
-            None => everywhere.push(sel),
-            Some(sites) if sites.is_empty() => {}
-            Some(sites) => specific
-                .entry((Vec::new(), sites.clone()))
-                .or_default()
-                .push(sel),
+        // A generic rule with exceptions applies everywhere except the excepted sites;
+        // an exception with no sites turns the rule off.
+        let mut everywhere = Vec::new();
+        for sel in generic {
+            match hide_off.get(&sel) {
+                None => everywhere.push(sel),
+                Some(sites) if sites.is_empty() => {}
+                Some(sites) => specific
+                    .entry((Vec::new(), sites.clone()))
+                    .or_default()
+                    .push(sel),
+            }
         }
+        // Generic hiding first: WebKit turns leading `.*` hide rules into one style sheet
+        // shared by every page, instead of matching them per page.
+        let mut head = Vec::new();
+        hide_rules(&everywhere, &[], &[], &mut head);
+        head.append(&mut blocks);
+        for ((on, off), sels) in &specific {
+            hide_rules(sels, on, off, &mut head);
+        }
+        allows.truncate(max / 2); // a list that is mostly exceptions is not a block list
+        let room = max - allows.len();
+        head.chunks(room)
+            .map(|part| {
+                let mut v = part.to_vec();
+                v.extend(allows.iter().cloned());
+                Value::Array(v).to_string()
+            })
+            .collect()
     }
-    // Generic hiding first: WebKit turns leading `.*` hide rules into one style sheet
-    // shared by every page, instead of matching them per page.
-    let mut head = Vec::new();
-    hide_rules(&everywhere, &[], &[], &mut head);
-    head.append(&mut blocks);
-    for ((on, off), sels) in &specific {
-        hide_rules(sels, on, off, &mut head);
-    }
-    allows.truncate(max / 2); // a list that is mostly exceptions is not a block list
-    let room = max - allows.len();
-    head.chunks(room)
-        .map(|part| {
-            let mut v = part.to_vec();
-            v.extend(allows.iter().cloned());
-            Value::Array(v).to_string()
-        })
-        .collect()
 }
 
 // ---------------------------------------------------------------- matcher (Windows)
@@ -747,7 +753,9 @@ pub mod matcher {
 #[cfg(test)]
 mod tests {
     use super::matcher::{Matcher, glob, site_of};
+    use super::webkit::to_webkit;
     use super::*;
+    use serde_json::{Value, json};
 
     fn net(line: &str) -> Net {
         match parse(line) {
@@ -1005,7 +1013,7 @@ fn real_lists() {
             .lines()
             .filter(|l| !l.is_empty() && !l.starts_with('!'))
             .count();
-        let parts = to_webkit(rules.into_iter(), 50_000);
+        let parts = webkit::to_webkit(rules.into_iter(), 50_000);
         let wk: usize = parts.iter().map(|p| p.matches("\"trigger\"").count()).sum();
         let bytes: usize = parts.iter().map(String::len).sum();
         println!(
