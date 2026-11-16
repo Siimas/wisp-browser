@@ -1274,12 +1274,13 @@ function divider(box, path, i, row, sizes) {
       a.style.flexGrow = now[i - 1]; b.style.flexGrow = now[i];
       frame ||= requestAnimationFrame(() => { frame = 0; send(false); }); // at most once a frame
     };
-    const up = () => {
-      d.removeEventListener('pointermove', move); d.removeEventListener('pointerup', up);
+    const ends = ['pointerup', 'pointercancel', 'lostpointercapture'];
+    const up = () => { // however it ends, once: the sizes are kept and the tiles redraw again
+      d.removeEventListener('pointermove', move); ends.forEach(t => d.removeEventListener(t, up));
       cancelAnimationFrame(frame); d.classList.remove('dragging'); divDrag = false;
       send(true);
     };
-    d.addEventListener('pointermove', move); d.addEventListener('pointerup', up);
+    d.addEventListener('pointermove', move); ends.forEach(t => d.addEventListener(t, up));
   };
   d.ondblclick = () => post({ cmd: 'split_sizes', path, sizes: sizes.map(() => 1), animate: true, done: true });
   return d;
@@ -1521,7 +1522,7 @@ function renderSettings() {
 
 const pretty = combo => combo.split('+').map(p =>
   p === 'Mod' ? (S.mac ? '⌘' : 'Ctrl') : p.replace(/^Bracket(Left|Right)$/, (_, s) => s === 'Left' ? '[' : ']')
-    .replace('Equal', '=').replace('Minus', '-').replace('Comma', ',').replace(/^Arrow/, '')).join(' + ');
+    .replace('Backslash', '\\').replace('Equal', '=').replace('Minus', '-').replace('Comma', ',').replace(/^Arrow/, '')).join(' + ');
 function renderHotkeys() {
   $('#hotkeys').replaceChildren(...Object.entries(cfg.hotkeys).map(([action, combo]) => {
     const b = el('button', { className: 'key', textContent: pretty(combo), title: 'Click, then press the new keys' });

@@ -228,7 +228,8 @@ pub fn default_hotkeys() -> BTreeMap<String, String> {
         ("private_window", "Mod+Shift+N".to_string()),
         ("close_tab", "Mod+W".to_string()),
         ("reopen_tab", "Mod+Shift+T".to_string()),
-        ("split_view", "Mod+Shift+S".to_string()),
+        // Not Mod+Shift+S: web apps use it (Save As, strikethrough).
+        ("split_view", "Mod+Shift+Backslash".to_string()),
         ("next_tab", format!("{ctrl}+Tab")),
         ("prev_tab", format!("{ctrl}+Shift+Tab")),
         ("next_workspace", "Mod+Alt+ArrowRight".to_string()),
@@ -373,7 +374,9 @@ fn write(name: &str, contents: &str) {
 pub struct Session {
     pub workspace: u32,
     pub tabs: Vec<SavedTab>,
-    /// Split view groups, naming tabs by their place in `tabs`.
+    /// Split view groups, naming tabs by their place in `tabs`. An entry that does not
+    /// read (a hand edit) is skipped rather than costing the whole session.
+    #[serde(deserialize_with = "lenient")]
     pub splits: Vec<crate::split::Node>,
 }
 
@@ -398,6 +401,18 @@ pub fn updated_from() -> Option<String> {
     before
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty() && v != now)
+}
+
+fn lenient<'de, D, T>(d: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    let items = Vec::<serde_json::Value>::deserialize(d).unwrap_or_default();
+    Ok(items
+        .into_iter()
+        .filter_map(|v| serde_json::from_value(v).ok())
+        .collect())
 }
 
 pub fn load_session() -> Session {
@@ -471,6 +486,17 @@ mod tests {
             "https://s.test/?q=javascript%3Aalert%281%29"
         );
         assert_eq!(r("  "), "about:blank");
+    }
+
+    #[test]
+    fn a_bad_split_does_not_cost_the_session() {
+        let json = r#"{"workspace":1,"tabs":[{"url":"https://a.test"},{"url":"https://b.test"}],
+            "splits":[{"row":true,"sizes":[1,1],"kids":[-1,1]},{"row":false,"sizes":[1,1],"kids":[0,1]}]}"#;
+        let s: Session = serde_json::from_str(json).unwrap();
+        assert_eq!(s.tabs.len(), 2);
+        assert_eq!(s.splits.len(), 1); // the one with a negative tab is skipped
+        let s: Session = serde_json::from_str(r#"{"tabs":[{"url":"x"}],"splits":7}"#).unwrap();
+        assert!(s.tabs.len() == 1 && s.splits.is_empty());
     }
 
     #[test]

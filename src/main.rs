@@ -705,7 +705,6 @@ impl App {
         let Some(ws) = self.tab(id).map(|t| t.workspace) else {
             return;
         };
-        let before: Vec<u32> = self.targets().iter().map(|f| f.0).collect();
         self.preview = None;
         self.workspace = ws;
         self.active = Some(id);
@@ -713,7 +712,11 @@ impl App {
         // Every tile of its split is shown with it.
         let shown: Vec<u32> = self.targets().iter().map(|f| f.0).collect();
         shown.iter().for_each(|&t| self.ensure_webview(t));
-        if !shown.iter().any(|t| before.contains(t)) {
+        let from = self.glide.as_ref().map(|g| &g.0);
+        if !shown
+            .iter()
+            .any(|t| from.is_some_and(|f| f.contains_key(t)))
+        {
             self.glide = None; // another tab entirely: no glide from the old one
         }
         self.settings_open = false;
@@ -1465,6 +1468,9 @@ impl App {
             UserEvent::PageKey(id, combo) => {
                 // A page can only have keyboard focus while it is the one on screen, so a
                 // key from a background tab, or while the interface covers the page, is forged.
+                // A tile focused by a click the app did not hear of (inside a frame) is
+                // taken on if the system confirms it holds the focus.
+                self.page_focus(id);
                 if self.active == Some(id) && self.page_visible() {
                     self.handle(UserEvent::Ui(Msg::Key { combo }));
                 }
