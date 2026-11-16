@@ -11,6 +11,15 @@
         ],
         "createdAt": "2026-11-16T18:48:22.630Z",
         "reason": "agent: the clips are intentional (sheets fill the page area; the progress sweep is clipped to its track); menus render in #pop at body level, outside any clip"
+      },
+      {
+        "rule": "marquee",
+        "value": "*",
+        "files": [
+          "src/ui.html"
+        ],
+        "createdAt": "2026-11-16T22:03:29.076Z",
+        "reason": "agent: the flagged motion is the indeterminate loading bar (#progress), which runs only while a page loads and carries no content; nothing in the interface auto-scrolls text"
       }
     ]
   }

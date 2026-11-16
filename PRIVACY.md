@@ -34,7 +34,7 @@ Private tabs show a fixed icon and make no such request.
   what any browser shows them. A tab that was unloaded to save memory (Settings >
   Behavior) loads its page again from the site when you come back to it.
 - **Searches**: text typed in the address bar that is not an address is sent to
-  your search engine when you press Enter (DuckDuckGo by default, changeable in
+  your search engine when you press Enter (Google by default, changeable in
   Settings). Nothing is sent while you type: the suggestions under the address
   bar come only from your own open tabs, bookmarks and history
   (`src/store.rs`), never from a search engine.
@@ -42,7 +42,7 @@ Private tabs show a fixed icon and make no such request.
   the site that offers it. Wisp makes no request of its own for it.
 - **Find in page** searches the page on your computer. What you type in the find
   bar is not sent anywhere and is not kept.
-- **Home page**: a new window opens your home page (DuckDuckGo by default).
+- **Home page**: a new window opens your home page (Google by default).
 - **Release notes and licenses**: after an update, and when you press View next
   to Open-source licenses, Wisp opens a page on github.com in a tab.
 
