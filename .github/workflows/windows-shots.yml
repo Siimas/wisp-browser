@@ -1,0 +1,27 @@
+name: Windows screenshots
+
+# Pictures of Wisp running on Windows, for checking how it looks there without a
+# Windows machine: run it from the Actions tab (or `gh workflow run windows-shots.yml
+# --ref <branch>`), then `gh run download <run id>`. Cases: .github/windows-shots.ps1.
+# Not a required check.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shots:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --locked
+      - run: .github/windows-shots.ps1
+        shell: pwsh
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: windows-shots
+          path: shots
