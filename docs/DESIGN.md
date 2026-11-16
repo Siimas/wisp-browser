@@ -337,6 +337,18 @@ Items (address bar, buttons, workspace switcher, spacers) live in three areas
 the user can rearrange in Customize mode: `hotbar`, `before_tabs`,
 `after_tabs`. The tab list itself is fixed between the last two.
 
+## Direct manipulation before settings
+
+If something can be adjusted by touching the thing itself, intuitively and with
+no effort, it does not get a setting. The sidebar's width is set by dragging
+its inner edge (double-click resets it); tabs are reordered by dragging them;
+toolbar items are placed by dragging in Customize; a workspace is edited from
+its own icon. Settings are for choices that have no natural place to grab:
+defaults, privacy, power.
+
+Before adding a row to Settings, ask where the user would reach for it. If the
+answer is a place on screen, build it there instead.
+
 ## Adding a component
 
 1. Build it from tokens. If a value is missing, add a token, not a number.

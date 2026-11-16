@@ -35,7 +35,7 @@ jobs:
       tag: ${{ steps.read.outputs.tag }}
       release: ${{ steps.read.outputs.release }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: read
         run: |
           version=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
@@ -82,7 +82,7 @@ jobs:
       SIGN_UPDATES: ${{ secrets.WISP_UPDATE_PRIVATE_KEY != '' && vars.WISP_UPDATE_PUBKEY != '' }}
       PACKAGE: cargo packager --release --formats ${{ matrix.formats }} --target ${{ matrix.target }} --binaries-dir target/${{ matrix.target }}/release --out-dir dist
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
@@ -100,18 +100,38 @@ jobs:
         if: env.SIGN_UPDATES != 'true'
         shell: bash
         run: $PACKAGE
-      - name: Name the macOS update archive after its version and architecture
-        if: runner.os == 'macOS' && env.SIGN_UPDATES == 'true'
+      # People read these names on the release page: say the system in plain words.
+      # The .dmg and Setup.exe are what a person downloads; the .update.tar.gz files
+      # and the .sig files are what installed copies fetch to update themselves.
+      - name: Give the files clear names
+        shell: bash
         run: |
-          mv dist/Wisp.app.tar.gz "dist/Wisp_${TAG#v}_${{ matrix.arch }}.app.tar.gz"
-          mv dist/Wisp.app.tar.gz.sig "dist/Wisp_${TAG#v}_${{ matrix.arch }}.app.tar.gz.sig"
-      - uses: actions/upload-artifact@v4
+          cd dist
+          case "${{ matrix.target }}" in
+            aarch64-apple-darwin) name="Wisp-${TAG#v}-macOS-Apple-Silicon" ;;
+            x86_64-apple-darwin) name="Wisp-${TAG#v}-macOS-Intel" ;;
+            x86_64-pc-windows-msvc) name="Wisp-${TAG#v}-Windows-x64" ;;
+          esac
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            # (the signature first: afterwards "*.dmg" would match two files)
+            if ls ./*.dmg.sig > /dev/null 2>&1; then mv ./*.dmg.sig "$name.dmg.sig"; fi
+            mv ./*.dmg "$name.dmg"
+            if [ -f Wisp.app.tar.gz ]; then
+              mv Wisp.app.tar.gz "$name.update.tar.gz"
+              mv Wisp.app.tar.gz.sig "$name.update.tar.gz.sig"
+            fi
+          else
+            if ls ./*-setup.exe.sig > /dev/null 2>&1; then mv ./*-setup.exe.sig "$name-Setup.exe.sig"; fi
+            mv ./*-setup.exe "$name-Setup.exe"
+          fi
+          ls -l
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.target }}
           path: |
             dist/*.dmg
             dist/*.exe
-            dist/*.app.tar.gz
+            dist/*.update.tar.gz
             dist/*.sig
           if-no-files-found: error
 
@@ -124,14 +144,29 @@ jobs:
     env:
       TAG: ${{ needs.version.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
       - run: python3 .github/latest-json.py dist "$TAG" "$GITHUB_REPOSITORY"
       # Creating the release also creates the tag, at the commit that was built.
       # (It refuses to run if a release for this tag already exists.)
-      - run: gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Wisp $TAG" --generate-notes
+      - name: Say which file is for whom
+        run: |
+          v="${TAG#v}"
+          {
+            echo "## Download"
+            echo
+            echo "| Your computer | File |"
+            echo "| --- | --- |"
+            echo "| Mac with Apple Silicon (M1 or later) | \`Wisp-$v-macOS-Apple-Silicon.dmg\` |"
+            echo "| Mac with an Intel processor | \`Wisp-$v-macOS-Intel.dmg\` |"
+            echo "| Windows 10 or 11 | \`Wisp-$v-Windows-x64-Setup.exe\` |"
+            echo
+            echo "The other files (\`.update.tar.gz\`, \`.sig\`, \`latest.json\`) are what installed copies of Wisp use to update themselves: each \`.sig\` is the signature Wisp checks before installing the file it is named after. You do not need to download them."
+            echo
+          } > notes.md
+      - run: gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Wisp $TAG" --notes-file notes.md --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
