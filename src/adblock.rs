@@ -31,7 +31,7 @@ pub fn configure(cfg: &Adblock) -> Option<Vec<String>> {
     list
 }
 
-fn host_of(url: &str) -> Option<&str> {
+pub fn host_of(url: &str) -> Option<&str> {
     let rest = url.split_once("://")?.1;
     let authority = rest.split(['/', '\\', '?', '#']).next()?;
     let host = authority.rsplit('@').next()?;
