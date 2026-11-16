@@ -18,6 +18,9 @@ engine.
   mouse comes near that window edge
 - **Workspaces**: named groups of tabs with their own icon and color; the
   window takes a tint of the active one, and tabs can be moved between them
+- **Tab basics**: drag tabs to reorder them, pin the ones you keep (compact
+  icon tiles above the list), duplicate a tab, close the others, and reopen
+  the tab you just closed
 - **Private tabs and private windows**: nothing from them is kept on disk or
   saved in the session
 - **Theme editor**: presets, up to three background colors as a gradient,
@@ -65,6 +68,7 @@ match the key it was built with. Copies you build yourself do not update.
 | Action | Keys |
 | --- | --- |
 | New tab / close tab | `Mod+T` / `Mod+W` |
+| Reopen closed tab | `Mod+Shift+T` |
 | New private tab / private window | `Mod+Shift+P` / `Mod+Shift+N` |
 | Next / previous tab | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
 | Next / previous workspace | `Mod+Alt+Right` / `Mod+Alt+Left` |

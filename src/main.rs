@@ -75,6 +75,21 @@ enum Msg {
     SelectWorkspace {
         id: u32,
     },
+    /// Drag to reorder: put a tab at `index` among its workspace's tabs.
+    ReorderTab {
+        id: u32,
+        index: usize,
+    },
+    PinTab {
+        id: u32,
+        pinned: bool,
+    },
+    DuplicateTab {
+        id: u32,
+    },
+    CloseOtherTabs {
+        id: u32,
+    },
     /// Where things go, as distances from each window edge (left, top, right, bottom):
     /// the gap left for the page, and the area a floating bar would take.
     PageRect {
@@ -132,12 +147,74 @@ struct Tab {
     id: u32,
     workspace: u32,
     private: bool,
+    /// Pinned tabs are listed before the others of their workspace.
+    pinned: bool,
     /// `None` until the tab is first shown: restored tabs cost nothing until used.
     webview: Option<WebView>,
     title: String,
     url: String,
     loading: bool,
     zoom: f64,
+}
+
+/// A closed tab, remembered for this run so it can be reopened.
+struct Closed {
+    url: String,
+    title: String,
+    workspace: u32,
+    pinned: bool,
+    /// Its place among its workspace's tabs.
+    index: usize,
+}
+
+/// How many closed tabs are remembered.
+const CLOSED_MAX: usize = 25;
+
+/// Put tab `id` at `index` among the tabs of its workspace (the order the interface
+/// lists them in), without leaving its group: pinned tabs first, then the rest.
+fn place_tab(tabs: &mut Vec<Tab>, id: u32, index: usize) {
+    let Some(pos) = tabs.iter().position(|t| t.id == id) else {
+        return;
+    };
+    let tab = tabs.remove(pos);
+    // Where the workspace's other tabs sit in the whole list.
+    let peers: Vec<usize> = (0..tabs.len())
+        .filter(|&i| tabs[i].workspace == tab.workspace)
+        .collect();
+    let pinned = peers.iter().filter(|&&i| tabs[i].pinned).count();
+    let index = if tab.pinned {
+        index.min(pinned)
+    } else {
+        index.clamp(pinned, peers.len())
+    };
+    let at = match peers.get(index) {
+        Some(&next) => next,
+        None => peers.last().map_or(pos.min(tabs.len()), |&last| last + 1),
+    };
+    tabs.insert(at, tab);
+}
+
+/// Pinned tabs before the others, the order otherwise kept; so it holds in every workspace.
+fn group_pinned(tabs: &mut [Tab]) {
+    tabs.sort_by_key(|t| !t.pinned);
+}
+
+/// Remember a tab that was just closed from place `index` of its workspace. Private
+/// tabs and blank ones are not remembered.
+fn remember_closed(closed: &mut Vec<Closed>, tab: &Tab, index: usize) {
+    if tab.private || !tab.url.starts_with("http") {
+        return;
+    }
+    if closed.len() == CLOSED_MAX {
+        closed.remove(0);
+    }
+    closed.push(Closed {
+        url: tab.url.clone(),
+        title: tab.title.clone(),
+        workspace: tab.workspace,
+        pinned: tab.pinned,
+        index,
+    });
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -193,6 +270,8 @@ struct App {
     workspace: u32,
     /// workspace id -> the tab last used there.
     last_active: HashMap<u32, u32>,
+    /// Tabs closed during this run, most recent last.
+    closed: Vec<Closed>,
     next_id: u32,
     /// Gap the interface leaves for the page: left, top, right, bottom. `None` until
     /// the interface has laid itself out once.
@@ -382,8 +461,8 @@ impl App {
             .iter()
             .filter(|t| t.workspace == self.workspace)
             .map(|t| {
-                json!({"id": t.id, "title": t.title, "url": t.url,
-                       "loading": t.loading, "private": t.private})
+                json!({"id": t.id, "title": t.title, "url": t.url, "loading": t.loading,
+                       "private": t.private, "pinned": t.pinned})
             })
             .collect();
         let state = json!({
@@ -502,6 +581,7 @@ impl App {
             id,
             workspace: self.workspace,
             private: private || self.private_window,
+            pinned: false,
             webview: None,
             title: String::new(),
             url: url.to_string(),
@@ -553,16 +633,144 @@ impl App {
     }
 
     fn close_tab(&mut self, id: u32) {
-        let Some(pos) = self.tabs.iter().position(|t| t.id == id) else {
+        let Some((ws, pos)) = self.remove_tab(id) else {
             return;
         };
-        let ws = self.tabs.remove(pos).workspace;
         if self.active == Some(id) {
             self.show_neighbor(ws, pos);
         } else {
             self.sync();
         }
         self.save_session();
+    }
+
+    // ---- tab basics: reorder, pin, duplicate, close others, reopen ----
+
+    /// Take a tab out of the list, remembering it for `reopen_tab`. Gives its
+    /// workspace and the list position it had.
+    fn remove_tab(&mut self, id: u32) -> Option<(u32, usize)> {
+        let pos = self.tabs.iter().position(|t| t.id == id)?;
+        let ws = self.tabs[pos].workspace;
+        let index = self.tabs[..pos]
+            .iter()
+            .filter(|t| t.workspace == ws)
+            .count();
+        let tab = self.tabs.remove(pos);
+        remember_closed(&mut self.closed, &tab, index);
+        Some((ws, pos))
+    }
+
+    /// Add a tab that is not loaded yet at `index` of its workspace, and show it.
+    fn insert_tab(&mut self, mut tab: Tab, index: usize) {
+        tab.id = self.next_id;
+        self.next_id += 1;
+        let id = tab.id;
+        self.tabs.push(tab);
+        place_tab(&mut self.tabs, id, index);
+        self.select(id);
+        self.save_session();
+    }
+
+    fn reorder_tab(&mut self, id: u32, index: usize) {
+        place_tab(&mut self.tabs, id, index);
+        self.sync();
+        self.save_session();
+    }
+
+    fn set_pinned(&mut self, id: u32, pinned: bool) {
+        // A private tab is never saved, so pinning it would promise something untrue.
+        let Some(tab) = self.tab_mut(id).filter(|t| !t.private) else {
+            return;
+        };
+        tab.pinned = pinned;
+        // To the border between the groups: last of the pinned, or first of the rest.
+        self.reorder_tab(id, if pinned { usize::MAX } else { 0 });
+    }
+
+    /// A copy of the tab, right after it (or first among the unpinned, for a pinned one).
+    fn duplicate_tab(&mut self, id: u32) {
+        let Some(pos) = self.tabs.iter().position(|t| t.id == id) else {
+            return;
+        };
+        let src = &self.tabs[pos];
+        let after = self.tabs[..=pos]
+            .iter()
+            .filter(|t| t.workspace == src.workspace)
+            .count();
+        let copy = Tab {
+            id: 0, // given by `insert_tab`
+            workspace: src.workspace,
+            private: src.private,
+            pinned: false,
+            webview: None,
+            title: src.title.clone(),
+            url: src.url.clone(),
+            loading: false,
+            zoom: self.cfg.behavior.default_zoom,
+        };
+        self.insert_tab(copy, after);
+    }
+
+    /// Close every unpinned tab of `keep`'s workspace except `keep` itself.
+    fn close_other_tabs(&mut self, keep: u32) {
+        let Some(ws) = self.tab(keep).map(|t| t.workspace) else {
+            return;
+        };
+        let others: Vec<u32> = self
+            .tabs
+            .iter()
+            .filter(|t| t.workspace == ws && t.id != keep && !t.pinned)
+            .map(|t| t.id)
+            .collect();
+        for id in others {
+            self.remove_tab(id);
+        }
+        if self.active.is_some_and(|id| self.tab(id).is_none()) {
+            self.select(keep);
+        } else {
+            self.sync();
+        }
+        self.save_session();
+    }
+
+    /// Bring back the tab closed last, in the workspace and place it had.
+    fn reopen_tab(&mut self) {
+        let Some(closed) = self.closed.pop() else {
+            return;
+        };
+        let known = self.cfg.workspaces.iter().any(|w| w.id == closed.workspace);
+        let tab = Tab {
+            id: 0, // given by `insert_tab`
+            workspace: if known {
+                closed.workspace
+            } else {
+                self.workspace
+            },
+            private: false,
+            pinned: closed.pinned,
+            webview: None,
+            title: closed.title,
+            url: closed.url,
+            loading: false,
+            zoom: self.cfg.behavior.default_zoom,
+        };
+        self.insert_tab(tab, closed.index);
+    }
+
+    /// The close-tab hotkey: a pinned tab stays open, the hotkey only steps off it.
+    fn close_active(&mut self) {
+        let Some((id, pinned, ws)) = self.active_tab().map(|t| (t.id, t.pinned, t.workspace))
+        else {
+            return;
+        };
+        if !pinned {
+            return self.close_tab(id);
+        }
+        let unpinned = |t: &&Tab| t.workspace == ws && !t.pinned;
+        match self.tabs.iter().find(unpinned).map(|t| t.id) {
+            Some(next) => self.select(next),
+            None => self.open_blank(),
+        }
     }
 
     fn move_tab(&mut self, id: u32, to: u32) {
@@ -585,6 +793,7 @@ impl App {
         } else {
             self.sync();
         }
+        group_pinned(&mut self.tabs); // it joins its group in the new workspace
         self.save_session();
     }
 
@@ -755,12 +964,8 @@ impl App {
             }
             "focus_url" => return self.focus_url(),
             "settings" => return self.set_settings_open(!self.settings_open),
-            "close_tab" => {
-                if let Some(id) = self.active {
-                    self.close_tab(id);
-                }
-                return;
-            }
+            "close_tab" => return self.close_active(),
+            "reopen_tab" => return self.reopen_tab(),
             _ => {}
         }
         let home = self.cfg.behavior.homepage.clone();
@@ -871,6 +1076,7 @@ impl App {
                     tab.workspace = ids[0];
                 }
             }
+            group_pinned(&mut self.tabs);
             if !ids.contains(&self.workspace) {
                 self.select_workspace(ids[0]);
             }
@@ -918,6 +1124,7 @@ impl App {
                 id,
                 workspace,
                 private: false,
+                pinned: saved.pinned,
                 webview: None,
                 title: saved.title,
                 url: saved.url,
@@ -925,6 +1132,7 @@ impl App {
                 zoom: self.cfg.behavior.default_zoom,
             });
         }
+        group_pinned(&mut self.tabs);
         if self.tabs.is_empty() {
             let home = self.cfg.behavior.homepage.clone();
             self.new_tab(&home, false);
@@ -954,6 +1162,7 @@ impl App {
                 url: t.url.clone(),
                 title: t.title.clone(),
                 workspace: t.workspace,
+                pinned: t.pinned,
                 active: self.last_active.get(&t.workspace) == Some(&t.id),
             })
             .collect();
@@ -988,6 +1197,10 @@ impl App {
                 Msg::CloseTab { id } => self.close_tab(id),
                 Msg::MoveTab { id, workspace } => self.move_tab(id, workspace),
                 Msg::SelectWorkspace { id } => self.select_workspace(id),
+                Msg::ReorderTab { id, index } => self.reorder_tab(id, index),
+                Msg::PinTab { id, pinned } => self.set_pinned(id, pinned),
+                Msg::DuplicateTab { id } => self.duplicate_tab(id),
+                Msg::CloseOtherTabs { id } => self.close_other_tabs(id),
                 Msg::PageRect {
                     page,
                     float,
@@ -1190,6 +1403,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         active: None,
         workspace: 0,
         last_active: HashMap::new(),
+        closed: Vec::new(),
         next_id: 1,
         insets: None,
         glide: None,
@@ -1290,7 +1504,119 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{App, Side, Zone, ease_out, zone};
+    use super::{
+        App, CLOSED_MAX, Side, Tab, Zone, ease_out, group_pinned, place_tab, remember_closed, zone,
+    };
+
+    fn tab(id: u32, workspace: u32, pinned: bool) -> Tab {
+        Tab {
+            id,
+            workspace,
+            private: false,
+            pinned,
+            webview: None,
+            title: String::new(),
+            url: format!("https://example.com/{id}"),
+            loading: false,
+            zoom: 1.0,
+        }
+    }
+
+    /// The tabs of one workspace, in the order the interface lists them.
+    fn order(tabs: &[Tab], workspace: u32) -> Vec<u32> {
+        let of = tabs.iter().filter(|t| t.workspace == workspace);
+        of.map(|t| t.id).collect()
+    }
+
+    #[test]
+    fn a_tab_moves_within_its_workspace_only() {
+        // Workspace 1 holds 1, 2, 3; workspace 2 holds 10, 11, interleaved in the list.
+        let mut tabs = vec![
+            tab(1, 1, false),
+            tab(10, 2, false),
+            tab(2, 1, false),
+            tab(11, 2, false),
+            tab(3, 1, false),
+        ];
+        place_tab(&mut tabs, 1, 2); // first to last
+        assert_eq!(order(&tabs, 1), [2, 3, 1]);
+        place_tab(&mut tabs, 1, 0); // and back
+        assert_eq!(order(&tabs, 1), [1, 2, 3]);
+        place_tab(&mut tabs, 3, 1);
+        assert_eq!(order(&tabs, 1), [1, 3, 2]);
+        place_tab(&mut tabs, 2, 99); // past the end = last
+        assert_eq!(order(&tabs, 1), [1, 3, 2]);
+        place_tab(&mut tabs, 99, 0); // unknown tab: nothing happens
+        assert_eq!(order(&tabs, 1), [1, 3, 2]);
+        assert_eq!(order(&tabs, 2), [10, 11]); // the other workspace never changed
+        // A workspace's only tab stays put wherever it is sent.
+        let mut tabs = vec![tab(1, 1, false), tab(10, 2, false), tab(2, 1, false)];
+        place_tab(&mut tabs, 10, 7);
+        assert_eq!(order(&tabs, 2), [10]);
+        assert_eq!(order(&tabs, 1), [1, 2]);
+    }
+
+    #[test]
+    fn pinned_and_unpinned_tabs_keep_to_their_groups() {
+        let mut tabs = vec![
+            tab(1, 1, true),
+            tab(2, 1, true),
+            tab(3, 1, false),
+            tab(4, 1, false),
+            tab(5, 1, false),
+        ];
+        place_tab(&mut tabs, 1, 4); // a pinned tab cannot pass the unpinned ones
+        assert_eq!(order(&tabs, 1), [2, 1, 3, 4, 5]);
+        place_tab(&mut tabs, 5, 0); // an unpinned tab cannot pass the pinned ones
+        assert_eq!(order(&tabs, 1), [2, 1, 5, 3, 4]);
+        // Pinning: last of the pinned. Unpinning: first of the rest.
+        tabs[4].pinned = true; // tab 4
+        place_tab(&mut tabs, 4, usize::MAX);
+        assert_eq!(order(&tabs, 1), [2, 1, 4, 5, 3]);
+        tabs[0].pinned = false; // tab 2
+        place_tab(&mut tabs, 2, 0);
+        assert_eq!(order(&tabs, 1), [1, 4, 2, 5, 3]);
+        assert!(tabs[..2].iter().all(|t| t.pinned) && tabs[2..].iter().all(|t| !t.pinned));
+
+        // A list out of order (a hand-edited session, a tab from another workspace).
+        let mut tabs = vec![tab(1, 1, false), tab(2, 2, true), tab(3, 1, true)];
+        group_pinned(&mut tabs);
+        assert_eq!(order(&tabs, 1), [3, 1]);
+        assert_eq!(order(&tabs, 2), [2]);
+    }
+
+    #[test]
+    fn closed_tabs_are_remembered_newest_last_up_to_a_limit() {
+        let mut closed = Vec::new();
+        let mut private = tab(1, 1, false);
+        private.private = true;
+        remember_closed(&mut closed, &private, 0);
+        let mut blank = tab(2, 1, false);
+        blank.url = "about:blank".into();
+        remember_closed(&mut closed, &blank, 0);
+        assert!(closed.is_empty()); // neither private tabs nor blank ones
+
+        for id in 0..CLOSED_MAX as u32 + 5 {
+            remember_closed(&mut closed, &tab(id, 3, id == 29), id as usize);
+        }
+        assert_eq!(closed.len(), CLOSED_MAX);
+        assert_eq!(closed[0].url, "https://example.com/5"); // the oldest five fell off
+        let last = closed.pop().unwrap();
+        assert_eq!(last.url, "https://example.com/29");
+        assert_eq!((last.workspace, last.index, last.pinned), (3, 29, true));
+
+        // Reopening puts it back where it was.
+        let mut tabs = vec![tab(1, 1, false), tab(2, 1, false), tab(3, 1, false)];
+        let mut closed = Vec::new();
+        remember_closed(&mut closed, &tabs.remove(1), 1);
+        let back = closed.pop().unwrap();
+        let mut reopened = tab(9, back.workspace, back.pinned);
+        reopened.url = back.url;
+        tabs.push(reopened);
+        place_tab(&mut tabs, 9, back.index);
+        assert_eq!(order(&tabs, 1), [1, 9, 3]);
+        assert_eq!(tabs[1].url, "https://example.com/2");
+    }
 
     #[test]
     fn cycling_wraps_and_survives_a_missing_current() {
