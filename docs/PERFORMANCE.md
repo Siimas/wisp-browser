@@ -33,7 +33,7 @@ The 80 MB increase is all in the two web-content processes (81 → 156 MB), and 
 - **Size.** Wisp is 250 to 300 times smaller to download than Zen or Chrome, and its app is under 2 MB. This is real, but only because the engine is the system's: the comparison is "Wisp + WebKit already on every Mac" against browsers that ship their own engine.
 - **Launch.** Wisp has a page loaded about 0.6 s sooner than Zen and about 0.1 s sooner than Chrome. Neither of those was a true cold start (see [Cold start](#cold-start)).
 - **Restored sessions.** Wisp does not load a restored tab until you open it. Ten restored tabs, with only the active one loaded, cost 281 MB. Zen does the same (`restore_on_demand`), so this is an advantage over Chrome's default, not over Zen.
-- **One tab.** With one simple page Wisp's whole tree is 188 MB, against 239 MB for Chrome and 716 MB for Zen. The Wisp process itself is only 22 MB; the rest is WebKit's helpers, counted in full.
+- **One tab.** With one simple page Wisp's whole tree is 188 MB, against 239 MB for Chrome and 716 MB for Zen. The Wisp process itself is only 22 MB; the rest is WebKit's helpers, counted in full. On `main` this is 268 MB, which is more than Chrome (see above).
 
 **Where Wisp loses**
 
