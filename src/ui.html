@@ -292,8 +292,8 @@ i.dot { display: block; width: 8px; height: 8px; border-radius: 50%; background:
 :root[data-lights=strip] { --cap-h: var(--strip); }
 #caption button { width: var(--cap-w); height: 100%; border-radius: 0; display: grid; place-items: center;
   font: 10px "Segoe Fluent Icons", "Segoe MDL2 Assets"; color: var(--fg); }
-#caption button:hover { background: color-mix(in srgb, var(--fg) 7%, transparent); }
-#caption button:active { background: color-mix(in srgb, var(--fg) 4%, transparent); color: color-mix(in srgb, var(--fg) 60%, transparent); transform: none; }
+#caption button:hover, #caption .max[data-state=hover] { background: color-mix(in srgb, var(--fg) 7%, transparent); }
+#caption button:active, #caption .max[data-state=press] { background: color-mix(in srgb, var(--fg) 4%, transparent); color: color-mix(in srgb, var(--fg) 60%, transparent); transform: none; }
 #caption .close:hover { background: #c42b1c; color: #fff; }
 #caption .close:active { background: #c42b1ce6; color: #ffffffb3; }
 :root[data-os=win]:not([data-max]):not([data-floater]) #rim { display: block; position: absolute; z-index: 6; top: 0; left: 0; right: 0; height: 5px; cursor: n-resize; }
@@ -727,6 +727,8 @@ let S = null, cfg = null, shownUrl = null, customizing = false, wasPeek = false,
 
 window.wisp = {
   state(s) { S = s; cfg = s.config; render(); },
+  // Windows: the system reports the pointer on the maximize button (see native::SnapButton).
+  snap(s) { $('#caption .max').dataset.state = s === 'click' ? 'hover' : s === 'leave' ? '' : s; },
   focusUrl() {
     const u = $('#url');
     if (u && u.getClientRects().length) { u.focus(); u.select(); }
@@ -1585,14 +1587,17 @@ function reportPage(animate = false) {
     : [0, 0, 0, innerHeight - (px('--tabs-h') + px('--hotbar-h') + pad + px('--float-shadow'))];
   const sh = px('--float-shadow'), panel = side === 'right' ? [float[0] + sh, float[1] + pad, pad, pad]
     : side === 'left' ? [pad, float[1] + pad, float[2] + sh, pad] : [pad, pad, pad, float[3] + sh];
-  // macOS window buttons: on the center line of the row they share (the tab row or the
-  // hotbar, or their own strip when a top bar is tucked away), at --gap + 5px from the left.
+  // The window buttons' box on the row they share (the tab row or the hotbar, or their own
+  // strip when a top bar is tucked away): macOS's at --gap + 5px from the left, centered
+  // on the row; Windows' (#caption) flush with the top-right corner.
   // `lights_peek`: where they go while a tucked-away top bar floats in, so they sit on its
   // tab row the same way.
-  const hidden = root.hasAttribute('data-hidden'), lx = px('--gap') + 5;
+  const hidden = root.hasAttribute('data-hidden');
+  const row = side === 'top' ? (hidden ? px('--strip') : px('--tabs-h')) : px('--hotbar-h');
+  const bw = S.win ? 3 * px('--cap-w') : 60, lx = S.win ? innerWidth - bw : px('--gap') + 5;
   const m = { cmd: 'page_rect', panel: panel.map(v => Math.max(0, v)), panel_radius: px('--radius') * 1.5 + px('--sp-1'), page: [r.left, r.top, innerWidth - r.right, innerHeight - r.bottom],
-    lights: [lx, (side === 'top' ? (hidden ? px('--strip') : px('--tabs-h')) : px('--hotbar-h')) / 2],
-    lights_peek: side === 'top' && hidden ? [pad + lx, pad + px('--tabs-h') / 2] : null,
+    lights: [lx, 0, bw, row],
+    lights_peek: side === 'top' && hidden ? [S.win ? lx - pad : lx + pad, pad, bw, px('--tabs-h')] : null,
     float: float.map(v => Math.max(0, v)), radius: parseFloat(getComputedStyle($('#page')).borderTopLeftRadius) || 0, animate };
   const key = JSON.stringify({ ...m, animate: 0 });
   if (key !== lastRect) { lastRect = key; post(m); }

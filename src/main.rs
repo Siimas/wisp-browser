@@ -111,13 +111,14 @@ enum Msg {
         panel: [f64; 4],
         #[serde(default)]
         panel_radius: f64,
-        /// macOS: where the window buttons go: x of the first one, and the vertical
-        /// center of the row they share with the bar.
+        /// Where the window buttons go (macOS's, or the ones the interface draws on
+        /// Windows): the box they take on the row they share with the bar, as left, top,
+        /// width, height.
         #[serde(default)]
-        lights: [f64; 2],
-        /// macOS: the same while a tucked-away top bar floats in, if they move then.
+        lights: [f64; 4],
+        /// The same while a tucked-away top bar floats in, if they move then.
         #[serde(default)]
-        lights_peek: Option<[f64; 2]>,
+        lights_peek: Option<[f64; 4]>,
         /// Glide to the new size (a layout change) instead of jumping.
         animate: bool,
     },
@@ -176,6 +177,10 @@ enum UserEvent {
     /// Chosen in the right-click menu of the page in tab `.0`: open this address in a
     /// (private, if `.2`) tab. Sent by the native menu only, never by the page.
     MenuTab(u32, String, bool),
+    /// Windows: the pointer on the maximize button, as the system reports it to
+    /// `native::SnapButton`: "hover", "press", "leave" or "click".
+    #[cfg(windows)]
+    Snap(&'static str),
 }
 
 struct Tab {
@@ -321,11 +326,14 @@ struct App {
     panel_radius: f64,
     /// Frosted glass shown behind the floating bar, where the platform has it.
     glass: Option<native::Glass>,
-    /// macOS: where the window buttons go, at rest and while the bar floats in.
-    lights: [f64; 2],
-    lights_peek: Option<[f64; 2]>,
-    /// macOS: inset of the window buttons, as last applied.
-    lights_at: [f64; 2],
+    /// Where the window buttons go, at rest and while the bar floats in.
+    lights: [f64; 4],
+    lights_peek: Option<[f64; 4]>,
+    /// Where they were last put.
+    lights_at: [f64; 4],
+    /// Windows: lies over the interface's maximize button so the system knows it is there.
+    #[cfg(windows)]
+    snap: Option<native::SnapButton>,
     settings_open: bool,
     /// A menu or sheet in the interface is using the page area.
     cover: bool,
@@ -894,7 +902,7 @@ impl App {
         }
     }
 
-    /// macOS: put the window buttons where the interface asked, for the bar as it is now.
+    /// Put the window buttons where the interface asked, for the bar as it is now.
     fn place_lights(&mut self) {
         let at = match self.lights_peek {
             Some(l) if self.peek => l,
@@ -910,8 +918,14 @@ impl App {
             // The library takes "extra title bar height", from which the buttons
             // end up 2px above the value given (measured on macOS 26).
             // ponytail: may sit 1-2px off on older systems; set frames directly if so.
-            let at = LogicalPosition::new(at[0], at[1] + 2.0);
+            let at = LogicalPosition::new(at[0], at[1] + at[3] / 2.0 + 2.0);
             self.window.set_traffic_light_inset(at);
+        }
+        // Windows: the interface draws them; the system is shown where maximize is.
+        #[cfg(windows)]
+        if let Some(snap) = &self.snap {
+            let w = at[2] / 3.0;
+            snap.place([at[0] + w, at[1], w, at[3]], self.window.scale_factor());
         }
     }
 
@@ -922,7 +936,6 @@ impl App {
             return;
         }
         self.peek = on;
-        self.place_lights();
         if on {
             self.ensure_floater();
             if let Some(f) = &self.floater {
@@ -937,6 +950,7 @@ impl App {
                 native::raise(f, &self.window);
             }
         }
+        self.place_lights(); // after the raise: on Windows it must stay above the floater
         self.sync(); // the floater slides in, or slides out and reports `FloaterDone`
     }
 
@@ -1441,6 +1455,14 @@ impl App {
                 }
                 self.sync();
             }
+            #[cfg(windows)]
+            UserEvent::Snap(what) => {
+                if what == "click" {
+                    self.window.set_maximized(!self.window.is_maximized());
+                }
+                let js = format!("window.wisp && wisp.snap('{what}')");
+                self.uis().for_each(|ui| drop(ui.evaluate_script(&js)));
+            }
             UserEvent::AdblockReady => {
                 if adblock::REATTACH_AFTER_COMPILE {
                     let pages = self.tabs.iter().filter_map(|t| t.webview.as_ref());
@@ -1552,9 +1574,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         panel_insets: [0.0; 4],
         panel_radius: 0.0,
         glass: native::Glass::new(),
-        lights: [0.0; 2],
+        lights: [0.0; 4],
         lights_peek: None,
-        lights_at: [0.0; 2],
+        lights_at: [0.0; 4],
+        #[cfg(windows)]
+        snap: None,
         settings_open: false,
         cover: false,
         peek: false,
@@ -1571,6 +1595,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         downloads: Default::default(),
         find_last: None,
     };
+    #[cfg(windows)]
+    {
+        let proxy = app.proxy.clone();
+        app.snap = native::SnapButton::new(&app.window, move |what| {
+            let _ = proxy.send_event(UserEvent::Snap(what));
+        });
+    }
     app.apply_theme();
     app.layout();
     app.recompile_adblock(); // tabs open once the block list is ready (AdblockReady)
