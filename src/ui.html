@@ -175,7 +175,14 @@ i.dot { display: block; width: 8px; height: 8px; border-radius: 50%; background:
 @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(334%); } }
 
 /* ================= SIDEBAR (a column) / TAB ROW (top-bar layouts) ================= */
-#sidebar { display: flex; min-width: 0; min-height: 0; }
+#sidebar { display: flex; min-width: 0; min-height: 0; position: relative; }
+/* Resize the sidebar by dragging its inner edge: no setting needed. */
+#grip { display: none; position: absolute; top: 0; bottom: 0; width: var(--gap); cursor: col-resize; z-index: 3; touch-action: none; }
+#grip::after { content: ""; position: absolute; top: var(--sp-2); bottom: var(--sp-2); left: calc(50% - 1px); width: 2px; border-radius: var(--r-full); background: var(--accent); opacity: 0; transition: opacity var(--d-1); }
+#grip:hover::after, #grip.dragging::after { opacity: .7; }
+:root[data-side=right]:not([data-floater]) #grip { display: block; left: 0; }
+:root[data-side=left]:not([data-floater]) #grip { display: block; right: 0; }
+:root[data-customizing] #grip { display: none; }
 .area { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); min-width: 0; }
 .area:empty { display: none; }
 #tabs { display: flex; gap: var(--sp-0); min-width: 0; min-height: 0; }
@@ -526,6 +533,7 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
 <div id="app">
   <header id="hotbar"><div class="area" data-area="hotbar"></div><div id="progress"></div></header>
   <aside id="sidebar">
+    <div id="grip" title="Drag to resize; double-click to reset" aria-hidden="true"></div>
     <div class="area" data-area="before_tabs"></div>
     <button id="ws-head" title="Edit this workspace"><span class="dot"></span><span class="name"></span></button>
     <div id="badge"></div>
@@ -573,7 +581,6 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
           <input type="checkbox" data-k="layout.hover_expand"></label>
         <label class="row"><span>Reveal distance<small>How close to the edge the mouse must come: further right reveals the bar sooner</small></span>
           <input type="range" min="4" max="160" step="4" data-k="layout.hover_zone"></label>
-        <label class="row">Sidebar width <input type="range" min="150" max="420" step="10" data-k="layout.sidebar_width"></label>
       </div>
 
       <h2>Workspaces</h2>
@@ -1708,6 +1715,23 @@ addEventListener('keydown', e => {
   else if (S.settings && !e.target.closest('input, textarea, select')) act('settings');
 });
 dark.addEventListener('change', () => cfg && applyLook());
+// Sidebar width: drag the sidebar's inner edge; double-click it for the default.
+$('#grip').onpointerdown = e => {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  const grip = e.currentTarget, right = root.dataset.side === 'right';
+  grip.setPointerCapture(e.pointerId);
+  grip.classList.add('dragging');
+  const move = ev => {
+    const w = Math.round(right ? innerWidth - ev.clientX : ev.clientX);
+    cfg.layout.sidebar_width = Math.max(150, Math.min(420, w)); // same limits as config.rs
+    root.style.setProperty('--side-w', cfg.layout.sidebar_width + 'px');
+    reportPage(); // the page follows the edge as it moves
+  };
+  const up = () => { grip.removeEventListener('pointermove', move); grip.removeEventListener('pointerup', up); grip.classList.remove('dragging'); save(); };
+  grip.addEventListener('pointermove', move); grip.addEventListener('pointerup', up);
+};
+$('#grip').ondblclick = () => { cfg.layout.sidebar_width = 220; root.style.setProperty('--side-w', '220px'); reportPage(true); save(); };
 new ResizeObserver(() => S && reportPage()).observe($('#page'));
 post({ cmd: 'ready' });
 </script>
