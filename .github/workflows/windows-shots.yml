@@ -6,8 +6,6 @@ name: Windows screenshots
 # Not a required check.
 on:
   workflow_dispatch:
-  push: # TEMPORARY: one run on this branch
-    branches: ['claude/windows-titlebar-72259a']
 
 permissions:
   contents: read
