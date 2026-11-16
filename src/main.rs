@@ -12,6 +12,8 @@ mod adblock;
 mod config;
 #[cfg(all(target_os = "macos", debug_assertions))]
 mod debug_shot;
+#[cfg(target_os = "macos")]
+mod extensions; // EXPERIMENTAL: extensions spike, off unless WISP_EXTENSIONS is set
 mod native;
 mod page_tools;
 mod store;
@@ -587,9 +589,16 @@ impl App {
         if let Some(ua) = &self.user_agent {
             builder = builder.with_user_agent(ua);
         }
+        #[cfg(target_os = "macos")]
+        if let Some(config) = extensions::configuration(private) {
+            use wry::WebViewBuilderExtMacos;
+            builder = builder.with_webview_configuration(config);
+        }
         let (builder, p5) = (self.with_downloads(builder), self.proxy.clone());
         match builder.build_as_child(&self.window) {
             Ok(webview) => {
+                #[cfg(target_os = "macos")]
+                extensions::did_open_tab(id, &webview);
                 adblock::attach(&webview);
                 native::page_menu(&webview, move |url, private| {
                     let _ = p5.send_event(UserEvent::MenuTab(id, url, private));
@@ -649,6 +658,8 @@ impl App {
         }
         self.workspace = ws;
         self.active = Some(id);
+        #[cfg(target_os = "macos")]
+        extensions::did_activate(id);
         self.last_active.insert(ws, id);
         self.settings_open = false;
         self.layout_pages();
@@ -692,6 +703,8 @@ impl App {
     /// workspace and the list position it had.
     fn remove_tab(&mut self, id: u32) -> Option<(u32, usize)> {
         let pos = self.tabs.iter().position(|t| t.id == id)?;
+        #[cfg(target_os = "macos")]
+        extensions::did_close_tab(id);
         let ws = self.tabs[pos].workspace;
         let index = self.tabs[..pos]
             .iter()
@@ -1498,6 +1511,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let window = builder.build(&event_loop)?;
     #[cfg(target_os = "macos")]
     let _menu = install_menu();
+    #[cfg(target_os = "macos")]
+    {
+        use tao::platform::macos::WindowExtMacOS;
+        extensions::init(window.ns_window());
+    }
 
     let chrome = build_ui(&window, &proxy, &cfg, false)?;
     let mut app = App {
@@ -1584,7 +1602,46 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         unsafe { std::env::remove_var("WISP_JS") };
                         let _ = app.chrome.evaluate_script(&js);
                     }
-                    if let Some(path) = std::env::var_os("WISP_SHOT").filter(|_| after(6)) {
+                    // Extensions spike: WISP_EXT_PRESS=<secs> presses every extension's
+                    // toolbar button; WISP_PROBE=<script> runs in the active tab after
+                    // WISP_PROBE_AT seconds (default 5) and prints the result;
+                    // WISP_SHOT_AT=<secs> moves the screenshot (default 6).
+                    let secs = |k: &str, d| {
+                        std::env::var(k)
+                            .ok()
+                            .and_then(|v| v.parse().ok())
+                            .unwrap_or(d)
+                    };
+                    if std::env::var_os("WISP_EXT_PRESS").is_some()
+                        && after(secs("WISP_EXT_PRESS", 4))
+                    {
+                        // SAFETY: as above.
+                        unsafe { std::env::remove_var("WISP_EXT_PRESS") };
+                        extensions::press_actions();
+                    }
+                    if let Some(js) = std::env::var("WISP_PROBE")
+                        .ok()
+                        .filter(|_| after(secs("WISP_PROBE_AT", 5)))
+                    {
+                        // SAFETY: as above.
+                        unsafe { std::env::remove_var("WISP_PROBE") };
+                        if let Some(w) = app.active_webview() {
+                            let _ = w.evaluate_script_with_callback(&js, |r| {
+                                eprintln!("wisp-probe: {r}")
+                            });
+                        }
+                    }
+                    if let Some(js) = std::env::var("WISP_POPUP_PROBE")
+                        .ok()
+                        .filter(|_| after(secs("WISP_POPUP_PROBE_AT", 9)))
+                    {
+                        // SAFETY: as above.
+                        unsafe { std::env::remove_var("WISP_POPUP_PROBE") };
+                        extensions::probe_popup(&js);
+                    }
+                    if let Some(path) =
+                        std::env::var_os("WISP_SHOT").filter(|_| after(secs("WISP_SHOT_AT", 6)))
+                    {
                         use tao::platform::macos::WindowExtMacOS;
                         let ok = debug_shot::save(app.window.ns_window(), &path.to_string_lossy());
                         eprintln!("wisp: screenshot {}", if ok { "saved" } else { "FAILED" });

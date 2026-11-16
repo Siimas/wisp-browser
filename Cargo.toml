@@ -24,12 +24,29 @@ wry = "0.57.2"
 muda = { version = "0.21.2", default-features = false }
 block2 = "0.6"
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSString", "NSError", "NSURL", "NSGeometry"] }
+objc2-foundation = { version = "0.3", features = ["NSString", "NSError", "NSURL", "NSGeometry", "NSArray", "NSBundle", "NSDate", "NSSet", "NSObject"] }
 objc2-web-kit = { version = "0.3", features = [
     "WKContentRuleList",
     "WKContentRuleListStore",
     "WKUserContentController",
     "block2",
+    # EXPERIMENTAL: extensions spike (src/extensions.rs).
+    "WKWebExtension",
+    "WKWebExtensionAction",
+    "WKWebExtensionContext",
+    "WKWebExtensionController",
+    "WKWebExtensionControllerConfiguration",
+    "WKWebExtensionControllerDelegate",
+    "WKWebExtensionMatchPattern",
+    "WKWebExtensionMessagePort",
+    "WKWebExtensionPermission",
+    "WKWebExtensionTab",
+    "WKWebExtensionTabConfiguration",
+    "WKWebExtensionWindow",
+    "WKWebView",
+    "WKWebViewConfiguration",
+    "WKWebsiteDataStore",
+    "WKUserScript",
 ] }
 
 [target.'cfg(windows)'.dependencies]

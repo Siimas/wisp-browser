@@ -1,0 +1,4 @@
+(()=>{const known=new Set(['HTML','HEAD','META','TITLE','BODY','H1','P','FORM','LABEL','INPUT','BUTTON','SCRIPT','STYLE','LINK']);
+const extra=[...document.querySelectorAll('*')].filter(e=>!known.has(e.tagName)).map(e=>e.tagName.toLowerCase()+(e.id?'#'+e.id:'')+(typeof e.className=='string'&&e.className?'.'+e.className.split(' ')[0]:'')+(e.shadowRoot?'[open-shadow]':''));
+const inputs=[...document.querySelectorAll('input')].map(i=>i.id+':'+[...i.attributes].map(a=>a.name).filter(n=>!['type','name','id','autocomplete','autofocus'].includes(n)).join(',')+':style='+(i.getAttribute('style')||'').slice(0,80));
+return JSON.stringify({title:document.title,extraCount:extra.length,extra:[...new Set(extra)].slice(0,25),inputs,html:[...document.documentElement.attributes].map(a=>a.name),body:[...document.body.attributes].map(a=>a.name)})})()

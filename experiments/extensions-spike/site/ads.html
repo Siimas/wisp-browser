@@ -1,0 +1,10 @@
+<!doctype html><meta charset="utf-8"><title>ads: testing</title><body style="font:16px system-ui;margin:40px">
+<h1>Ad request test</h1><p id="r">…</p>
+<script>
+const urls = ["https://www.googletagmanager.com/gtag/js?id=G-TEST", "https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js", "https://code.jquery.com/jquery-3.7.1.min.js"];
+const load = (u) => new Promise(ok => { const s = document.createElement("script"); s.src = u + (u.includes("?") ? "&" : "?") + "r=" + Math.random(); s.onload = () => ok("loaded"); s.onerror = () => ok("BLOCKED"); document.head.appendChild(s); });
+const round = (label) => Promise.all(urls.map(load)).then(rs => label + ": " + urls.map((u, i) => new URL(u).host.split(".").slice(-2)[0] + "=" + rs[i]).join(" "));
+let out = [];
+round("t0").then(r => { out.push(r); document.title = out.join(" | "); });
+setTimeout(() => round("t4").then(r => { out.push(r); document.title = out.join(" | "); document.getElementById("r").textContent = document.title; }), 4000);
+</script></body>
