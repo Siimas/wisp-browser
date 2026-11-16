@@ -526,6 +526,48 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
 .sheet input.find::placeholder { color: var(--mute); }
 .sheet .list .card { padding: var(--sp-1); }
 .pop small { display: block; color: var(--mute); font-size: var(--text-xs); padding: 0 var(--sp-2) var(--sp-1); }
+
+/* ================= MEDIA PLAYER =================
+   While a tab other than the one on screen has media, a small player sits at the
+   bottom of the sidebar. In a tab row it is a button that opens it as a menu. */
+#media { display: none; flex: none; min-width: 0; }
+#media.on, #media.out { display: block; }
+#media.on { animation: media-in var(--d-2) var(--ease-out); }
+#media.out { animation: media-out var(--d-1) var(--ease-in) forwards; pointer-events: none; }
+@keyframes media-in { from { opacity: 0; transform: translateY(6px); } }
+@keyframes media-out { to { opacity: 0; transform: translateY(6px); } }
+:root[data-side=top] #media { order: 3; }
+:root[data-side=top] #media > .m-card, :root:not([data-side=top]) #media > .m-btn { display: none; }
+.m-card { display: flex; flex-direction: column; padding: var(--sp-1); border-radius: var(--r-lg); background: var(--field); }
+.pop .m-card { padding: 0; background: none; }
+/* the tab it plays in: icon on the tab list's column, title over what plays it */
+.m-head { display: flex; align-items: center; gap: var(--sp-2); height: var(--row); padding-left: var(--sp-1); border-radius: var(--r-md); }
+.m-head:hover { background: var(--hover); }
+.m-text { flex: 1; min-width: 0; line-height: 1.25; }
+.m-title, .m-sub { overflow: hidden; white-space: nowrap;
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - var(--fade)), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - var(--fade)), transparent); }
+.m-sub { color: var(--mute); font-size: var(--text-xs); }
+.m-card.private .m-title { font-style: italic; }
+.m-card.private .fav { background: none; color: var(--accent); }
+.m-x { visibility: hidden; border-radius: max(0px, var(--r-md) - var(--sp-1)); }
+.m-x svg { width: 12px; height: 12px; }
+.m-card:hover .m-x, .m-x:focus-visible { visibility: visible; }
+/* progress: a hairline, thicker under the pointer; drag it to seek */
+.m-bar { position: relative; height: var(--sp-3); margin: 0 var(--sp-1); cursor: pointer; touch-action: none; }
+.m-bar[hidden] { display: none; }
+.m-bar::before, .m-bar i { content: ""; position: absolute; left: 0; right: 0; top: calc(50% - 1px); height: 2px; border-radius: var(--r-full); transition: height var(--d-1), top var(--d-1); }
+.m-bar::before { background: var(--line); }
+.m-bar i { background: var(--fg); transform-origin: 0 50%; transform: scaleX(0); }
+.m-bar:hover::before, .m-bar:hover i, .m-bar.drag::before, .m-bar.drag i { top: calc(50% - 2px); height: 4px; }
+.m-ctl { display: flex; align-items: center; }
+.m-ctl .m-mute { margin-left: auto; }
+.m-card .ib:disabled { opacity: .35; pointer-events: none; }
+/* a playing tab's speaker: click to mute it */
+.tab .snd { display: none; width: var(--ctl); height: var(--ctl); place-items: center; flex: none; margin-right: calc(-1 * var(--sp-2)); border-radius: max(0px, var(--r-md) - var(--sp-1)); color: var(--mute); }
+.tab.sound .snd { display: grid; }
+.tab .snd:hover { color: var(--fg); background: var(--hover); }
+.tab .snd svg { width: 14px; height: 14px; }
+#pins .tab .snd { display: none; }
 </style>
 <style id="user-css"></style>
 </head>
@@ -541,6 +583,7 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
     <div id="pins" role="tablist" aria-label="Pinned tabs"></div>
     <button id="new" title="New tab" aria-label="New tab"></button>
     <div id="tabs" role="tablist"></div>
+    <div id="media"></div>
     <div class="area" data-area="after_tabs"></div>
   </aside>
   <div id="edge"></div>
@@ -912,7 +955,9 @@ const tabEls = new Map();
 function makeTab(id) {
   const x = el('button', { className: 'x', title: 'Close tab', ariaLabel: 'Close tab' }, svg('close'));
   x.onclick = e => { e.stopPropagation(); post({ cmd: 'close_tab', id }); };
-  const tab = el('div', { className: 'tab', role: 'tab', tabIndex: 0 }, el('span', { className: 'fav' }), el('span', { className: 'title' }), x);
+  const snd = el('button', { className: 'snd' });
+  snd.onclick = e => { e.stopPropagation(); post({ cmd: 'media', id, op: 'mute' }); };
+  const tab = el('div', { className: 'tab', role: 'tab', tabIndex: 0 }, el('span', { className: 'fav' }), el('span', { className: 'title' }), snd, x);
   tab.dataset.id = id;
   tab.onclick = () => post({ cmd: 'select_tab', id });
   tab.onpointerdown = e => tabDragStart(e, id, tab);
@@ -928,14 +973,23 @@ function updateTab(node, t) {
   node.title = name;
   node.setAttribute('aria-selected', t.id === S.active);
   node.children[1].textContent = name;
-  const key = t.private ? 'private' : host;
-  if (node.dataset.fav !== key) { // site icon, or a letter when there is none
-    node.dataset.fav = key;
-    const fav = node.children[0], letter = (host.replace(/^www\./, '')[0] || '•').toUpperCase();
-    if (t.private) fav.replaceChildren(svg('private'));
-    else if (!host.includes('.')) fav.replaceChildren(letter);
-    else { const img = el('img', { alt: '', src: `https://${host}/favicon.ico` }); img.onerror = () => fav.replaceChildren(letter); fav.replaceChildren(img); }
+  setFav(node.children[0], host, t.private);
+  const snd = node.children[2], icon = t.muted ? 'muted' : 'speaker';
+  node.classList.toggle('sound', t.playing || t.muted);
+  if (snd.dataset.icon !== icon) {
+    snd.dataset.icon = icon;
+    snd.title = snd.ariaLabel = t.muted ? 'Unmute tab' : 'Mute tab';
+    snd.replaceChildren(svg(icon));
   }
+}
+function setFav(fav, host, priv) {
+  const key = priv ? 'private' : host;
+  if (fav.dataset.key === key) return; // site icon, or a letter when there is none
+  fav.dataset.key = key;
+  const letter = (host.replace(/^www\./, '')[0] || '•').toUpperCase();
+  if (priv) fav.replaceChildren(svg('private'));
+  else if (!host.includes('.')) fav.replaceChildren(letter);
+  else { const img = el('img', { alt: '', src: `https://${host}/favicon.ico` }); img.onerror = () => fav.replaceChildren(letter); fav.replaceChildren(img); }
 }
 function renderTabs() {
   const boxes = [$('#tabs'), $('#pins')], swapped = lastWs !== null && lastWs !== S.workspace, seen = new Set();
@@ -989,7 +1043,7 @@ function glideTabs(change) {
 // the places they would take, and letting go glides everything home.
 // ponytail: a long list does not scroll while you drag; add edge scrolling if wanted.
 function tabDragStart(e, id, node) {
-  if (e.button === 0 && !customizing && !e.target.closest('.x')) tabDrag = { id, node, x: e.clientX, y: e.clientY, pointer: e.pointerId };
+  if (e.button === 0 && !customizing && !e.target.closest('.x, .snd')) tabDrag = { id, node, x: e.clientX, y: e.clientY, pointer: e.pointerId };
 }
 addEventListener('pointermove', e => {
   const d = tabDrag;
@@ -1603,6 +1657,7 @@ function render() {
   renderLibrary();
   if (S.settings && !FLOATER) renderSettings();
   renderTools();
+  renderMedia();
   reportPage(true);
 }
 
@@ -1720,6 +1775,93 @@ function renderTools() {
   if (list && !$('#pop').hidden) list.replaceChildren(...dlRows()); // an open list stays current
 }
 // ================= END PAGE TOOLS =================
+
+// ================= MEDIA PLAYER =================
+// The app picks which tab's media to show (S.media) and checks everything in it: what
+// a page reports is plain text and numbers, and only ever set as text here.
+Object.assign(ICON, {
+  'm-play': 'M5 3.300v9.400L12.500 8z', 'm-pause': 'M5.500 3.500v9M10.500 3.500v9',
+  'm-prev': 'M4 3.500v9M12 3.800 6 8l6 4.200z', 'm-next': 'M12 3.500v9M4 3.800 10 8l-6 4.200z',
+  speaker: 'M2.500 6.200v3.600H5l3.500 2.700V3.500L5 6.200zM11 6a3 3 0 0 1 0 4M12.700 4.200a5.500 5.500 0 0 1 0 7.600',
+  muted: 'M2.500 6.200v3.600H5l3.500 2.700V3.500L5 6.200zM11 6.300l3.400 3.400M14.400 6.300 11 9.700',
+});
+let mediaOn = false, mediaTimer = 0, seekAt = null;
+const mediaOp = (op, at = 0) => S.media && post({ cmd: 'media', id: S.media.id, op, at });
+const mbtn = (cls, label, op) => el('button', { className: 'ib ' + cls, title: label, ariaLabel: label, onclick: e => { e.stopPropagation(); mediaOp(op); } });
+function mediaCard() {
+  const bar = el('div', { className: 'm-bar' }, el('i'));
+  bar.onpointerdown = e => { // drag to seek; the media jumps when let go
+    const m = S.media;
+    if (e.button || !m || !m.dur) return;
+    e.preventDefault();
+    try { bar.setPointerCapture(e.pointerId); } catch {}
+    bar.classList.add('drag');
+    const r = bar.getBoundingClientRect(), at = ev => Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
+    const show = ev => { seekAt = at(ev); const i = bar.firstChild; i.style.transition = 'none'; i.style.transform = `scaleX(${seekAt})`; };
+    show(e);
+    bar.onpointermove = show;
+    bar.onpointerup = bar.onpointercancel = ev => {
+      bar.onpointermove = bar.onpointerup = bar.onpointercancel = null;
+      bar.classList.remove('drag');
+      if (ev.type === 'pointerup') mediaOp('seek', at(ev) * m.dur);
+      seekAt = null; bar.dataset.key = '';
+    };
+  };
+  return el('div', { className: 'm-card' },
+    el('div', { className: 'm-head', title: 'Go to this tab', onclick: () => S.media && post({ cmd: 'select_tab', id: S.media.id }) },
+      el('span', { className: 'fav' }), el('div', { className: 'm-text' }, el('div', { className: 'm-title' }), el('div', { className: 'm-sub' })),
+      mbtn('m-x', 'Close player', 'dismiss')),
+    bar,
+    el('div', { className: 'm-ctl' }, mbtn('m-prev', 'Previous', 'prev'), mbtn('m-pp', 'Play', 'play'), mbtn('m-next', 'Next', 'next'), mbtn('m-mute', 'Mute', 'mute')));
+}
+const setIcon = (b, icon, label) => { if (b.dataset.icon !== icon) { b.dataset.icon = icon; b.title = b.ariaLabel = label; b.replaceChildren(svg(icon)); } };
+function updateCard(card, m) {
+  const q = s => card.querySelector(s), host = hostOf(m.url);
+  card.classList.toggle('private', m.private);
+  setFav(q('.fav'), host, m.private);
+  q('.m-title').textContent = m.title || m.tab_title || host || 'Media';
+  q('.m-sub').textContent = m.artist || host;
+  if (!q('.m-x').firstChild) q('.m-x').append(svg('close'));
+  setIcon(q('.m-prev'), 'm-prev', 'Previous');
+  setIcon(q('.m-next'), 'm-next', 'Next');
+  q('.m-next').disabled = !m.next;
+  setIcon(q('.m-pp'), m.playing ? 'm-pause' : 'm-play', m.playing ? 'Pause' : 'Play');
+  q('.m-pp').onclick = e => { e.stopPropagation(); mediaOp(m.playing ? 'pause' : 'play'); };
+  setIcon(q('.m-mute'), m.muted ? 'muted' : 'speaker', m.muted ? 'Unmute' : 'Mute');
+  // Progress runs on its own between reports: one linear transition to the end, so
+  // nothing is polled or redrawn by script while it plays.
+  const bar = q('.m-bar'), i = bar.firstChild, key = [m.id, m.pos, m.dur, m.rate, m.playing].join();
+  bar.hidden = !m.dur;
+  if (bar.dataset.key === key || seekAt !== null || !m.dur) return;
+  bar.dataset.key = key;
+  i.style.transition = 'none';
+  i.style.transform = `scaleX(${Math.min(1, m.pos / m.dur)})`;
+  if (m.playing && m.rate > 0) { void i.offsetWidth; i.style.transition = `transform ${(m.dur - m.pos) / m.rate}s linear`; i.style.transform = 'scaleX(1)'; }
+}
+function renderMedia() {
+  const box = $('#media'), m = S.media;
+  if (!box.firstChild) {
+    const btn = el('button', { className: 'ib m-btn' });
+    btn.onclick = () => { if (!S.media) return; const card = mediaCard(); openPop(btn, [card]); updateCard(card, S.media); };
+    box.append(mediaCard(), btn);
+  }
+  const popCard = $('#pop:not([hidden]) .m-card');
+  if (m) { // shown first: a progress transition only runs on a box that is laid out
+    if (!mediaOn) { clearTimeout(mediaTimer); box.classList.remove('out'); box.classList.add('on'); mediaOn = true; }
+    updateCard(box.firstChild, m);
+    if (popCard) updateCard(popCard, m);
+    setIcon(box.lastChild, m.playing ? 'speaker' : 'm-pause', '');
+    box.lastChild.title = (m.playing ? 'Playing: ' : 'Paused: ') + (m.title || m.tab_title || hostOf(m.url));
+  } else {
+    if (popCard) closePop();
+    if (mediaOn) { // slide away, then take no room
+      mediaOn = false;
+      box.classList.replace('on', 'out');
+      mediaTimer = setTimeout(() => box.classList.remove('out'), ms('--d-1'));
+    }
+  }
+}
+// ================= END MEDIA PLAYER =================
 
 addEventListener('keydown', e => {
   if (e.key !== 'Escape' || !S || window.__wispRecording) return;

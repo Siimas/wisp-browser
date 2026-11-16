@@ -12,6 +12,7 @@ mod adblock;
 mod config;
 #[cfg(all(target_os = "macos", debug_assertions))]
 mod debug_shot;
+mod media;
 mod native;
 mod page_tools;
 mod store;
@@ -146,15 +147,32 @@ enum Msg {
         id: u32,
         op: String,
     },
+    /// A button of the media player, for the media in tab `id`; `at` is where to seek to.
+    Media {
+        id: u32,
+        op: media::Op,
+        #[serde(default)]
+        at: f64,
+    },
     /// History, bookmarks and suggestions: see `store::Msg`.
     #[serde(untagged)]
     Library(store::Msg),
+}
+
+/// The only messages a page may send (see `build_webview`).
+#[derive(Deserialize)]
+#[serde(tag = "cmd", rename_all = "snake_case")]
+enum PageMsg {
+    Key { combo: String },
+    Media(media::Report),
 }
 
 enum UserEvent {
     Ui(Msg),
     /// Hotkey reported by the page in tab `.0`.
     PageKey(u32, String),
+    /// What the page in tab `.0` says it is playing (unchecked yet).
+    PageMedia(u32, Box<media::Report>),
     Title(u32, String),
     Load(u32, bool, String),
     /// A page in tab `.0` asked for a new window.
@@ -183,6 +201,8 @@ struct Tab {
     url: String,
     loading: bool,
     zoom: f64,
+    /// What it is playing, if anything; `media.playing()` says whether it is audible now.
+    media: media::Slot,
 }
 
 /// A closed tab, remembered for this run so it can be reopened.
@@ -485,6 +505,30 @@ impl App {
             .collect()
     }
 
+    /// The media the player shows: the one started most recently, in any tab but the
+    /// one on screen (which has its own controls), unless dismissed.
+    fn media_tab(&self) -> Option<&Tab> {
+        let shown = self.tabs.iter().filter(|t| self.active != Some(t.id));
+        shown
+            .filter(|t| t.media.shown())
+            .max_by_key(|t| t.media.started)
+    }
+
+    /// A button of the media player.
+    fn media_op(&mut self, id: u32, op: media::Op, at: f64) {
+        let Some(tab) = self.tab_mut(id) else { return };
+        if op == media::Op::Dismiss {
+            tab.media.dismissed = true;
+            return self.sync();
+        }
+        let (Some(m), Some(w)) = (&tab.media.now, &tab.webview) else {
+            return;
+        };
+        if let Some(js) = media::script(op, at, m) {
+            let _ = w.evaluate_script(&js);
+        }
+    }
+
     /// Both copies of the interface.
     fn uis(&self) -> impl Iterator<Item = &WebView> {
         std::iter::once(&self.chrome).chain(&self.floater)
@@ -498,7 +542,8 @@ impl App {
             .filter(|t| t.workspace == self.workspace)
             .map(|t| {
                 json!({"id": t.id, "title": t.title, "url": t.url, "loading": t.loading,
-                       "private": t.private, "pinned": t.pinned})
+                       "private": t.private, "pinned": t.pinned,
+                       "playing": t.media.playing(), "muted": t.media.muted()})
             })
             .collect();
         let state = json!({
@@ -514,6 +559,7 @@ impl App {
             "glass": self.glass.is_some(),
             "version": env!("CARGO_PKG_VERSION"),
             "downloads": self.downloads.borrow().json(),
+            "media": self.media_tab().map(|t| t.media.json(t.id, &t.title, &t.url, t.private)),
             "update": {
                 "supported": update::supported(),
                 "ready": self.update.as_ref().map(|u| u.version.as_str()),
@@ -560,15 +606,23 @@ impl App {
             .with_incognito(private)
             .with_back_forward_navigation_gestures(true)
             .with_initialization_script(keys_script(&self.cfg))
-            // Pages are untrusted: the only message accepted from them is a hotkey press,
-            // and only while their tab is the active one (see `PageKey`).
+            .with_initialization_script(include_str!("media.js"))
+            // Pages are untrusted: the only messages accepted from them are a hotkey press,
+            // only while their tab is the active one (see `PageKey`), and what they are
+            // playing, checked and rate-limited (see media.rs). The tab is the one this
+            // handler belongs to, whatever the message says.
             // ponytail: the active page can still fake a press (e.g. close its own tab)
             // or swallow hotkeys while focused. Upgrade path: native key capture per
             // platform instead of the injected listener.
             .with_ipc_handler(move |req| {
-                if let Ok(Msg::Key { combo }) = serde_json::from_str(req.body()) {
-                    let _ = p1.send_event(UserEvent::PageKey(id, combo));
+                if req.body().len() > media::MAX_MESSAGE {
+                    return;
                 }
+                let _ = match serde_json::from_str(req.body()) {
+                    Ok(PageMsg::Key { combo }) => p1.send_event(UserEvent::PageKey(id, combo)),
+                    Ok(PageMsg::Media(r)) => p1.send_event(UserEvent::PageMedia(id, Box::new(r))),
+                    Err(_) => Ok(()),
+                };
             })
             .with_document_title_changed_handler(move |title| {
                 let _ = p2.send_event(UserEvent::Title(id, title));
@@ -629,6 +683,7 @@ impl App {
             url: url.to_string(),
             loading: false,
             zoom: self.cfg.behavior.default_zoom,
+            media: Default::default(),
         });
         self.select(id);
     }
@@ -749,6 +804,7 @@ impl App {
             url: src.url.clone(),
             loading: false,
             zoom: self.cfg.behavior.default_zoom,
+            media: Default::default(),
         };
         self.insert_tab(copy, after);
     }
@@ -795,6 +851,7 @@ impl App {
             url: closed.url,
             loading: false,
             zoom: self.cfg.behavior.default_zoom,
+            media: Default::default(),
         };
         self.insert_tab(tab, closed.index);
     }
@@ -1214,6 +1271,7 @@ impl App {
                 url: saved.url,
                 loading: false,
                 zoom: self.cfg.behavior.default_zoom,
+                media: Default::default(),
             });
         }
         group_pinned(&mut self.tabs);
@@ -1350,6 +1408,7 @@ impl App {
                 Msg::Find { query, back } => self.find(query, back),
                 Msg::FindClose => self.find_close(),
                 Msg::Download { id, op } => self.download_op(id, &op),
+                Msg::Media { id, op, at } => self.media_op(id, op, at),
                 Msg::Library(msg) => self.library(msg),
             },
             UserEvent::PageKey(id, combo) => {
@@ -1357,6 +1416,12 @@ impl App {
                 // key from a background tab, or while the interface covers the page, is forged.
                 if self.active == Some(id) && self.page_visible() {
                     self.handle(UserEvent::Ui(Msg::Key { combo }));
+                }
+            }
+            UserEvent::PageMedia(id, report) => {
+                let changed = self.tab_mut(id).is_some_and(|t| t.media.report(*report));
+                if changed {
+                    self.sync();
                 }
             }
             UserEvent::Title(id, title) => {
@@ -1371,6 +1436,9 @@ impl App {
                     self.find_last = None; // a new page: the next search starts over
                 }
                 if let Some(tab) = self.tab_mut(id) {
+                    if started {
+                        tab.media = media::Slot::default(); // a new page: its media is gone
+                    }
                     tab.loading = started;
                     tab.url = url;
                     self.sync();
@@ -1619,7 +1687,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        App, CLOSED_MAX, Side, Tab, Zone, ease_out, group_pinned, place_tab, remember_closed, zone,
+        App, CLOSED_MAX, PageMsg, Side, Tab, Zone, ease_out, group_pinned, place_tab,
+        remember_closed, zone,
     };
 
     fn tab(id: u32, workspace: u32, pinned: bool) -> Tab {
@@ -1633,6 +1702,7 @@ mod tests {
             url: format!("https://example.com/{id}"),
             loading: false,
             zoom: 1.0,
+            media: Default::default(),
         }
     }
 
@@ -1766,5 +1836,29 @@ mod tests {
         assert_eq!(ease_out(1.0), 1.0);
         assert_eq!(ease_out(7.0), 1.0);
         assert!(ease_out(0.25) > 0.6);
+    }
+
+    #[test]
+    fn a_page_can_send_only_keys_and_media() {
+        let page = |body| serde_json::from_str::<PageMsg>(body);
+        for forged in [
+            r#"{"cmd":"close_tab","id":1}"#,
+            r#"{"cmd":"navigate","url":"https://example.com"}"#,
+            r#"{"cmd":"select_tab","id":1}"#,
+            r#"{"cmd":"action","name":"private_window"}"#,
+            r#"{"cmd":"media","pos":"x"}"#,
+            "not json",
+        ] {
+            assert!(page(forged).is_err(), "{forged}");
+        }
+        assert!(matches!(
+            page(r#"{"cmd":"key","combo":"Mod+T"}"#),
+            Ok(PageMsg::Key { .. })
+        ));
+        // A button press shaped like the interface's is just an empty report from the page.
+        assert!(matches!(
+            page(r#"{"cmd":"media","id":3,"op":"dismiss"}"#),
+            Ok(PageMsg::Media(_))
+        ));
     }
 }
