@@ -1,15 +1,17 @@
-<p align="center">
-  <img src="docs/images/banner.svg" alt="Wisp" width="100%">
-</p>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/banner-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/banner-light.svg">
+  <img src="docs/images/banner-light.svg" alt="Wisp" width="100%">
+</picture>
 
 <p align="center">
   <b>A small, quiet web browser for macOS and Windows that you can make your own.</b>
 </p>
 
 <p align="center">
-  <a href="https://github.com/Siimas/wisp-browser/releases/latest"><img src="docs/images/download-macos.svg" alt="Download for macOS" height="44"></a>
+  <a href="https://github.com/Siimas/wisp-browser/releases/latest"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/download-macos-dark.svg"><img src="docs/images/download-macos-light.svg" alt="Download for macOS" height="44"></picture></a>
   &nbsp;
-  <a href="https://github.com/Siimas/wisp-browser/releases/latest"><img src="docs/images/download-windows.svg" alt="Download for Windows" height="44"></a>
+  <a href="https://github.com/Siimas/wisp-browser/releases/latest"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/download-windows-dark.svg"><img src="docs/images/download-windows-light.svg" alt="Download for Windows" height="44"></picture></a>
 </p>
 
 <p align="center">
@@ -26,7 +28,7 @@
 </picture>
 
 Wisp does not ship its own copy of a web engine. It uses the one your computer
-already has (WebKit on macOS, WebView2 on Windows), so the download is one to
+already has (WebKit on macOS, WebView2 on Windows), so the download is about
 two megabytes and engine security fixes arrive with your system updates. No
 account, no telemetry, free and open source.
 
@@ -49,10 +51,10 @@ takes a tint of the one you are in, so you can tell at a glance where you are.
 ## Your colors
 
 The theme editor is a color wheel laid flat. Place up to three colors for a
-gradient, add a texture, pick an accent, or start from a preset. Light and dark
+gradient, set the grain, pick an accent, or start from one of nine presets. Light and dark
 are both there, and everything applies as you change it.
 
-![Left: the theme editor with the Dusk preset, three color dots on a canvas above presets and texture settings. Right: Wisp in light mode with the Sand preset and tabs across the top](docs/images/theme-pair.webp)
+![Left: the theme editor with the Dusk preset selected, its colors as dots on a canvas above the nine presets. Right: Wisp in light mode with the Daybreak preset and tabs across the top](docs/images/theme-pair.webp)
 
 ## Your toolbar
 
@@ -94,7 +96,7 @@ Get the installer for your system from the
 | --- | --- |
 | macOS, Apple Silicon | `Wisp_<version>_aarch64.dmg` |
 | macOS, Intel | `Wisp_<version>_x64.dmg` |
-| Windows 10 or 11, 64-bit | `Wisp_<version>_x64-setup.exe` |
+| Windows 10 or 11, 64-bit | `wisp_<version>_x64-setup.exe` |
 
 The installers are not code-signed yet, so the first launch needs one extra
 step:
@@ -108,7 +110,7 @@ step:
 - **Windows**: on the SmartScreen prompt choose **More info**, then
   **Run anyway**.
 
-From 0.2.0 on, installed copies update themselves: a new version downloads in
+Installed copies update themselves: a new version downloads in
 the background and is in place the next time you open Wisp. Every update file
 is signed, and Wisp refuses one whose signature does not match. You can turn
 this off in Settings > About.

@@ -115,7 +115,8 @@ update.
 ### Brand images
 
 The banner, wordmark, download buttons and screenshots used by the README are
-in [docs/images](docs/images). `social-preview.png` (1280x640) is the image for
+in [docs/images](docs/images) and follow [docs/BRAND.md](docs/BRAND.md); the
+banner, wordmark and buttons come in a light and a dark version. `social-preview.png` (1280x640) is the image for
 link previews; GitHub only takes it by hand, under Settings > General > Social
 preview.
 
