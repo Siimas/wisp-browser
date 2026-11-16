@@ -22,10 +22,10 @@ shouts; emphasis comes from spacing and from one accent color.
 
 | Group | Tokens | Notes |
 | --- | --- | --- |
-| Space | `--sp-1` … `--sp-6` (4, 8, 12, 16, 24, 32 px), `--gap` (8 px) | `--gap` is the one distance between window edge, page card and bars. |
+| Space | `--sp-0` (2 px), `--sp-1` … `--sp-6` (4, 8, 12, 16, 24, 32 px), `--gap` (8 px), `--fade` (18 px) | `--gap` is the one distance between window edge, page card and bars. `--sp-0` is only for neighbors in one tight list. `--fade` is how far a long title fades out. |
 | Shape | `--r-sm`, `--r-md`, `--r-lg`, `--r-full`, `--page-r` | All derived from the user's roundness (`--radius`). |
 | Type | `--text-xs` … `--text-xl`, `--font-ui`, `--font-mono` | All derived from the user's text size (`--font`). Weights: 400 body, 500 emphasis. No bold. |
-| Size | `--ctl` 28 (buttons, inputs), `--row` 36 (a sidebar tab), `--hotbar-h` 40, `--tabs-h` 40, `--side-w` 220 | `top-compact` shrinks `--ctl`, `--hotbar-h`, `--tabs-h`. |
+| Size | `--ctl` 28 (buttons, inputs), `--row` 36 (a sidebar tab), `--hotbar-h` 40, `--tabs-h` 40, `--side-w` 220, `--lights` 82, `--strip` 28 | `top-compact` shrinks `--ctl`, `--hotbar-h`, `--tabs-h`. `--lights` and `--strip` are the room kept for the macOS window buttons. |
 | Color | `--bg`, `--fg`, `--mute`, `--surface`, `--hover`, `--field`, `--line`, `--accent`, `--ws`, `--danger`, `--paint` | Semantic. Light values on `:root`, dark on `[data-theme=dark]`. |
 | Elevation | `--shadow-0`, `--shadow-1`, `--shadow-card`, `--shadow-pop` | Four levels, see Elevation below. |
 | Motion | `--d-1`, `--d-2`, `--d-3`, `--ease-out`, `--ease-in`, `--ease-move` | See below. |
@@ -95,7 +95,8 @@ Workspace icons are picked from the same set and take the workspace's color.
   "New tab" in a sidebar and at the start of the row in a top bar. They have
   no close button; the close-tab hotkey only steps off them.
 - **macOS window buttons** are moved to sit on the center line of the first
-  row of controls, at `--gap` + 5 px from the left edge.
+  row of controls, at `--gap` + 5 px from the left edge. While a tucked-away
+  top bar floats in, they move onto its tab row the same way.
 
 ### The theme editor
 
@@ -113,6 +114,58 @@ wheel laid flat:
 
 Text flips between light and dark automatically if the painted result would
 make the chosen one unreadable.
+
+## Spacing and alignment
+
+Measured, not eyeballed: check a change with `WISP_SHOT` captures and with
+`getBoundingClientRect()` numbers read through `WISP_JS`. The rules:
+
+1. **Only tokens.** Every gap, padding, margin, inset and control height is a
+   space token, a size token, or arithmetic on them
+   (`calc(var(--ctl) + 2 * var(--sp-2))`). Raw numbers are left only for a
+   drawing's own geometry (the layout pictures, the dial, the color dots, a
+   16 px icon) and for the widths of particular fields and popovers.
+2. **One value per pattern.**
+
+   | Pattern | Value |
+   | --- | --- |
+   | Window edge, page card, bars | `--gap` |
+   | Items in a bar (hotbar, tab row, find bar, workspace switcher) | `--sp-1` |
+   | Tab rows in a sidebar; tabs in a tab row | `--sp-0` |
+   | Pinned tiles, in a grid or a row | `--sp-1` |
+   | Icon to its label (tabs, menus, lists, fields) | `--sp-2` |
+   | Text to the edge of its row or card | `--sp-3` (rows in cards, fields), `--sp-2` (tabs, list rows, menu items) |
+   | Between a row's text and its control | `--sp-4` |
+   | Parts of one instrument (the theme editor) | `--sp-2`, the same as its padding |
+
+3. **Columns line up.** Icons, text and controls in a row share a center line.
+   Down a list, icons sit in one 16 px column (a dot takes the same 16 px), so
+   titles share a left edge. A section header (`.sheet h2`) is inset `--sp-3`
+   so it sits on the text of the rows below it. The address bar and the
+   suggestions under it share the icon and text columns: icon at `--sp-3`,
+   text `--sp-2` after it. A menu's labels sit on its items' text.
+4. **One height per context.** Controls are `--ctl` (selects too: they are
+   drawn, not native, so they match), rows `--row`, settings rows at least
+   `--ctl` plus `--sp-2` above and below. A hairline between rows is an inset
+   shadow, so it adds no height. Hit targets are at least 24 px; a close button
+   in a tab or row is a full `--ctl`.
+5. **Nothing moves on hover.** Buttons that appear on hover in a list row are
+   hidden, not removed, so the text beside them stays put. (A tab's close
+   button is the one exception: it takes room from the title, whose fade moves;
+   nothing else does.)
+6. **Corners nest.** An inner radius is the outer radius minus the padding
+   between them: `max(0px, var(--r-lg) - var(--sp-2))` for a menu item in a
+   menu, `var(--r-md) - var(--sp-1)` for a close button in a tab.
+7. **Trailing buttons sit like padding.** A row with a button at its end keeps
+   `--sp-1` between the button and the row's edge, so the button is inset
+   equally on three sides.
+8. **Content never touches an edge, and overflow is handled.** Long text fades
+   (`--fade`) or wraps; a menu item grows to fit a wrapped label; a set of
+   things that can grow past its box (the workspace switcher) scrolls instead
+   of spilling out.
+9. **The window buttons are part of the row.** Content after them starts at
+   `--lights`, keeping the same 9 px from the last button that the buttons keep
+   from each other.
 
 ## Motion
 

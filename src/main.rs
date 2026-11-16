@@ -108,6 +108,9 @@ enum Msg {
         /// center of the row they share with the bar.
         #[serde(default)]
         lights: [f64; 2],
+        /// macOS: the same while a tucked-away top bar floats in, if they move then.
+        #[serde(default)]
+        lights_peek: Option<[f64; 2]>,
         /// Glide to the new size (a layout change) instead of jumping.
         animate: bool,
     },
@@ -311,8 +314,11 @@ struct App {
     panel_radius: f64,
     /// Frosted glass shown behind the floating bar, where the platform has it.
     glass: Option<native::Glass>,
-    /// macOS: inset of the window buttons, as last applied.
+    /// macOS: where the window buttons go, at rest and while the bar floats in.
     lights: [f64; 2],
+    lights_peek: Option<[f64; 2]>,
+    /// macOS: inset of the window buttons, as last applied.
+    lights_at: [f64; 2],
     settings_open: bool,
     /// A menu or sheet in the interface is using the page area.
     cover: bool,
@@ -877,6 +883,27 @@ impl App {
         }
     }
 
+    /// macOS: put the window buttons where the interface asked, for the bar as it is now.
+    fn place_lights(&mut self) {
+        let at = match self.lights_peek {
+            Some(l) if self.peek => l,
+            _ => self.lights,
+        };
+        if at == self.lights_at {
+            return;
+        }
+        self.lights_at = at;
+        #[cfg(target_os = "macos")]
+        {
+            use tao::platform::macos::WindowExtMacOS;
+            // The library takes "extra title bar height", from which the buttons
+            // end up 2px above the value given (measured on macOS 26).
+            // ponytail: may sit 1-2px off on older systems; set frames directly if so.
+            let at = LogicalPosition::new(at[0], at[1] + 2.0);
+            self.window.set_traffic_light_inset(at);
+        }
+    }
+
     fn set_peek(&mut self, on: bool) {
         let on = on && self.cfg.layout.collapsed;
         self.away_since = None;
@@ -884,6 +911,7 @@ impl App {
             return;
         }
         self.peek = on;
+        self.place_lights();
         if on {
             self.ensure_floater();
             if let Some(f) = &self.floater {
@@ -1048,6 +1076,7 @@ impl App {
     /// The bar was collapsed, pinned open, or moved: drop any reveal in progress.
     fn bar_mode_changed(&mut self) {
         self.peek = false;
+        self.place_lights();
         self.away_since = None;
         if let Some(f) = &self.floater {
             let _ = f.set_visible(false);
@@ -1263,6 +1292,7 @@ impl App {
                     panel,
                     panel_radius,
                     lights,
+                    lights_peek,
                     animate,
                 } => {
                     let sane = |v: &[f64]| v.iter().all(|n| n.is_finite() && *n >= 0.0);
@@ -1274,17 +1304,10 @@ impl App {
                     } else if !animate {
                         self.glide = None;
                     }
-                    if self.lights != lights && sane(&lights) {
+                    if sane(&lights) {
                         self.lights = lights;
-                        #[cfg(target_os = "macos")]
-                        {
-                            use tao::platform::macos::WindowExtMacOS;
-                            // The library takes "extra title bar height", from which the buttons
-                            // end up 2px above the value given (measured on macOS 26).
-                            // ponytail: may sit 1-2px off on older systems; set frames directly if so.
-                            let at = LogicalPosition::new(lights[0], lights[1] + 2.0);
-                            self.window.set_traffic_light_inset(at);
-                        }
+                        self.lights_peek = lights_peek.filter(|l| sane(l));
+                        self.place_lights();
                     }
                     self.insets = Some(page);
                     self.float_insets = float;
@@ -1498,6 +1521,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         panel_radius: 0.0,
         glass: native::Glass::new(),
         lights: [0.0; 2],
+        lights_peek: None,
+        lights_at: [0.0; 2],
         settings_open: false,
         cover: false,
         peek: false,
