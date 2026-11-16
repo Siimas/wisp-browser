@@ -55,8 +55,10 @@ foreach ($c in $cases) {
   @{ layout = @{ mode = $mode; collapsed = $collapsed }; appearance = @{ theme = $theme } } |
     ConvertTo-Json -Depth 4 | Set-Content "$data\Wisp\config.json"
   $env:APPDATA = $data
-  $env:WISP_JS = $js
-  $env:WISP_PEEK = $(if ($peek) { "1" } else { "" })
+  # Any value at all switches these on, an empty one too: unset them when not wanted.
+  Remove-Item Env:WISP_JS, Env:WISP_PEEK -ErrorAction SilentlyContinue
+  if ($js) { $env:WISP_JS = $js }
+  if ($peek) { $env:WISP_PEEK = "1" }
   [W]::SetCursorPos(500, 400) | Out-Null # away from edges that reveal a collapsed bar
   $p = Start-Process -FilePath $Exe -PassThru -NoNewWindow
   Start-Sleep -Seconds 2
