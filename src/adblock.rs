@@ -625,12 +625,51 @@ mod platform {
     // ------------------------------------------------ the per-site switch, before loading
 
     static DECIDE: OnceLock<Imp> = OnceLock::new();
+    static BECAME_DOWNLOAD: OnceLock<Imp> = OnceLock::new();
+    /// `decisionHandler` takes a `WKNavigationActionPolicy` (an NSInteger); Allow is 1.
+    const ALLOW: isize = 1;
+    type Decide = unsafe extern "C-unwind" fn(
+        &AnyObject,
+        Sel,
+        *mut AnyObject,
+        *mut AnyObject,
+        *mut AnyObject,
+    );
 
-    /// Runs in place of the web view delegate's `decidePolicyForNavigationAction`: for
-    /// a page (main-frame) navigation, the view gets the rules for the site it is about
-    /// to load, before the request goes out; then the original method decides as before.
-    /// So a site switched off never loads with blocking on, or the reverse, and nothing
-    /// has to be loaded twice. Frames, which belong to their page, leave it alone.
+    /// The view's rule-list holder, and the address of the page it shows.
+    unsafe fn manager_of(view: *mut AnyObject) -> Option<Retained<WKUserContentController>> {
+        // SAFETY (caller): `view` is a live WKWebView, main thread.
+        unsafe {
+            let config: *mut AnyObject = msg_send![view, configuration];
+            let manager: *mut WKUserContentController = msg_send![config, userContentController];
+            Retained::retain(manager)
+        }
+    }
+
+    unsafe fn address(url: *mut AnyObject) -> String {
+        // SAFETY (caller): `url` is an NSURL or null.
+        unsafe {
+            let text: *mut NSString = if url.is_null() {
+                std::ptr::null_mut()
+            } else {
+                msg_send![url, absoluteString]
+            };
+            text.as_ref().map(|t| t.to_string()).unwrap_or_default()
+        }
+    }
+
+    fn set_for(manager: &WKUserContentController, url: &str) {
+        let key = manager as *const WKUserContentController as usize;
+        switch(key, url, |on, _| apply_to(manager, on));
+    }
+
+    /// Runs in place of the web view delegate's `decidePolicyForNavigationAction`. For
+    /// a page (main-frame) navigation it wraps the decision: once the navigation is
+    /// allowed, and before its request goes out, the view gets the rules for the site
+    /// it is about to load. So a page never loads with the wrong state and nothing is
+    /// loaded twice. Frames, which belong to their page, leave it alone. A navigation
+    /// that is allowed but never shows a page (it fails, or becomes a download) is put
+    /// right by `undo` from the page actually shown.
     unsafe extern "C-unwind" fn decide(
         this: &AnyObject,
         cmd: Sel,
@@ -638,75 +677,117 @@ mod platform {
         action: *mut AnyObject,
         handler: *mut AnyObject,
     ) {
-        // SAFETY: WebKit passes a live web view and navigation action; main thread.
+        let Some(original) = DECIDE.get() else { return };
+        // SAFETY: the original method has this signature (see `hook_navigation`).
+        let original: Decide = unsafe { std::mem::transmute(*original) };
+        // SAFETY: WebKit passes a live web view, navigation action and decision block;
+        // main thread.
         unsafe {
             let frame: *mut AnyObject = msg_send![action, targetFrame];
             let main = !frame.is_null() && {
                 let m: bool = msg_send![frame, isMainFrame];
                 m
             };
-            if main {
-                let request: *mut AnyObject = msg_send![action, request];
-                let address: *mut AnyObject = msg_send![request, URL];
-                let text: *mut NSString = if address.is_null() {
-                    std::ptr::null_mut()
-                } else {
-                    msg_send![address, absoluteString]
-                };
-                let config: *mut AnyObject = msg_send![view, configuration];
-                let manager: *mut WKUserContentController =
-                    msg_send![config, userContentController];
-                if let (Some(url), Some(manager)) = (text.as_ref(), manager.as_ref()) {
-                    let key = manager as *const WKUserContentController as usize;
-                    switch(key, &url.to_string(), |on, _| apply_to(manager, on));
+            let decided = RcBlock::copy(handler.cast::<block2::Block<dyn Fn(isize)>>());
+            let (Some(manager), Some(decided), true) = (manager_of(view), decided, main) else {
+                return original(this, cmd, view, action, handler);
+            };
+            let request: *mut AnyObject = msg_send![action, request];
+            let url = address(msg_send![request, URL]);
+            let wrapped = RcBlock::new(move |policy: isize| {
+                if policy == ALLOW {
+                    set_for(&manager, &url);
                 }
-            }
-            if let Some(original) = DECIDE.get() {
-                let original: unsafe extern "C-unwind" fn(
-                    &AnyObject,
-                    Sel,
-                    *mut AnyObject,
-                    *mut AnyObject,
-                    *mut AnyObject,
-                ) = std::mem::transmute(*original);
-                original(this, cmd, view, action, handler);
+                decided.call((policy,));
+            });
+            original(this, cmd, view, action, RcBlock::as_ptr(&wrapped).cast());
+        }
+    }
+
+    /// A page navigation that will not show its page: the view takes the state of the
+    /// page it still shows (with no address, blocking stays on).
+    unsafe extern "C-unwind" fn undo(
+        _this: &AnyObject,
+        _cmd: Sel,
+        view: *mut AnyObject,
+        _navigation: *mut AnyObject,
+        _error: *mut AnyObject,
+    ) {
+        // SAFETY: WebKit passes the live web view; main thread.
+        unsafe {
+            if let Some(manager) = manager_of(view) {
+                set_for(&manager, &address(msg_send![view, URL]));
             }
         }
     }
 
-    /// Put `decide` in front of the delegate class's own method (once; every web view
-    /// gets the same delegate class from wry).
+    /// wry's own `navigationResponse:didBecomeDownload:` runs first, then `undo`.
+    unsafe extern "C-unwind" fn became_download(
+        this: &AnyObject,
+        cmd: Sel,
+        view: *mut AnyObject,
+        response: *mut AnyObject,
+        download: *mut AnyObject,
+    ) {
+        // SAFETY: the original method has this signature (see `hook_navigation`), and
+        // WebKit passes live objects; main thread.
+        unsafe {
+            if let Some(original) = BECAME_DOWNLOAD.get() {
+                let original: Decide = std::mem::transmute(*original);
+                original(this, cmd, view, response, download);
+            }
+            undo(this, cmd, view, response, download);
+        }
+    }
+
+    /// Put `decide` in front of the delegate class's own method, and `undo` behind a
+    /// navigation that fails before showing its page or becomes a download (once; every
+    /// web view gets the same delegate class from wry).
     fn hook_navigation(webview: &WebView) {
         if DECIDE.get().is_some() {
             return;
         }
         let view = webview.webview();
-        // SAFETY: main-thread messages to the live view; swaps an existing method of the
-        // delegate class for one with the same signature (void; self, _cmd, view,
-        // action, block), keeping the original to call.
+        let imp = |f: Decide| -> Imp {
+            // SAFETY: an Objective-C method implementation is called through a plain
+            // function pointer; the selector's real signature is restored before calling.
+            unsafe { std::mem::transmute(f) }
+        };
+        // SAFETY: main-thread messages to the live view. Swaps existing methods of the
+        // delegate class for ones with the same signature (void; self, _cmd and three
+        // objects), keeping the originals to call, and adds the failure callback, which
+        // wry does not implement, with its signature.
         unsafe {
             let delegate: *mut AnyObject = msg_send![&*view, navigationDelegate];
             let Some(delegate) = delegate.as_ref() else {
                 return;
             };
-            let sel = sel!(webView:decidePolicyForNavigationAction:decisionHandler:);
-            let method = objc2::ffi::class_getInstanceMethod(delegate.class(), sel);
-            if method.is_null() {
-                return;
-            }
-            let ours: Imp = std::mem::transmute(
-                decide
-                    as unsafe extern "C-unwind" fn(
-                        &AnyObject,
-                        Sel,
-                        *mut AnyObject,
-                        *mut AnyObject,
-                        *mut AnyObject,
-                    ),
+            let class = delegate.class();
+            let swap = |sel: Sel, ours: Imp, keep: &OnceLock<Imp>| {
+                let method = objc2::ffi::class_getInstanceMethod(class, sel);
+                if !method.is_null()
+                    && let Some(original) = objc2::ffi::method_setImplementation(method, ours)
+                {
+                    let _ = keep.set(original);
+                }
+            };
+            swap(
+                sel!(webView:navigationResponse:didBecomeDownload:),
+                imp(became_download),
+                &BECAME_DOWNLOAD,
             );
-            if let Some(original) = objc2::ffi::method_setImplementation(method, ours) {
-                let _ = DECIDE.set(original);
-            }
+            let failed = sel!(webView:didFailProvisionalNavigation:withError:);
+            objc2::ffi::class_addMethod(
+                (class as *const objc2::runtime::AnyClass).cast_mut(),
+                failed,
+                imp(undo),
+                c"v@:@@@".as_ptr(),
+            );
+            swap(
+                sel!(webView:decidePolicyForNavigationAction:decisionHandler:),
+                imp(decide),
+                &DECIDE,
+            );
         }
     }
 

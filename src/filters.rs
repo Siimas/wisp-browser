@@ -151,18 +151,102 @@ fn parse_hide(doms: &str, rest: &str) -> Option<Hide> {
     })
 }
 
-/// A selector (or one of a list) naming only the page itself (`html`, `body`, `*`,
-/// `:root`): hiding it would blank every page the rule applies to.
+/// Split at `sep` characters outside brackets, parentheses and quotes.
+fn split_top(s: &str, sep: impl Fn(char) -> bool) -> Vec<&str> {
+    let (mut out, mut start, mut depth, mut quote) = (Vec::new(), 0, 0i32, None);
+    for (i, c) in s.char_indices() {
+        match (quote, c) {
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), _) => {}
+            (None, '"' | '\'') => quote = Some(c),
+            (None, '(' | '[') => depth += 1,
+            (None, ')' | ']') => depth -= 1,
+            (None, c) if depth == 0 && sep(c) => {
+                out.push(&s[start..i]);
+                start = i + c.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    out.push(&s[start..]);
+    out
+}
+
+/// Attributes nearly every page has somewhere: `[lang]` or `[style]` narrows nothing.
+const COMMON_ATTRS: [&str; 18] = [
+    "id", "class", "style", "href", "src", "lang", "dir", "title", "role", "name", "type", "width",
+    "height", "alt", "rel", "tabindex", "hidden", "content",
+];
+
+/// One compound selector (`div.ad[x="1"]:has(...)`): its element name, and whether
+/// something in it singles elements out: a class or id, an attribute with a value or
+/// one most pages lack, or `:has(...)`. Parts inside `:not(...)` and the like count
+/// for nothing, since they can only widen what is hidden.
+fn compound(c: &str) -> (String, bool) {
+    let element: String = c
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '*')
+        .collect::<String>()
+        .to_ascii_lowercase();
+    let (mut parens, mut attr, mut narrow) = (0, None::<String>, false);
+    let lower = c.to_ascii_lowercase();
+    for (i, ch) in lower.char_indices() {
+        match ch {
+            '(' => parens += 1,
+            ')' => parens -= 1,
+            '.' | '#' if parens == 0 && attr.is_none() => narrow = true,
+            ':' if parens == 0 && attr.is_none() && lower[i..].starts_with(":has(") => {
+                narrow = true
+            }
+            '[' if parens == 0 => attr = Some(String::new()),
+            ']' => {
+                if let Some(name) = attr.take()
+                    && !COMMON_ATTRS.contains(&name.trim())
+                {
+                    narrow = true;
+                }
+            }
+            '=' | '^' | '$' | '*' | '~' | '|' if attr.is_some() => {
+                narrow = true; // a value follows
+                attr = Some("id".into()); // the rest of the brackets is the value
+            }
+            c => {
+                if let Some(name) = attr.as_mut() {
+                    name.push(c);
+                }
+            }
+        }
+    }
+    let root = lower.starts_with(":root");
+    (if root { ":root".into() } else { element }, narrow)
+}
+
+/// Would this selector hide the page itself? For each selector of the list: refused
+/// when the element it hides is `html`, `body`, `head` or `:root` without a class or
+/// id, or when no part of it singles anything out (`*`, `:not(.x)`, `[lang]`,
+/// `body > *`). `[id^="ad-"]`, `[data-ad-slot]`, `li.ad > a > *` and `##amp-ad`
+/// are fine.
 fn hides_page(selector: &str) -> bool {
-    selector.split(',').any(|part| {
-        let mut words = part
-            .split(|c: char| c.is_whitespace() || ">+~".contains(c))
-            .filter(|w| !w.is_empty())
-            .peekable();
-        words.peek().is_some()
-            && words.all(|w| {
-                ["html", "body", "head", "*", ":root"].contains(&w.to_ascii_lowercase().as_str())
-            })
+    split_top(selector, |c| c == ',').into_iter().any(|part| {
+        let parts: Vec<(String, bool)> =
+            split_top(part.trim(), |c| c.is_whitespace() || ">+~".contains(c))
+                .into_iter()
+                .filter(|c| !c.is_empty())
+                .map(compound)
+                .collect();
+        let page = |e: &str| ["html", "body", "head", ":root"].contains(&e);
+        let named = |c: &str| split_top(c, |ch| ch == '.' || ch == '#').len() > 1;
+        let subject = split_top(part.trim(), |c| c.is_whitespace() || ">+~".contains(c))
+            .into_iter()
+            .rfind(|c| !c.is_empty())
+            .unwrap_or("");
+        match parts.last() {
+            None => true,
+            Some((e, _)) if page(e) => !named(subject),
+            _ => parts
+                .iter()
+                .all(|(e, narrow)| !narrow && (e.is_empty() || e == "*" || page(e))),
+        }
     })
 }
 
@@ -312,32 +396,60 @@ const SECOND_LEVELS: [&str; 10] = [
     "co", "com", "net", "org", "gov", "edu", "ac", "ne", "or", "go",
 ];
 
+/// Address words too common to single anything out.
+const COMMON: [&str; 20] = [
+    "http", "https", "www", "ws", "wss", "com", "net", "org", "html", "htm", "php", "js", "css",
+    "png", "jpg", "gif", "svg", "json", "xml", "asp",
+];
+
 /// A rule with no site to limit it that would hit nearly every address: a typo or a
-/// hostile list, not a filter. `||host...` needs two labels (or a name of four letters
-/// or more followed by a dot: any top-level domain) and must not be a public suffix
-/// (`||com^`, `||co.uk^`); any other pattern needs four characters besides wildcards
-/// and a leading scheme (`*`, `://`, `|http`, `.js`, `$script` fail). Rules for pings
-/// only are let through: no page breaks without them.
+/// hostile list, not a filter. Host patterns must name a site (`host_too_broad`); any
+/// other pattern needs four characters besides wildcards and a leading scheme, and
+/// either an uncommon word of three letters or a path or query (`/`, `?`, `=`, `&`)
+/// with five characters. So `*`, `://`, `|http`, `.js`, `.com^` and `.co.uk^` are
+/// refused, `/ut.js?cb=` is not. Block rules for pings only are let through: no page
+/// breaks without them.
 fn too_broad(n: &Net, body: &str) -> bool {
-    if n.types == PING {
+    if n.types == PING && !n.allow {
         return false;
     }
     if n.host {
-        let host = body.split(['/', '^', ':', '?', '|']).next().unwrap_or("");
-        let labels: Vec<&str> = host.split('.').filter(|l| !l.is_empty()).collect();
-        return match labels.as_slice() {
-            [] => true,
-            [name] => !(host.ends_with('.') && name.len() >= 4),
-            [sld, tld] => tld.len() == 2 && SECOND_LEVELS.contains(sld),
-            _ => false,
-        };
+        return host_too_broad(body);
     }
     let mut rest = body.trim_start_matches(['*', '|']);
     for scheme in ["https", "http", "wss", "ws", "://", ":", "//"] {
         rest = rest.strip_prefix(scheme).unwrap_or(rest);
     }
+    if n.start && rest.len() != body.len() {
+        return host_too_broad(rest); // `|https://host...`: a host, like `||host`
+    }
     let literal = rest.bytes().filter(|b| !b"*^|".contains(b)).count();
-    literal < 4 || !rest.bytes().any(|b| b.is_ascii_alphanumeric())
+    let word = rest
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .any(|w| w.len() >= 3 && !COMMON.contains(&w.to_ascii_lowercase().as_str()));
+    let path = literal >= 5 && rest.contains(['/', '?', '=', '&']);
+    literal < 4 || !(word || path)
+}
+
+/// The host at the start of a pattern must name a site: one of its labels other than
+/// the top-level domain (and a public second level, "co.uk") is written out, in full
+/// or with three letters beside its wildcard. One label is accepted only followed by
+/// a dot ("any top-level domain") and four letters long. So `||com^`, `||co.uk^`,
+/// `||*.*^` and `||a*.com^` are refused; `||t.co^` and `||mkto-*.com^` are not.
+fn host_too_broad(pattern: &str) -> bool {
+    let host = pattern
+        .split(['/', '^', ':', '?', '|'])
+        .next()
+        .unwrap_or("");
+    let labels: Vec<&str> = host.split('.').filter(|l| !l.is_empty()).collect();
+    let letters = |l: &str| l.bytes().filter(|b| *b != b'*').count();
+    let names: &[&str] = match labels.as_slice() {
+        [] => return true,
+        [one] => return !(host.ends_with('.') && !one.contains('*') && letters(one) >= 4),
+        [names @ .., sld, tld] if tld.len() == 2 && SECOND_LEVELS.contains(sld) => names,
+        [names @ .., _tld] => names,
+    };
+    !names.iter().any(|l| !l.contains('*') || letters(l) >= 3)
 }
 
 /// The host name, when the rule is exactly `||host^` (or `||host`).
@@ -858,6 +970,22 @@ mod tests {
             "##:root",
             "example.com##html > body",
             "##.ad, body",
+            "##body:not(.x)",
+            "##html[lang]",
+            "##html[lang=\"en\"]",
+            "##:is(html)",
+            "##:not(.ad)",
+            "##[lang]",
+            "##:not([data-x=\"1\"])",
+            "##div, *",
+            "##body > *",
+            "||*.*^",
+            "||a*.com^",
+            "||*.co.uk^",
+            ".com^",
+            ".co.uk^",
+            ".js?",
+            "@@*$ping",
         ] {
             assert_eq!(parse(line), None, "{line}");
         }
