@@ -117,19 +117,19 @@ Three durations and three curves. Pick by what is moving, not by taste.
 
 | Token | Value | Use for |
 | --- | --- | --- |
-| `--d-1` | 130 ms | Feedback (hover, press, focus) and anything **leaving**. |
-| `--d-2` | 220 ms | A part **entering**: a tab, a menu. |
-| `--d-3` | 320 ms | A whole surface: the bar, the page card resizing, a sheet, a workspace swap. |
-| `--ease-out` | `cubic-bezier(.22, 1, .36, 1)` | Entering: quick start, long soft landing. |
-| `--ease-in` | `cubic-bezier(.5, 0, .9, .4)` | Leaving. |
-| `--ease-move` | `cubic-bezier(.3, .7, .2, 1)` | Moving between two places. |
+| `--d-1` | 90 ms | Feedback (hover, press, focus) and anything **leaving**. |
+| `--d-2` | 150 ms | A part **entering**: a tab, a menu. |
+| `--d-3` | 220 ms | A whole surface: the bar, the page card resizing, a sheet, a workspace swap. |
+| `--ease-out` | `cubic-bezier(.16, 1, .3, 1)` | Entering: most of the way at once, then settle. |
+| `--ease-in` | `cubic-bezier(.4, 0, 1, 1)` | Leaving: gone without a wind-up. |
+| `--ease-move` | `cubic-bezier(.2, .8, .2, 1)` | Moving between two places. |
 
 Rules:
 
 1. **Leaving is faster than entering.** Exits use `--d-1`; entrances `--d-2`
    or `--d-3`. Things get out of the way quickly and arrive gently.
-2. **Move a short distance.** Things travel 12–36 px and fade; nothing crosses
-   the window.
+2. **Move a short distance.** Things travel 6–18 px and fade; nothing crosses
+   the window. Speed comes from short travel, not from rushing a long one.
 3. **Direction means something.** The bar comes from the edge it lives on.
    Tabs slide in from the side the new workspace sits on. Menus grow from the
    point that opened them.
@@ -137,8 +137,8 @@ Rules:
    glides down; a closed tab folds away so the list glides up. Nothing jumps.
 5. **Only new things animate.** Tabs are keyed by id, so a title update never
    replays an entrance.
-6. **Pressing has weight.** Buttons press to 94% and tabs to 98.5% on
-   mouse-down.
+6. **Pressing answers at once.** Buttons press to 96% within 40 ms and tabs to
+   98.5% on mouse-down; the response starts on the press, not the release.
 7. **Reduced motion is honored.** With the system setting on, all three
    durations become 1 ms.
 
@@ -146,13 +146,13 @@ Rules:
 
 | Interaction | Animation |
 | --- | --- |
-| Collapsed bar revealed (cursor within 10 px of its window edge) | The bar floats in over the page as a panel: slides 36 px from its edge, scales from 98.5%, fades in. `--d-3` `--ease-out` |
-| Revealed bar let go (cursor away for 300 ms) | Slides back 22 px and fades. `--d-1` `--ease-in` |
+| Collapsed bar revealed (cursor within 8 px of its window edge, checked 40 times a second) | The bar floats in over the page as a panel: slides 18 px from its edge, scales from 99%, fades in. `--d-3` `--ease-out` |
+| Revealed bar let go (cursor away for 180 ms) | Slides back 11 px and fades. `--d-1` `--ease-in` |
 | Bar collapsed or pinned open, layout changed | The page card **glides** to its new size over `--d-3` with the same soft landing (driven natively, `PAGE_GLIDE` in `main.rs`) while the bar slides in over `--d-3` |
 | New tab / closed tab | Grows from / folds to zero height with a fade. `--d-2` in, `--d-1` out |
-| Switching workspace | Tab list slides 32 px from that workspace's side, `--d-3`; the window tint changes with it |
-| Menu or workspace editor | Scales from 94% at its anchor, `--d-2` |
-| Settings / Customize sheet | Rises 10 px and fades in, `--d-3` |
+| Switching workspace | Tab list slides 16 px from that workspace's side, `--d-3`; the window tint changes with it |
+| Menu or workspace editor | Scales from 96% at its anchor, `--d-2` |
+| Settings / Customize sheet | Rises 6 px and fades in, `--d-3` |
 | Address bar focus | Lifts to `--surface`, accent ring grows, `--d-2` |
 | Page loading | Spinner in the tab, sweep under the hotbar |
 | Hover, press | Background `--d-1`; press scale as above |

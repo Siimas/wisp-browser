@@ -32,17 +32,17 @@ use wry::{NewWindowResponse, PageLoadEvent, Rect, WebView, WebViewBuilder};
 
 // Collapsed bar: how the cursor brings it back and lets it go again.
 /// Cursor this close to the bar's window edge reveals the bar.
-const NEAR: f64 = 10.0;
+const NEAR: f64 = 8.0;
 /// Cursor may stray this far past the bar before it counts as having left.
 const LEAVE_MARGIN: f64 = 36.0;
 /// How long the cursor must stay away before the bar hides again.
-const LEAVE_DELAY: Duration = Duration::from_millis(300);
+const LEAVE_DELAY: Duration = Duration::from_millis(180);
 /// How often the cursor is checked while the bar is collapsed.
-const POLL: Duration = Duration::from_millis(60);
+const POLL: Duration = Duration::from_millis(25);
 /// Look for a new version this often (and once shortly after start).
 const UPDATE_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
 /// The page card gliding to a new size (keep in step with --d-3 in ui.html).
-const PAGE_GLIDE: Duration = Duration::from_millis(320);
+const PAGE_GLIDE: Duration = Duration::from_millis(220);
 const FRAME: Duration = Duration::from_millis(8);
 
 /// Messages from the UI (and, for `Key` only, from pages).
@@ -173,7 +173,7 @@ fn zone(side: Side, x: f64, y: f64, w: f64, bar: f64) -> Zone {
 
 /// Position `t` (0..1) along a glide that starts fast and settles softly.
 fn ease_out(t: f64) -> f64 {
-    1.0 - (1.0 - t.clamp(0.0, 1.0)).powi(4)
+    1.0 - (1.0 - t.clamp(0.0, 1.0)).powi(5)
 }
 
 struct App {

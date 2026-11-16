@@ -49,12 +49,12 @@
   --shadow-pop: 0 0 0 1px var(--line), 0 18px 44px #0000003d, 0 4px 10px #0000001f;  /* floating: menus, the revealed bar */
 
   /* Motion: three durations, three curves */
-  --d-1: 130ms;   /* feedback: hover, press, focus; anything leaving */
-  --d-2: 220ms;   /* parts entering: tabs, menus */
-  --d-3: 320ms;   /* whole surfaces: the bar, sheets, workspace swaps (= PAGE_GLIDE in Rust) */
-  --ease-out: cubic-bezier(.22, 1, .36, 1);  /* entering: quick start, long soft landing */
-  --ease-in: cubic-bezier(.5, 0, .9, .4);    /* leaving */
-  --ease-move: cubic-bezier(.3, .7, .2, 1);  /* moving between two places */
+  --d-1: 90ms;    /* feedback: hover, press, focus; anything leaving */
+  --d-2: 150ms;   /* parts entering: tabs, menus */
+  --d-3: 220ms;   /* whole surfaces: the bar, sheets, workspace swaps (= PAGE_GLIDE in Rust) */
+  --ease-out: cubic-bezier(.16, 1, .3, 1);   /* entering: most of the way at once, then settle */
+  --ease-in: cubic-bezier(.4, 0, 1, 1);      /* leaving: gone without a wind-up */
+  --ease-move: cubic-bezier(.2, .8, .2, 1);  /* moving between two places */
   color-scheme: light;
 }
 :root[data-theme=dark] {
@@ -88,7 +88,7 @@ body::before { /* texture */
 button { font: inherit; letter-spacing: inherit; color: inherit; border: 0; background: none; padding: 0; border-radius: var(--r-md); }
 button, .tab, .chip, .mi { transition: background var(--d-1), color var(--d-1), transform var(--d-1), opacity var(--d-1), box-shadow var(--d-1); }
 button:hover { background: var(--hover); }
-button:active { transform: scale(.94); }
+button:active { transform: scale(.96); transition-duration: 40ms; }
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, .tab:focus-visible {
   outline: 2px solid var(--accent); outline-offset: 1px;
 }
@@ -194,8 +194,8 @@ i.dot { display: block; width: 8px; height: 8px; border-radius: 50%; background:
 
 /* sidebar layouts */
 :root:not([data-side=top]) #sidebar { flex-direction: column; gap: var(--sp-1); width: var(--side-w); padding: 0 var(--gap) var(--gap); animation: bar-in var(--d-3) var(--ease-out); }
-:root[data-side=right] #sidebar { --from: 24px; }
-:root[data-side=left] #sidebar { --from: -24px; }
+:root[data-side=right] #sidebar { --from: 12px; }
+:root[data-side=left] #sidebar { --from: -12px; }
 :root[data-side=right]:not([data-hidden]) #page { margin-right: 0; }
 :root[data-side=left]:not([data-hidden]) #page { margin-left: 0; }
 :root:not([data-side=top]) #ws-head { display: flex; }
@@ -211,8 +211,8 @@ i.dot { display: block; width: 8px; height: 8px; border-radius: 50%; background:
 @keyframes tab-in { from { height: 0; margin-bottom: -2px; opacity: 0; transform: scale(.96); } }
 @keyframes tab-out { to { height: 0; margin-bottom: -2px; opacity: 0; transform: scale(.96); } }
 /* swapping workspaces slides the tab list sideways */
-#tabs.swap-next { animation: swap var(--d-3) var(--ease-out); --from: 32px; }
-#tabs.swap-prev { animation: swap var(--d-3) var(--ease-out); --from: -32px; }
+#tabs.swap-next { animation: swap var(--d-3) var(--ease-out); --from: 16px; }
+#tabs.swap-prev { animation: swap var(--d-3) var(--ease-out); --from: -16px; }
 @keyframes swap { from { opacity: 0; transform: translateX(var(--from)); } }
 
 /* top-bar layouts */
@@ -231,7 +231,7 @@ i.dot { display: block; width: 8px; height: 8px; border-radius: 50%; background:
 
 /* the bar arriving */
 @keyframes bar-in { from { opacity: 0; transform: translateX(var(--from)); } }
-@keyframes bar-in-top { from { opacity: 0; transform: translateY(-12px); } }
+@keyframes bar-in-top { from { opacity: 0; transform: translateY(-8px); } }
 
 /* With the workspace switcher on screen, the header above the tabs would say it twice. */
 :root[data-ws-placed] #ws-head, :root[data-ws-placed]:not([data-private]) #sidebar > hr.sep { display: none !important; }
@@ -247,12 +247,13 @@ i.dot { display: block; width: 8px; height: 8px; border-radius: 50%; background:
 :root[data-floater], :root[data-floater] body { background: transparent; }
 :root[data-floater] body::before, :root[data-floater] #page, :root[data-floater] #edge { display: none; }
 :root[data-floater] #app {
+  will-change: transform, opacity;
   display: flex; flex-direction: column; position: absolute; height: auto; overflow: hidden;
   border-radius: var(--r-lg); background: var(--paint); box-shadow: var(--shadow-pop);
   opacity: 0; pointer-events: none;
 }
-:root[data-floater][data-side=right] #app { inset: var(--float-pad) var(--float-pad) var(--float-pad) var(--float-shadow); --from: 36px; }
-:root[data-floater][data-side=left] #app { inset: var(--float-pad) var(--float-shadow) var(--float-pad) var(--float-pad); --from: -36px; }
+:root[data-floater][data-side=right] #app { inset: var(--float-pad) var(--float-pad) var(--float-pad) var(--float-shadow); --from: 18px; }
+:root[data-floater][data-side=left] #app { inset: var(--float-pad) var(--float-shadow) var(--float-pad) var(--float-pad); --from: -18px; }
 :root[data-floater][data-side=top] #app { inset: var(--float-pad) var(--float-pad) var(--float-shadow) var(--float-pad); }
 :root[data-floater]:not([data-side=top]) #hotbar { display: none; }
 :root[data-floater]:not([data-side=top]) #sidebar { width: auto; flex: 1; padding: var(--gap); animation: none; }
@@ -268,12 +269,12 @@ i.dot { display: block; width: 8px; height: 8px; border-radius: 50%; background:
 :root[data-floater][data-glass] #app { background: color-mix(in srgb, var(--bg) 40%, transparent); box-shadow: var(--shadow-pop), inset 0 1px 0 #ffffff1a; }
 /* The address must never blend with page pixels, glass or not. */
 :root[data-floater][data-glass] .url { background: color-mix(in srgb, var(--bg) 88%, var(--fg)); }
-:root[data-floater][data-glass][data-side=right] #app { --from: 14px; }
-:root[data-floater][data-glass][data-side=left] #app { --from: -14px; }
-@keyframes float-in { from { opacity: 0; transform: translateX(var(--from)) scale(.985); } }
+:root[data-floater][data-glass][data-side=right] #app { --from: 10px; }
+:root[data-floater][data-glass][data-side=left] #app { --from: -10px; }
+@keyframes float-in { from { opacity: 0; transform: translateX(var(--from)) scale(.99); } }
 @keyframes float-out { from { opacity: 1; } to { opacity: 0; transform: translateX(calc(var(--from) * .6)); } }
-@keyframes float-in-top { from { opacity: 0; transform: translateY(-28px) scale(.985); } }
-@keyframes float-out-top { from { opacity: 1; } to { opacity: 0; transform: translateY(-16px); } }
+@keyframes float-in-top { from { opacity: 0; transform: translateY(-14px) scale(.99); } }
+@keyframes float-out-top { from { opacity: 1; } to { opacity: 0; transform: translateY(-8px); } }
 
 /* ================= PAGE AREA + SHEETS ================= */
 /* The card the page sits on. The tab's own view covers it exactly; its shadow shows around. */
@@ -281,7 +282,7 @@ i.dot { display: block; width: 8px; height: 8px; border-radius: 50%; background:
   border-radius: var(--page-r); box-shadow: var(--shadow-card); background: color-mix(in srgb, var(--fg) 3%, transparent); }
 .sheet { display: none; position: absolute; inset: 0; overflow-y: auto; padding: var(--sp-5) var(--sp-4) calc(var(--sp-6) * 2); animation: sheet-in var(--d-3) var(--ease-out); }
 :root[data-settings] #settings, :root[data-customizing] #customize { display: block; }
-@keyframes sheet-in { from { opacity: 0; transform: translateY(10px); } }
+@keyframes sheet-in { from { opacity: 0; transform: translateY(6px); } }
 .sheet > div { max-width: 640px; margin: 0 auto; }
 .sheet h1 { font-size: var(--text-xl); margin: 0 0 var(--sp-1); display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2); }
 .sheet h2 { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: .06em; color: var(--mute); margin: var(--sp-5) 0 var(--sp-2); }
@@ -374,7 +375,7 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
 .pop { position: fixed; z-index: 20; width: 232px; padding: var(--sp-2); border-radius: var(--r-lg); background: color-mix(in srgb, var(--bg) 64%, transparent);
   -webkit-backdrop-filter: blur(28px) saturate(1.8); backdrop-filter: blur(28px) saturate(1.8); box-shadow: var(--shadow-pop); animation: pop-in var(--d-2) var(--ease-out); transform-origin: var(--ox, 50%) var(--oy, 0); }
 .pop[hidden] { display: none; }
-@keyframes pop-in { from { opacity: 0; transform: scale(.94); } }
+@keyframes pop-in { from { opacity: 0; transform: scale(.96); } }
 .mi > svg, .mi > i.dot { margin-right: 2px; }
 .mi { display: flex; align-items: center; gap: var(--sp-2); width: 100%; height: var(--ctl); padding: 0 var(--sp-2); text-align: left; border-radius: var(--r-sm); }
 .mi.danger { color: var(--danger); }
