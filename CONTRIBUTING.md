@@ -83,6 +83,43 @@ Release workflow sees a version with no tag, builds the installers, signs the
 update files, and publishes the release (which creates the tag). Ordinary merges
 publish nothing. Installed copies then update themselves.
 
+To build an installer by hand:
+
+```bash
+cargo install cargo-packager --locked
+cargo build --release
+cargo packager --release --formats dmg   # or: --formats nsis on Windows
+```
+
+### Update signing key (one-time setup)
+
+Automatic updates need a signing key pair. Generate it once and keep the
+private half safe: anyone holding it can ship an update to every installed copy,
+and if it is lost, installed copies can no longer be updated automatically.
+
+```bash
+cargo packager signer generate --path ~/.wisp/update.key
+```
+
+Then, in the repository's settings on GitHub (Secrets and variables > Actions):
+
+- secret `WISP_UPDATE_PRIVATE_KEY`: the contents of `~/.wisp/update.key`
+- secret `WISP_UPDATE_PRIVATE_KEY_PASSWORD`: the password you chose
+- variable `WISP_UPDATE_PUBKEY`: the contents of `~/.wisp/update.key.pub`
+
+From the next release on, the workflow signs the update files and publishes
+`latest.json`, which installed copies read. Without the key, releases are built
+as before and offer no automatic update. Copies you build yourself do not
+update.
+
+### Brand images
+
+The banner, wordmark, download buttons and screenshots used by the README are
+in [docs/images](docs/images) and follow [docs/BRAND.md](docs/BRAND.md); the
+banner, wordmark and buttons come in a light and a dark version. `social-preview.png` (1280x640) is the image for
+link previews; GitHub only takes it by hand, under Settings > General > Social
+preview.
+
 ## License
 
 Contributions are accepted under the project's [MIT license](LICENSE).

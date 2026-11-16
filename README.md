@@ -1,93 +1,127 @@
-# Wisp
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/banner-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/banner-light.svg">
+  <img src="docs/images/banner-light.svg" alt="Wisp" width="100%">
+</picture>
 
-A fast, lightweight, customizable web browser written in Rust.
+<p align="center">
+  <b>A small, quiet web browser for macOS and Windows that you can make your own.</b>
+</p>
 
-Wisp is a thin Rust shell around the web engine your operating system already
-ships (WebKit on macOS, WebView2 on Windows). It does not bundle its own copy of
-Chromium, so the download is a few megabytes and pages render with the system
-engine.
+<p align="center">
+  <a href="https://github.com/Siimas/wisp-browser/releases/latest"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/download-macos-dark.svg"><img src="docs/images/download-macos-light.svg" alt="Download for macOS" height="44"></picture></a>
+  &nbsp;
+  <a href="https://github.com/Siimas/wisp-browser/releases/latest"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/images/download-windows-dark.svg"><img src="docs/images/download-windows-light.svg" alt="Download for Windows" height="44"></picture></a>
+</p>
 
-## Features
+<p align="center">
+  <a href="#install">Install</a> ·
+  <a href="PRIVACY.md">Privacy</a> ·
+  <a href="CHANGELOG.md">What's new</a> ·
+  <a href="CONTRIBUTING.md">Contribute</a>
+</p>
 
-- **Sidebar or top bar**: tabs in a sidebar on the right (default) or left with
-  a hotbar across the top for the address bar and buttons, or a classic top bar
-  in relaxed or compact size. The page sits on a rounded card.
-- **Customize toolbar**: drag the address bar, any button, the workspace
-  switcher and spacers between the hotbar and the sidebar, or remove them
-- **Collapsible bar**: tuck the bar away; it floats back over the page when the
-  mouse comes near that window edge
-- **Workspaces**: named groups of tabs with their own icon and color; the
-  window takes a tint of the active one, and tabs can be moved between them
-- **Tab basics**: drag tabs to reorder them, pin the ones you keep (compact
-  icon tiles above the list), duplicate a tab, close the others, and reopen
-  the tab you just closed
-- **Private tabs and private windows**: nothing from them is kept on disk or
-  saved in the session
-- **Theme editor**: presets, up to three background colors as a gradient,
-  textures (grain, dots, lines, grid), accent color, custom CSS
-- Ad and tracker blocking inside the engine's network layer
-- Every hotkey can be rebound
-- Session restore, saved as you browse; restored tabs load only when opened
-- Double-click an empty part of the bar to expand the window, drag it to move,
-  right-click it for layout options
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/hero-dark.webp">
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/hero-light.webp">
+  <img src="docs/images/hero-dark.webp" alt="The Wisp window: a web page on a rounded card, with pinned tabs, a tab list and a workspace switcher in a sidebar">
+</picture>
 
-Everything is in Settings (`Cmd/Ctrl + ,`) and applies live. The interface is
-built on a small design and motion system: see [docs/DESIGN.md](docs/DESIGN.md).
+Wisp does not ship its own copy of a web engine. It uses the one your computer
+already has (WebKit on macOS, WebView2 on Windows), so the download is about
+two megabytes and engine security fixes arrive with your system updates. No
+account, no telemetry, free and open source.
+
+## A sidebar that gets out of the way
+
+Tabs live in a sidebar on the right or the left, with the ones you keep pinned
+as small tiles at the top. Collapse it and the page takes the whole window;
+move the mouse to the edge and the sidebar floats back over the page. If you
+prefer tabs across the top, there is a classic top bar in two sizes.
+
+![The sidebar floating over a page as a frosted panel after being collapsed](docs/images/floating.webp)
+
+## Workspaces
+
+Group tabs into named workspaces, each with its own icon and color. The window
+takes a tint of the one you are in, so you can tell at a glance where you are.
+
+![The Work workspace: its own tabs, and the window tinted in the workspace's orange](docs/images/workspaces.webp)
+
+## Your colors
+
+The theme editor is a color wheel laid flat. Place up to three colors for a
+gradient, set the grain, pick an accent, or start from one of nine presets. Light and dark
+are both there, and everything applies as you change it.
+
+![Left: the theme editor with the Dusk preset selected, its colors as dots on a canvas above the nine presets. Right: Wisp in light mode with the Daybreak preset and tabs across the top](docs/images/theme-pair.webp)
+
+## Your toolbar
+
+Drag the address bar, any button, or the workspace switcher to where you want
+it: across the top, above the tabs, or below them. Remove what you do not use.
+Every keyboard shortcut can be changed too.
+
+![Customize mode: drop zones outlined on the toolbar and sidebar, and a tray of spare buttons](docs/images/customize.webp)
+
+## Private by design
+
+- **Nothing phones home.** No telemetry, no analytics, no account, no Wisp
+  server. The app itself only asks GitHub whether there is an update (you can
+  turn that off) and asks the sites in your tabs for their icons.
+- **Ads and trackers are blocked** from a built-in list of known hosts, checked
+  on your computer. You can add your own.
+- **Private tabs and private windows** keep nothing on disk.
+- **History and bookmarks stay on your computer.** Address bar suggestions come
+  only from your own tabs, bookmarks and history. Nothing is sent while you
+  type.
+
+![Left: a private window, marked in the sidebar and painted deep violet. Right: the History sheet, pages listed by day with search and Clear browsing data](docs/images/privacy-pair.webp)
+
+Every request Wisp makes, and every file it keeps, is listed in
+[PRIVACY.md](PRIVACY.md).
+
+## And the everyday things
+
+Find in page, a downloads list, history, bookmarks, address bar suggestions,
+and your tabs back where you left them when you reopen the app. Restored tabs
+load only when you open them.
 
 ## Install
 
-Download the installer for your system from the
+Get the installer for your system from the
 [latest release](https://github.com/Siimas/wisp-browser/releases/latest).
 
 | System | File |
 | --- | --- |
 | macOS, Apple Silicon | `Wisp_<version>_aarch64.dmg` |
 | macOS, Intel | `Wisp_<version>_x64.dmg` |
-| Windows 10/11, 64-bit | `Wisp_<version>_x64-setup.exe` |
+| Windows 10 or 11, 64-bit | `wisp_<version>_x64-setup.exe` |
 
-The installers are not code-signed yet, so the first launch needs one extra step:
+The installers are not code-signed yet, so the first launch needs one extra
+step:
 
-- **macOS**: after dragging Wisp to Applications, run
-  `xattr -cr /Applications/Wisp.app` in Terminal, then open it.
-- **Windows**: on the SmartScreen prompt choose **More info**, then **Run anyway**.
+- **macOS**: drag Wisp to Applications, run this in Terminal, then open it.
 
-## Updates
+  ```bash
+  xattr -cr /Applications/Wisp.app
+  ```
 
-Installed copies update themselves. A new version downloads in the background,
-is installed as you quit, and is simply there the next time you open Wisp, with
-its release notes in a tab. You can turn this off, or check by hand, in
-Settings > About.
+- **Windows**: on the SmartScreen prompt choose **More info**, then
+  **Run anyway**.
 
-Every update file is signed, and Wisp refuses any file whose signature does not
-match the key it was built with. Copies you build yourself do not update.
+Installed copies update themselves: a new version downloads in
+the background and is in place the next time you open Wisp. Every update file
+is signed, and Wisp refuses one whose signature does not match. You can turn
+this off in Settings > About.
 
-## Uninstall
+<details>
+<summary><b>Keyboard shortcuts</b></summary>
 
-**macOS**: quit Wisp and drag `Wisp.app` from Applications to the Trash. That
-removes the app and leaves your data. To remove the data as well:
+<br>
 
-```bash
-rm -rf ~/Library/"Application Support"/Wisp ~/Library/WebKit/io.github.siimas.wisp ~/Library/Caches/io.github.siimas.wisp ~/Library/HTTPStorages/io.github.siimas.wisp*
-```
-
-**Windows**: open Settings > Apps > Installed apps, find Wisp and choose
-**Uninstall** (or run `uninstall.exe` in the install folder). This removes the
-program, its Start menu and desktop shortcuts and its entry in the list. Tick
-**Delete the application data** in the uninstaller to remove your data too, or
-delete the folders below by hand.
-
-What lives where:
-
-| | macOS | Windows |
-| --- | --- | --- |
-| Settings and saved session | `~/Library/Application Support/Wisp/` | `%APPDATA%\Wisp\` |
-| Cookies, cache, site storage | `~/Library/WebKit/io.github.siimas.wisp/`, `~/Library/Caches/io.github.siimas.wisp/`, `~/Library/HTTPStorages/io.github.siimas.wisp*` | `wisp.exe.WebView2\` in the install folder (`%LOCALAPPDATA%\Wisp\` unless you chose another) |
-
-Wisp keeps nothing anywhere else. See [PRIVACY.md](PRIVACY.md).
-
-## Default hotkeys
-
-`Mod` is `Cmd` on macOS and `Ctrl` on Windows.
+`Mod` is `Cmd` on macOS and `Ctrl` on Windows. All of them can be changed in
+Settings > Hotkeys.
 
 | Action | Keys |
 | --- | --- |
@@ -101,86 +135,72 @@ Wisp keeps nothing anywhere else. See [PRIVACY.md](PRIVACY.md).
 | Back / forward | `Mod+[` / `Mod+]` |
 | Reload / home | `Mod+R` / `Mod+Shift+H` |
 | Zoom in / out / reset | `Mod+=` / `Mod+-` / `Mod+0` |
-| Settings | `Mod+,` |
+| Find in page | `Mod+F` |
 | History / bookmarks | `Mod+Y` / `Mod+Shift+O` |
 | Bookmark this page | `Mod+D` |
+| Settings | `Mod+,` |
 
-## Settings file
+</details>
 
-Settings live in `config.json`, which the settings page writes for you:
+<details>
+<summary><b>Where Wisp keeps your data</b></summary>
 
-- macOS: `~/Library/Application Support/Wisp/`
-- Windows: `%APPDATA%\Wisp\`
+<br>
 
-## Build from source
+| | macOS | Windows |
+| --- | --- | --- |
+| Settings, session, history, bookmarks | `~/Library/Application Support/Wisp/` | `%APPDATA%\Wisp\` |
+| Cookies, cache, site storage | `~/Library/WebKit/io.github.siimas.wisp/`, `~/Library/Caches/io.github.siimas.wisp/`, `~/Library/HTTPStorages/io.github.siimas.wisp*` | `wisp.exe.WebView2\` in the install folder (`%LOCALAPPDATA%\Wisp\` unless you chose another) |
 
-Needs [Rust](https://rustup.rs). On Windows you also need the
-[WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/)
-(preinstalled on Windows 11).
+Settings are in `config.json`, which the settings page writes for you. Wisp
+keeps nothing anywhere else.
+
+</details>
+
+### Uninstall
+
+**macOS**: quit Wisp and drag `Wisp.app` from Applications to the Trash. Your
+data stays. To remove it as well:
+
+```bash
+rm -rf ~/Library/"Application Support"/Wisp ~/Library/WebKit/io.github.siimas.wisp ~/Library/Caches/io.github.siimas.wisp ~/Library/HTTPStorages/io.github.siimas.wisp*
+```
+
+**Windows**: open Settings > Apps > Installed apps, find Wisp and choose
+**Uninstall**. Tick **Delete the application data** in the uninstaller to
+remove your data too.
+
+## Not built yet
+
+Wisp is young. Things you may miss today:
+
+- Extensions, sync, and importing from another browser.
+- Bookmark folders. Bookmarks are one flat list.
+- Filter-list ad blocking. Blocking is by host, so some ads get through and
+  empty ad slots are not hidden.
+- Separate logins per workspace. Workspaces group tabs but share cookies.
+- Linux builds.
+- On Windows, the page card has square corners and the floating sidebar is
+  solid rather than frosted.
+- A menu or suggestion list that has to overlap the page hides the page while
+  it is open, and a private window shows its own Dock or taskbar icon.
+
+## For developers
+
+Wisp is a thin Rust shell around the system web view, and the whole interface
+is one HTML file. You need [Rust](https://rustup.rs); on Windows also the
+[WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/),
+which Windows 11 already has.
 
 ```bash
 cargo run --release
 ```
 
-To build an installer:
-
-```bash
-cargo install cargo-packager --locked
-cargo build --release
-cargo packager --release --formats dmg   # or: --formats nsis on Windows
-```
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for how to build, check and submit a
-change, and [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
-`main` is protected: open a pull request, and CI (`cargo fmt --check`,
-`cargo clippy`, `cargo test` on macOS and Windows) must pass before merging.
-
-A release is published automatically when the version in `Cargo.toml` changes
-on `main`: move the Unreleased entries in `CHANGELOG.md` under the new version,
-bump `version`, and merge. The Release workflow builds the installers and
-publishes them; ordinary merges publish nothing.
-
-### Update signing key (one-time setup)
-
-Automatic updates need a signing key pair. Generate it once and keep the
-private half safe: anyone holding it can ship an update to every installed copy,
-and if it is lost, installed copies can no longer be updated automatically.
-
-```bash
-cargo packager signer generate --path ~/.wisp/update.key
-```
-
-Then, in the repository's settings on GitHub (Secrets and variables > Actions):
-
-- secret `WISP_UPDATE_PRIVATE_KEY`: the contents of `~/.wisp/update.key`
-- secret `WISP_UPDATE_PRIVATE_KEY_PASSWORD`: the password you chose
-- variable `WISP_UPDATE_PUBKEY`: the contents of `~/.wisp/update.key.pub`
-
-From the next release on, the workflow signs the update files and publishes
-`latest.json`, which installed copies read. Without the key, releases are built
-as before and offer no automatic update.
-
-## Known limits
-
-- Ad blocking is a host list (built-in plus your own). It does not yet read
-  EasyList-style filter lists or hide leftover empty ad slots.
-- Linux builds are not provided, and network-level blocking is not wired up there.
-- Workspaces group tabs but share cookies and logins.
-- A menu that has to overlap the page hides the page while it is open (menus
-  opened from the sidebar stay inside it). Page corners are square on Windows.
-- A private window runs as a second copy of the app, so it shows its own
-  Dock or taskbar icon.
-- No find-in-page yet.
-- The suggestions list under a docked address bar hides the page while it is
-  open. Bookmarks are one flat list (no folders, no import).
-
-## Privacy
-
-No telemetry, no accounts, no Wisp server. The app itself only contacts GitHub
-to check for updates and the sites in your tabs for their icons. The full
-statement is in [PRIVACY.md](PRIVACY.md).
+- [CONTRIBUTING.md](CONTRIBUTING.md): building, checks, pull requests, releases
+- [docs/DESIGN.md](docs/DESIGN.md): the design and motion system
+- [PRIVACY.md](PRIVACY.md): what the app sends and stores
+- [SECURITY.md](SECURITY.md): reporting a vulnerability
+- [CHANGELOG.md](CHANGELOG.md): what changed in each version
 
 ## License
 
