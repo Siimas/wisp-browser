@@ -10,6 +10,8 @@ All notable changes to Wisp are recorded here. The format follows
 
 - Google is the default search engine and home page for new profiles. Existing
   profiles keep what they have; change it in Settings > Behavior.
+- Double-clicking the empty space around the tabs opens a new tab at the end of
+  the list. (Double-clicking the hotbar still expands the window.)
 - The sidebar is resized by dragging its inner edge (double-click to reset); the
   width slider is gone from Settings.
 
