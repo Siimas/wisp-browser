@@ -33,7 +33,7 @@ pub fn configure(cfg: &Adblock) -> Option<Vec<String>> {
 
 fn host_of(url: &str) -> Option<&str> {
     let rest = url.split_once("://")?.1;
-    let authority = rest.split(['/', '?', '#']).next()?;
+    let authority = rest.split(['/', '\\', '?', '#']).next()?;
     let host = authority.rsplit('@').next()?;
     host.split(':').next().filter(|h| !h.is_empty())
 }
@@ -79,7 +79,7 @@ mod platform {
         let rules: Vec<_> = hosts
             .iter()
             .map(|h| {
-                let filter = format!("^[^:]+://+([^:/]+\\.)?{}[:/]", h.replace('.', "\\."));
+                let filter = format!("^[^:]+://+([^/]*[.@])?{}[:/]", h.replace('.', "\\."));
                 serde_json::json!({"trigger": {"url-filter": filter}, "action": {"type": "block"}})
             })
             .collect();
@@ -204,6 +204,8 @@ mod tests {
         assert!(is_blocked("https://doubleclick.net/x"));
         assert!(is_blocked("https://stats.g.doubleclick.net:443/x?y"));
         assert!(is_blocked("http://user@ads.example.org/"));
+        assert!(is_blocked("https://u:p@doubleclick.net?x=1"));
+        assert!(!is_blocked("https://example.org\\@doubleclick.net/"));
         assert!(!is_blocked("https://example.org/"));
         assert!(!is_blocked("https://notdoubleclick.net/"));
         assert!(!is_blocked(

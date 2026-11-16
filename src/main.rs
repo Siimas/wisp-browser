@@ -33,6 +33,8 @@ enum Msg {
 
 enum UserEvent {
     Ui(Msg),
+    /// Hotkey reported by the page in tab `.0`.
+    PageKey(u32, String),
     Title(u32, String),
     Load(u32, bool, String),
     NewTab(String),
@@ -150,12 +152,14 @@ impl App {
             .with_bounds(rect(0.0, top, s.width, s.height - top))
             .with_back_forward_navigation_gestures(true)
             .with_initialization_script(keys_script(&self.cfg))
-            // Pages are untrusted: the only message accepted from them is a hotkey press.
-            // ponytail: a page can fake one (e.g. close its own tab). Upgrade path:
-            // native key capture per platform instead of the injected listener.
+            // Pages are untrusted: the only message accepted from them is a hotkey press,
+            // and only while their tab is the active one (see `PageKey`).
+            // ponytail: the active page can still fake a press (e.g. close its own tab)
+            // or swallow hotkeys while focused. Upgrade path: native key capture per
+            // platform instead of the injected listener.
             .with_ipc_handler(move |req| {
                 if let Ok(Msg::Key { combo }) = serde_json::from_str(req.body()) {
-                    let _ = p1.send_event(UserEvent::Ui(Msg::Key { combo }));
+                    let _ = p1.send_event(UserEvent::PageKey(id, combo));
                 }
             })
             .with_document_title_changed_handler(move |title| {
@@ -363,6 +367,12 @@ impl App {
                 Msg::CloseTab { id } => self.close_tab(id),
                 Msg::SaveSettings { config } => self.apply_config(config),
             },
+            UserEvent::PageKey(id, combo) => {
+                // Background tabs cannot have keyboard focus, so a key from one is forged.
+                if self.tabs.get(self.active).is_some_and(|t| t.id == id) {
+                    self.handle(UserEvent::Ui(Msg::Key { combo }));
+                }
+            }
             UserEvent::Title(id, title) => {
                 if let Some(tab) = self.tab_mut(id) {
                     tab.title = title;
