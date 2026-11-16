@@ -16,6 +16,11 @@ All notable changes to Wisp are recorded here. The format follows
   tile you click in gets the address bar, find and page hotkeys. A split reads
   as one row in the tab list, survives workspace switches and restarts, and
   "Remove from split" or "Unsplit tabs" in a tab's menu take it apart.
+- Low-power mode (Settings > Behavior): solid surfaces instead of glass and no
+  animation. Automatic, the default, turns it on in the system's power saving
+  mode, on a low battery, or on a computer with 4 GB of memory or less or two
+  cores or fewer. The system's "Reduce transparency" setting now turns glass
+  off too.
 - A media player at the bottom of the sidebar while another tab plays audio or
   video: title and artist, previous, play/pause, next, mute, and a progress line
   you can drag to seek. Click the title to go to the tab; close it to hide it
@@ -25,6 +30,10 @@ All notable changes to Wisp are recorded here. The format follows
 
 ### Changed
 
+- The interface uses about 50 MB less memory: the background texture is drawn
+  without a separate window-sized layer, and looks the same.
+- With the bar collapsed, the cursor is checked less often while it is far from
+  the bar's edge.
 - Google is the default search engine and home page for new profiles. Existing
   profiles keep what they have; change it in Settings > Behavior.
 - Double-clicking the empty space around the tabs opens a new tab at the end of

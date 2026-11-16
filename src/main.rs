@@ -43,8 +43,13 @@ const OVERSHOOT: f64 = 120.0;
 const LEAVE_MARGIN: f64 = 36.0;
 /// How long the cursor must stay away before the bar hides again.
 const LEAVE_DELAY: Duration = Duration::from_millis(180);
-/// How often the cursor is checked while the bar is collapsed.
+/// How often the cursor is checked while the bar is collapsed and the cursor is near
+/// its edge (or the bar is revealed).
 const POLL: Duration = Duration::from_millis(25);
+/// low-power: further away the cursor is checked less often, as often as it could
+/// reach the edge moving this fast (px/s), but at least this often.
+const CURSOR_SPEED: f64 = 4000.0;
+const POLL_FAR: Duration = Duration::from_millis(150);
 /// Look for a new version this often (and once shortly after start).
 const UPDATE_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
 /// The page card gliding to a new size (keep in step with --d-3 in ui.html).
@@ -242,6 +247,8 @@ enum UserEvent {
     /// A page in tab `.0` asked for a new window.
     NewTab(u32, String),
     AdblockReady,
+    /// low-power: the power source or battery level changed.
+    Power,
     /// An update check finished: a version ready to install, none, or why it failed.
     Update(Result<Option<Box<update::Ready>>, String>),
     /// A search of the page in tab `.0` came back.
@@ -406,6 +413,12 @@ struct App {
     panel_radius: f64,
     /// Frosted glass shown behind the floating bar, where the platform has it.
     glass: Option<native::Glass>,
+    /// low-power: the mode is on now (set, or decided by "auto"), and glass is off
+    /// (low power, or the system asks for less transparency).
+    low: bool,
+    solid: bool,
+    /// low-power: when to check the cursor next while the bar is collapsed.
+    poll_every: Duration,
     /// Where the window buttons go, at rest and while the bar floats in.
     lights: [f64; 4],
     lights_peek: Option<[f64; 4]>,
@@ -534,8 +547,9 @@ impl App {
     }
 
     /// The layout is about to change: glide from where the tabs are now.
+    /// (low-power: no glide, the tabs jump.)
     fn start_glide(&mut self) {
-        if self.insets.is_some() {
+        if self.insets.is_some() && !self.low {
             self.glide = Some((self.frames().into_iter().collect(), Instant::now()));
         }
     }
@@ -659,7 +673,9 @@ impl App {
             "mac": cfg!(target_os = "macos"),
             "win": cfg!(windows),
             "maximized": self.maximized,
-            "glass": self.glass.is_some(),
+            "glass": self.glass.is_some() && !self.solid,
+            "low": self.low,
+            "solid": self.solid,
             "version": env!("CARGO_PKG_VERSION"),
             "downloads": self.downloads.borrow().json(),
             "media": self.media_tab().map(|t| t.media.json(t.id, &t.title, &t.url, t.private)),
@@ -1096,17 +1112,23 @@ impl App {
             if let Some(f) = &self.floater {
                 let _ = f.set_bounds(self.inset_rect(self.float_insets));
                 let _ = f.set_visible(true);
-                if let Some(glass) = &self.glass {
-                    let [l, t, r, b] = self.panel_insets;
-                    let s = self.size();
-                    let frame = [l, t, s.width - l - r, s.height - t - b];
-                    glass.show(&self.window, frame, self.panel_radius);
-                }
+                self.show_glass();
                 native::raise(f, &self.window);
             }
         }
         self.place_lights(); // after the raise: on Windows it must stay above the floater
         self.sync(); // the floater slides in, or slides out and reports `FloaterDone`
+    }
+
+    /// The frosted pane under the revealed bar, where there is one and glass is wanted.
+    /// Raise the floating bar right after, so the pane ends up beneath it.
+    fn show_glass(&self) {
+        if let Some(glass) = self.glass.as_ref().filter(|_| !self.solid) {
+            let [l, t, r, b] = self.panel_insets;
+            let s = self.size();
+            let frame = [l, t, s.width - l - r, s.height - t - b];
+            glass.show(&self.window, frame, self.panel_radius);
+        }
     }
 
     /// While the bar is collapsed: reveal it when the cursor reaches its window edge,
@@ -1140,6 +1162,22 @@ impl App {
             _ => (0.0..=s.height).contains(&y),
         };
         let near = self.cfg.layout.hover_zone as f64;
+        // low-power: check again as soon as the cursor could reach the edge, and no sooner.
+        let off = match side {
+            Side::Top => (-x).max(x - s.width),
+            _ => (-y).max(y - s.height),
+        };
+        let to_edge = match side {
+            Side::Top => y,
+            Side::Left => x,
+            Side::Right => s.width - x,
+        };
+        let far = (to_edge.max(off) - near).max(0.0);
+        self.poll_every = if self.peek {
+            POLL
+        } else {
+            Duration::from_secs_f64(far / CURSOR_SPEED).clamp(POLL, POLL_FAR)
+        };
         let zone = if inside {
             zone(side, x, y, s.width, bar, near)
         } else {
@@ -1220,7 +1258,8 @@ impl App {
             }
             "focus_url" => return self.focus_url(),
             "find" => {
-                if self.page_visible() && self.active_webview().is_some() {
+                // With Settings open, Mod+F goes to its own search box.
+                if self.settings_open || (self.page_visible() && self.active_webview().is_some()) {
                     let _ = self.chrome.focus();
                     let _ = self.chrome.evaluate_script("wisp.find()");
                 }
@@ -1348,6 +1387,7 @@ impl App {
             self.save_session();
         }
         self.apply_theme();
+        self.refresh_power();
         if old.layout.collapsed != self.cfg.layout.collapsed
             || old.layout.mode != self.cfg.layout.mode
         {
@@ -1355,6 +1395,27 @@ impl App {
         } else {
             self.sync();
         }
+    }
+
+    /// low-power: decide the mode again (settings, power source or focus changed).
+    /// Returns whether anything changed; the caller syncs.
+    fn refresh_power(&mut self) -> bool {
+        let p = native::power();
+        let cores = std::thread::available_parallelism().map_or(4, |n| n.get());
+        let low = low_power(&self.cfg.behavior.low_power, p, cores);
+        let solid = low || p.reduce_transparency;
+        if (low, solid) == (self.low, self.solid) {
+            return false;
+        }
+        (self.low, self.solid) = (low, solid);
+        if let Some(glass) = self.glass.as_ref().filter(|_| solid) {
+            glass.hide();
+        } else if let Some(f) = self.floater.as_ref().filter(|_| self.peek) {
+            // Glass is back while the bar is out (plugged in, say): put the pane under it.
+            self.show_glass();
+            native::raise(f, &self.window);
+        }
+        true
     }
 
     fn start(&mut self) {
@@ -1670,6 +1731,11 @@ impl App {
                 }
                 self.sync();
             }
+            UserEvent::Power => {
+                if self.refresh_power() {
+                    self.sync();
+                }
+            }
             #[cfg(windows)]
             UserEvent::Snap(what) => {
                 if what == "click" {
@@ -1727,6 +1793,23 @@ fn install_menu() -> muda::Menu {
     menu
 }
 
+/// low-power: whether the mode is on. "auto" turns it on when the system is saving
+/// power, the battery is low, or the computer is weak.
+fn low_power(mode: &str, p: native::Power, cores: usize) -> bool {
+    match mode {
+        "on" => true,
+        "off" => false,
+        _ => p.saver || p.low_battery || weak_hardware(p.memory, cores),
+    }
+}
+
+/// 4 GB of memory or less, or two cores or fewer: where the interface's extras show.
+/// ponytail: a coarse cut. Upgrade path: a GPU check, if integrated graphics on an
+/// otherwise decent machine turn out to struggle with the texture and glass.
+fn weak_hardware(memory: u64, cores: usize) -> bool {
+    (memory > 0 && memory <= 4 << 30) || cores <= 2
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let private_window = std::env::args().any(|a| a == "--private");
     let cfg = Config::load();
@@ -1744,6 +1827,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_title("Wisp")
         .with_inner_size(LogicalSize::new(1280.0, 820.0))
         .with_min_inner_size(LogicalSize::new(560.0, 360.0));
+    // Development: WISP_SIZE=<width>x<height> opens the window at that size.
+    #[cfg(debug_assertions)]
+    let builder = match std::env::var("WISP_SIZE").ok().and_then(|v| {
+        let (w, h) = v.split_once('x')?;
+        Some((w.parse::<f64>().ok()?, h.parse::<f64>().ok()?))
+    }) {
+        Some((w, h)) => builder.with_inner_size(LogicalSize::new(w, h)),
+        None => builder,
+    };
     // Windows: no title bar of its own. The interface's first row is the title bar and
     // draws the window buttons; the system keeps the shadow, the side and bottom resize
     // edges, snapping and rounded corners (see Msg::Minimize and #caption in ui.html).
@@ -1792,6 +1884,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         panel_insets: [0.0; 4],
         panel_radius: 0.0,
         glass: native::Glass::new(),
+        low: false,
+        solid: false,
+        poll_every: POLL,
         lights: [0.0; 4],
         lights_peek: None,
         #[cfg(target_os = "macos")]
@@ -1814,6 +1909,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         downloads: Default::default(),
         find_last: None,
     };
+    app.refresh_power();
+    let power_proxy = app.proxy.clone();
+    native::on_power_change(move || drop(power_proxy.send_event(UserEvent::Power)));
     #[cfg(windows)]
     {
         let proxy = app.proxy.clone();
@@ -1851,6 +1949,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 event: WindowEvent::CloseRequested,
                 ..
             } => app.quit = true,
+            // low-power: the system's switches send nothing we listen to; re-read them
+            // when the user comes back to the window.
+            Event::WindowEvent {
+                event: WindowEvent::Focused(true),
+                ..
+            } => app.handle(UserEvent::Power),
             Event::MainEventsCleared => {
                 app.tick();
                 app.poll_cursor();
@@ -1906,7 +2010,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else if app.glide.is_some() {
             ControlFlow::WaitUntil(Instant::now() + FRAME)
         } else if app.cfg.layout.collapsed || cfg!(debug_assertions) {
-            ControlFlow::WaitUntil(Instant::now() + POLL)
+            ControlFlow::WaitUntil(Instant::now() + app.poll_every)
         } else {
             ControlFlow::WaitUntil(next_update_check)
         };
@@ -1916,9 +2020,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        App, CLOSED_MAX, PageMsg, Side, Tab, Zone, ease_out, group_pinned, origin, place_tab,
-        remember_closed, same_origin, zone,
+        App, CLOSED_MAX, PageMsg, Side, Tab, Zone, ease_out, group_pinned, low_power, origin,
+        place_tab, remember_closed, same_origin, zone,
     };
+    use crate::native::Power;
+
+    #[test]
+    fn low_power_auto_follows_the_system() {
+        let gb = 1u64 << 30;
+        let fine = Power {
+            memory: 16 * gb,
+            ..Default::default()
+        };
+        assert!(!low_power("auto", fine, 8));
+        assert!(low_power("on", fine, 8));
+        let saver = Power {
+            saver: true,
+            ..fine
+        };
+        let low_battery = Power {
+            low_battery: true,
+            ..fine
+        };
+        assert!(low_power("auto", saver, 8) && low_power("auto", low_battery, 8));
+        assert!(!low_power("off", saver, 8));
+        let small = Power {
+            memory: 4 * gb,
+            ..fine
+        };
+        assert!(low_power("auto", small, 8) && low_power("auto", fine, 2));
+        let unknown = Power { memory: 0, ..fine };
+        assert!(!low_power("auto", unknown, 8));
+    }
 
     fn tab(id: u32, workspace: u32, pinned: bool) -> Tab {
         Tab {
