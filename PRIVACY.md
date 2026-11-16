@@ -37,6 +37,10 @@ Private tabs show a fixed icon and make no such request.
   Settings). Nothing is sent while you type: the suggestions under the address
   bar come only from your own open tabs, bookmarks and history
   (`src/store.rs`), never from a search engine.
+- **Downloads**: a file you download is fetched by the system web engine from
+  the site that offers it. Wisp makes no request of its own for it.
+- **Find in page** searches the page on your computer. What you type in the find
+  bar is not sent anywhere and is not kept.
 - **Home page**: a new window opens your home page (DuckDuckGo by default).
 - **Release notes and licenses**: after an update, and when you press View next
   to Open-source licenses, Wisp opens a page on github.com in a tab.
@@ -65,12 +69,18 @@ Private tabs show a fixed icon and make no such request.
 - Cookies, cache and site storage, kept by the system web engine. History >
   Clear browsing data can remove these too. See
   [Uninstall](README.md#uninstall) for the folders.
+- Files you download, in your Downloads folder. The list of downloads shown in
+  the toolbar (file name, the site it came from, and whether it finished) is
+  held in memory only and is gone when Wisp quits.
 - Private tabs and private windows keep nothing on disk and are left out of the
   saved session and of history. A private window can read your history and
   bookmarks to suggest addresses, but cannot change them, and private tabs are
   never offered as suggestions.
+  your Downloads folder like any other, and appears in the downloads list until
+  Wisp quits.
 
-Nothing is stored anywhere else. Removing these folders removes everything.
+Wisp stores nothing else. Removing these folders removes everything except the
+files you downloaded.
 
 ## Outside Wisp's control
 

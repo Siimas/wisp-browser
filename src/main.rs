@@ -13,6 +13,7 @@ mod config;
 #[cfg(all(target_os = "macos", debug_assertions))]
 mod debug_shot;
 mod native;
+mod page_tools;
 mod store;
 mod update;
 
@@ -129,6 +130,19 @@ enum Msg {
     SaveSettings {
         config: Box<Config>,
     },
+    // Page tools (see page_tools.rs).
+    /// Search the page: a new query, or the next/previous match of the same one.
+    Find {
+        query: String,
+        #[serde(default)]
+        back: bool,
+    },
+    FindClose,
+    /// "open" or "show" (in its folder) a finished download.
+    Download {
+        id: u32,
+        op: String,
+    },
     /// History, bookmarks and suggestions: see `store::Msg`.
     #[serde(untagged)]
     Library(store::Msg),
@@ -145,6 +159,13 @@ enum UserEvent {
     AdblockReady,
     /// An update check finished: a version ready to install, none, or why it failed.
     Update(Result<Option<Box<update::Ready>>, String>),
+    /// A search of the page in tab `.0` came back.
+    Found(u32, native::Found),
+    /// A download started or ended.
+    Downloads,
+    /// Chosen in the right-click menu of the page in tab `.0`: open this address in a
+    /// (private, if `.2`) tab. Sent by the native menu only, never by the page.
+    MenuTab(u32, String, bool),
 }
 
 struct Tab {
@@ -312,6 +333,9 @@ struct App {
     store: store::Store,
     started: bool,
     quit: bool,
+    /// Page tools: this session's downloads, and the last search (tab, query).
+    downloads: page_tools::SharedDownloads,
+    find_last: Option<(u32, String)>,
 }
 
 fn rect(x: f64, y: f64, w: f64, h: f64) -> Rect {
@@ -483,6 +507,7 @@ impl App {
             "mac": cfg!(target_os = "macos"),
             "glass": self.glass.is_some(),
             "version": env!("CARGO_PKG_VERSION"),
+            "downloads": self.downloads.borrow().json(),
             "update": {
                 "supported": update::supported(),
                 "ready": self.update.as_ref().map(|u| u.version.as_str()),
@@ -556,9 +581,13 @@ impl App {
         if let Some(ua) = &self.user_agent {
             builder = builder.with_user_agent(ua);
         }
+        let (builder, p5) = (self.with_downloads(builder), self.proxy.clone());
         match builder.build_as_child(&self.window) {
             Ok(webview) => {
                 adblock::attach(&webview);
+                native::page_menu(&webview, move |url, private| {
+                    let _ = p5.send_event(UserEvent::MenuTab(id, url, private));
+                });
                 native::round_corners(&webview, self.page_radius);
                 let zoom = self.cfg.behavior.default_zoom;
                 if zoom != 1.0 {
@@ -982,6 +1011,13 @@ impl App {
                 return self.bar_mode_changed();
             }
             "focus_url" => return self.focus_url(),
+            "find" => {
+                if self.page_visible() && self.active_webview().is_some() {
+                    let _ = self.chrome.focus();
+                    let _ = self.chrome.evaluate_script("wisp.find()");
+                }
+                return;
+            }
             "settings" => return self.set_settings_open(!self.settings_open),
             "close_tab" => return self.close_active(),
             "reopen_tab" => return self.reopen_tab(),
@@ -1288,6 +1324,9 @@ impl App {
                     }
                 }
                 Msg::SaveSettings { config } => self.apply_config(*config),
+                Msg::Find { query, back } => self.find(query, back),
+                Msg::FindClose => self.find_close(),
+                Msg::Download { id, op } => self.download_op(id, &op),
                 Msg::Library(msg) => self.library(msg),
             },
             UserEvent::PageKey(id, combo) => {
@@ -1305,6 +1344,9 @@ impl App {
                 }
             }
             UserEvent::Load(id, started, url) => {
+                if started && self.find_last.as_ref().is_some_and(|f| f.0 == id) {
+                    self.find_last = None; // a new page: the next search starts over
+                }
                 if let Some(tab) = self.tab_mut(id) {
                     tab.loading = started;
                     tab.url = url;
@@ -1316,9 +1358,30 @@ impl App {
                 }
             }
             UserEvent::NewTab(opener, url) => {
-                let private = self.tab(opener).is_some_and(|t| t.private);
+                // The address is the page's choice: web addresses only, so a page
+                // cannot have the app open a local file or a script address. Checked
+                // first, so a request that is dropped does not use up a private choice.
+                if !(url.starts_with("http://") || url.starts_with("https://")) {
+                    return;
+                }
+                let opener = self.tab(opener);
+                // Private if the opener is, or if the user just chose "Open Link in
+                // Private Tab" in its right-click menu (which the app itself observed).
+                let picked = opener
+                    .and_then(|t| t.webview.as_ref())
+                    .is_some_and(native::take_private);
+                let private = picked || opener.is_some_and(|t| t.private);
                 self.new_tab(&url, private);
             }
+            UserEvent::MenuTab(opener, url, private) => {
+                let web = url.starts_with("http://") || url.starts_with("https://");
+                if let Some(opener) = self.tab(opener).filter(|_| web) {
+                    let private = private || opener.private;
+                    self.new_tab(&url, private);
+                }
+            }
+            UserEvent::Found(id, found) => self.found(id, found),
+            UserEvent::Downloads => self.downloads_changed(),
             UserEvent::Update(found) => {
                 match found {
                     Ok(Some(ready)) => {
@@ -1447,6 +1510,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         store: store::Store::load(config::dir(), private_window),
         started: false,
         quit: false,
+        downloads: Default::default(),
+        find_last: None,
     };
     app.apply_theme();
     app.layout();
