@@ -91,6 +91,12 @@ Every keyboard shortcut can be changed too.
 Every request Wisp makes, and every file it keeps, is listed in
 [PRIVACY.md](PRIVACY.md).
 
+## And the everyday things
+
+Find in page, a downloads list, history, bookmarks, address bar suggestions,
+and your tabs back where you left them when you reopen the app. Restored tabs
+load only when you open them.
+
 ## Install
 
 Get the installer for your system from the
@@ -139,6 +145,7 @@ Settings > Hotkeys.
 | Back / forward | `Mod+[` / `Mod+]` |
 | Reload / home | `Mod+R` / `Mod+Shift+H` |
 | Zoom in / out / reset | `Mod+=` / `Mod+-` / `Mod+0` |
+| Find in page | `Mod+F` |
 | History / bookmarks | `Mod+Y` / `Mod+Shift+O` |
 | Bookmark this page | `Mod+D` |
 | Settings | `Mod+,` |
@@ -177,7 +184,6 @@ remove your data too.
 
 Wisp is young. Things you may miss today:
 
-- Find in page, and a downloads list.
 - Extensions, sync, and importing from another browser.
 - Bookmark folders. Bookmarks are one flat list.
 - Filter-list ad blocking. Blocking is by host, so some ads get through and
