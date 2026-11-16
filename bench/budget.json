@@ -1,5 +1,5 @@
 {
- "_about": "Limits for bench/perf_check.py on the GitHub-hosted runners, checked against the median of 3 runs. Raising one: see CONTRIBUTING.md (Performance budget). 'measured' is the runner's median when the limit was set, for reference.",
+ "_about": "Limits for bench/perf_check.py on the GitHub-hosted runners, checked against the median of 3 runs. 'measured' is the runner's typical median when the limits were set (Nov 2026, macos-latest, 5 runs). Headroom: memory +35-40% (run-to-run medians spread 115-131 MB, the 2026-11 interface regression was +80 MB); idle CPU several points (it reads 0.2%, the hidden progress-bar bug read 12%); launch is noisy on shared runners, so its limit only catches a gross stall; binary size +5%, so growth is a decision. Raising one: CONTRIBUTING.md, Performance budget.",
  "darwin": {
   "max": {
    "binary_kb": 1800,
@@ -10,10 +10,22 @@
    "memory_mb_collapsed": 200,
    "idle_cpu_pct_collapsed": 4
   },
-  "measured": {}
+  "measured": {
+   "binary_kb": 1715,
+   "launch_s": 1.7,
+   "memory_mb": 125,
+   "idle_cpu_pct": 0.2,
+   "launch_s_collapsed": 2.3,
+   "memory_mb_collapsed": 145,
+   "idle_cpu_pct_collapsed": 1.3
+  }
  },
  "win32": {
-  "max": {"binary_kb": 1400},
-  "measured": {"binary_kb": 1328}
+  "max": {
+   "binary_kb": 1400
+  },
+  "measured": {
+   "binary_kb": 1328
+  }
  }
 }
