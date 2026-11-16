@@ -10,15 +10,18 @@ All notable changes to Wisp are recorded here. The format follows
 
 - Ad blocking with real filter lists: EasyList and EasyPrivacy by default, and
   the EasyList Cookie List, Fanboy's Annoyance List and Peter Lowe's List to
-  choose from in Settings > Ad blocking. Lists are downloaded from their
+  choose from in Settings > Privacy and security (Advanced). Lists are downloaded from their
   publishers, refreshed every four days in the background (or with Update
   now), and checked before use: a download that is not a filter list, is too
   large, or is much shorter than the copy in use is refused and the old copy
-  kept. With no network on the first run, the built-in host list is used.
+  kept. The built-in host list stays in use alongside, so pages are never
+  loaded unblocked while a list is prepared, or if one cannot be used.
 - Empty ad slots are hidden (element-hiding rules), on macOS.
 - The shield button turns blocking off, or back on, for the site in the
-  current tab, and shows whether blocking is on there. Sites turned off are
-  listed in Settings > Ad blocking.
+  current tab, and shows whether blocking is on there. The choice is applied
+  before each page of the site starts loading, so pages are not loaded twice.
+  Sites turned off are listed in Settings > Privacy and security. Not offered
+  in private tabs, and not for local addresses.
 - Split view: show two to four tabs of a workspace side by side, in rows and
   columns. Drag a tab from the list onto any side of the page (the tiles make
   room to show where it lands), choose "Split with current tab" in a tab's menu,
