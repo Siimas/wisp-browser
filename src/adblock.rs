@@ -197,15 +197,21 @@ fn set_switches(cfg: &Adblock) {
     });
 }
 
-/// The rule sources for these settings: each downloaded list, the built-in hosts
-/// while no list has been downloaded, and the user's extra hosts.
+/// A set of rules compiled as one unit: one version of a downloaded list, the built-in
+/// hosts, or the user's extra hosts.
 #[derive(Clone)]
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 struct Source {
     /// Names the compiled rules: changes whenever their content would.
     name: String,
-    hosts: Vec<String>,
+    /// The list it belongs to, for the records kept per list.
+    list_id: Option<&'static str>,
+    /// The file to build it from. `None` with no hosts: only look it up (a previous
+    /// version, kept because the current one would not compile).
     list: Option<PathBuf>,
+    hosts: Vec<String>,
+    /// How many parts the stored version has, when known.
+    parts: Option<usize>,
 }
 
 fn hash(x: impl Hash) -> u64 {
@@ -214,7 +220,23 @@ fn hash(x: impl Hash) -> u64 {
     h.finish()
 }
 
+/// `<id>.compiled`: "name parts" of the last version of a list that compiled fully.
+/// `<id>.failed`: the name of a version that would not compile.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn record_path(id: &str, kind: &str) -> PathBuf {
+    folder().join(format!("{id}.{kind}"))
+}
+
+fn record(id: &str) -> Option<(String, usize)> {
+    let text = fs::read_to_string(record_path(id, "compiled")).ok()?;
+    let (name, parts) = text.trim().split_once(' ')?;
+    Some((name.to_string(), parts.parse().ok()?))
+}
+
 fn sources(cfg: &Adblock) -> Vec<Source> {
+    if !cfg.enabled {
+        return Vec::new();
+    }
     let mut out = Vec::new();
     for l in enabled_lists(cfg) {
         let path = list_path(l.id);
@@ -225,23 +247,39 @@ fn sources(cfg: &Adblock) -> Vec<Source> {
             .modified()
             .ok()
             .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok());
-        let version = hash((meta.len(), stamp));
-        out.push(Source {
-            name: format!("wisp-{}-{version:x}-{FORMAT}", l.id),
-            hosts: Vec::new(),
-            list: Some(path),
-        });
+        let name = format!("wisp-{}-{:x}-{FORMAT}", l.id, hash((meta.len(), stamp)));
+        let failed = fs::read_to_string(record_path(l.id, "failed")).ok();
+        let source = match record(l.id) {
+            // This version would not compile: keep using the last one that did.
+            Some((good, parts)) if failed.as_deref() == Some(&name) && good != name => Source {
+                name: good,
+                list_id: Some(l.id),
+                list: None,
+                hosts: Vec::new(),
+                parts: Some(parts),
+            },
+            rec => Source {
+                parts: rec.filter(|(r, _)| *r == name).map(|(_, n)| n),
+                name,
+                list_id: Some(l.id),
+                list: Some(path),
+                hosts: Vec::new(),
+            },
+        };
+        out.push(source);
     }
     let hosts_source = |kind: &str, hosts: Vec<String>| Source {
         name: format!("wisp-{kind}-{:x}-{FORMAT}", hash(&hosts)),
-        hosts,
+        list_id: None,
         list: None,
+        hosts,
+        parts: Some(1),
     };
-    if cfg.enabled && out.is_empty() {
-        out.push(hosts_source("builtin", builtin_hosts()));
-    }
+    // The built-in hosts are always in: a few hundred rules, and they keep blocking on
+    // while a list is being converted, or when one cannot be used.
+    out.push(hosts_source("builtin", builtin_hosts()));
     let extra = clean_hosts(cfg.extra_hosts.iter().map(String::as_str));
-    if cfg.enabled && !extra.is_empty() {
+    if !extra.is_empty() {
         out.push(hosts_source("extra", extra));
     }
     out
@@ -266,8 +304,7 @@ impl Source {
 
 thread_local! {
     /// What each web view has attached: (rules version, blocking on). Keyed by the
-    /// engine object's address; a new view always attaches first, so a reused address
-    /// is overwritten before it is read.
+    /// engine object's address; a new view is cleared first (`attach_new`).
     /// ponytail: entries of closed views stay (a few bytes each).
     static ATTACHED: RefCell<HashMap<usize, (u64, bool)>> = RefCell::new(HashMap::new());
 }
@@ -280,16 +317,24 @@ pub fn attach_new(webview: &wry::WebView, url: &str) {
 }
 
 /// Give this web view the current rules, on or off for the site at `url` (the UI
-/// views pass ""). Call when a view is made, when its page changes, and on
-/// `notify`. Returns true when blocking was switched for a page already loading,
-/// which then needs a reload for the switch to take effect.
+/// views pass ""). Called when a view is made, when its page commits, and on
+/// `notify`; the platform also calls `switch` just before each page navigation, so
+/// a page always starts with the right rules. Returns true when this changed
+/// blocking for the page already shown (which then needs loading again).
 pub fn attach(webview: &wry::WebView, url: &str) -> bool {
+    switch(platform::key(webview), url, |on, new| {
+        platform::apply(webview, platform::key(webview), on, new)
+    })
+}
+
+/// Set the view `key` to the right state for `url`; `apply(on, new view)` runs when
+/// the state or the rules changed. Returns whether blocking was switched.
+fn switch(key: usize, url: &str, apply: impl FnOnce(bool, bool)) -> bool {
     let on = enabled_for(url);
-    let key = platform::key(webview);
     let now = (platform::version(), on);
     let before = ATTACHED.with_borrow_mut(|m| m.insert(key, now));
     if before != Some(now) {
-        platform::apply(webview, key, on, before.is_none());
+        apply(on, before.is_none());
     }
     before.is_some_and(|(_, was)| was != on)
 }
@@ -465,33 +510,52 @@ pub fn status() -> Value {
 
 #[cfg(target_os = "macos")]
 mod platform {
-    use super::{Source, notify, sources};
+    use super::{Source, notify, record_path, sources, switch};
     use crate::{config::Adblock, filters};
     use block2::RcBlock;
     use dispatch2::DispatchQueue;
-    use objc2::{MainThreadMarker, rc::Retained};
+    use objc2::{
+        MainThreadMarker, msg_send,
+        rc::Retained,
+        runtime::{AnyObject, Imp, Sel},
+        sel,
+    };
     use objc2_foundation::{NSArray, NSError, NSString};
-    use objc2_web_kit::{WKContentRuleList, WKContentRuleListStore};
+    use objc2_web_kit::{WKContentRuleList, WKContentRuleListStore, WKUserContentController};
     use std::{
         cell::{Cell, RefCell},
-        collections::{BTreeMap, HashMap},
+        collections::{BTreeMap, HashMap, HashSet},
+        fs,
         rc::Rc,
+        sync::OnceLock,
         time::Instant,
     };
     use wry::{WebView, WebViewExtMacOS};
 
-    /// Rules per compiled list. WebKit takes up to 150,000 on current systems; smaller
+    /// Rules per compiled part. WebKit takes up to 150,000 on current systems; smaller
     /// parts compile faster and stay under the 50,000 that older versions allowed.
     const PART: usize = 50_000;
     /// Parts kept per list: 200,000 rules, over three times EasyList's.
     const MAX_PARTS: usize = 4;
 
+    /// How a wanted source stands.
+    #[derive(Clone, Copy, PartialEq)]
+    enum State {
+        /// Parts still to come (looked up or compiled).
+        Waiting(usize),
+        Ready,
+        Failed,
+    }
+
     thread_local! {
-        /// Compiled rule lists in use, by name (`<source>.<part>`).
+        /// Compiled parts in use, by name (`<source>.<part>`).
         static RULES: RefCell<BTreeMap<String, Retained<WKContentRuleList>>> = RefCell::default();
-        /// Sources wanted now, and how many of each one's parts are still on their way.
-        static WANT: RefCell<HashMap<String, usize>> = RefCell::default();
-        /// Lookups not answered yet; the first `notify` waits for them, not for compiles.
+        /// The sources wanted now.
+        static WANT: RefCell<HashMap<String, State>> = RefCell::default();
+        /// Sources whose every part is in `RULES`.
+        static COMPLETE: RefCell<HashSet<String>> = RefCell::default();
+        /// Lookups (and small compiles) not answered yet; the first `notify`, when tabs
+        /// start, waits for them but not for big lists being compiled.
         static PENDING: Cell<usize> = const { Cell::new(0) };
         static VERSION: Cell<u64> = const { Cell::new(0) };
     }
@@ -506,6 +570,23 @@ mod platform {
         part.rsplit_once('.').map_or(part, |(s, _)| s)
     }
 
+    /// "wisp-easylist-<version>-<format>" -> "easylist".
+    fn list_of(name: &str) -> &str {
+        name.split('-').nth(1).unwrap_or("")
+    }
+
+    fn state(name: &str) -> Option<State> {
+        WANT.with_borrow(|w| w.get(name).copied())
+    }
+
+    fn set_state(name: &str, st: State) {
+        WANT.with_borrow_mut(|w| {
+            if let Some(s) = w.get_mut(name) {
+                *s = st;
+            }
+        });
+    }
+
     pub fn version() -> u64 {
         VERSION.get()
     }
@@ -514,9 +595,15 @@ mod platform {
         Retained::as_ptr(&webview.manager()) as usize
     }
 
-    /// Put this view's rule lists in place: all of them, or none.
-    pub fn apply(webview: &WebView, _key: usize, on: bool, _new: bool) {
-        let manager = webview.manager();
+    pub fn apply(webview: &WebView, _key: usize, on: bool, new: bool) {
+        if new {
+            hook_navigation(webview);
+        }
+        apply_to(&webview.manager(), on);
+    }
+
+    /// Put a view's rule lists in place: all of them, or none.
+    fn apply_to(manager: &WKUserContentController, on: bool) {
         // SAFETY: main-thread calls on a live WKUserContentController.
         unsafe {
             manager.removeAllContentRuleLists();
@@ -525,6 +612,96 @@ mod platform {
             }
         }
     }
+
+    // ------------------------------------------------ the per-site switch, before loading
+
+    static DECIDE: OnceLock<Imp> = OnceLock::new();
+
+    /// Runs in place of the web view delegate's `decidePolicyForNavigationAction`: for
+    /// a page (main-frame) navigation, the view gets the rules for the site it is about
+    /// to load, before the request goes out; then the original method decides as before.
+    /// So a site switched off never loads with blocking on, or the reverse, and nothing
+    /// has to be loaded twice. Frames, which belong to their page, leave it alone.
+    unsafe extern "C-unwind" fn decide(
+        this: &AnyObject,
+        cmd: Sel,
+        view: *mut AnyObject,
+        action: *mut AnyObject,
+        handler: *mut AnyObject,
+    ) {
+        // SAFETY: WebKit passes a live web view and navigation action; main thread.
+        unsafe {
+            let frame: *mut AnyObject = msg_send![action, targetFrame];
+            let main = !frame.is_null() && {
+                let m: bool = msg_send![frame, isMainFrame];
+                m
+            };
+            if main {
+                let request: *mut AnyObject = msg_send![action, request];
+                let address: *mut AnyObject = msg_send![request, URL];
+                let text: *mut NSString = if address.is_null() {
+                    std::ptr::null_mut()
+                } else {
+                    msg_send![address, absoluteString]
+                };
+                let config: *mut AnyObject = msg_send![view, configuration];
+                let manager: *mut WKUserContentController =
+                    msg_send![config, userContentController];
+                if let (Some(url), Some(manager)) = (text.as_ref(), manager.as_ref()) {
+                    let key = manager as *const WKUserContentController as usize;
+                    switch(key, &url.to_string(), |on, _| apply_to(manager, on));
+                }
+            }
+            if let Some(original) = DECIDE.get() {
+                let original: unsafe extern "C-unwind" fn(
+                    &AnyObject,
+                    Sel,
+                    *mut AnyObject,
+                    *mut AnyObject,
+                    *mut AnyObject,
+                ) = std::mem::transmute(*original);
+                original(this, cmd, view, action, handler);
+            }
+        }
+    }
+
+    /// Put `decide` in front of the delegate class's own method (once; every web view
+    /// gets the same delegate class from wry).
+    fn hook_navigation(webview: &WebView) {
+        if DECIDE.get().is_some() {
+            return;
+        }
+        let view = webview.webview();
+        // SAFETY: main-thread messages to the live view; swaps an existing method of the
+        // delegate class for one with the same signature (void; self, _cmd, view,
+        // action, block), keeping the original to call.
+        unsafe {
+            let delegate: *mut AnyObject = msg_send![&*view, navigationDelegate];
+            let Some(delegate) = delegate.as_ref() else {
+                return;
+            };
+            let sel = sel!(webView:decidePolicyForNavigationAction:decisionHandler:);
+            let method = objc2::ffi::class_getInstanceMethod(delegate.class(), sel);
+            if method.is_null() {
+                return;
+            }
+            let ours: Imp = std::mem::transmute(
+                decide
+                    as unsafe extern "C-unwind" fn(
+                        &AnyObject,
+                        Sel,
+                        *mut AnyObject,
+                        *mut AnyObject,
+                        *mut AnyObject,
+                    ),
+            );
+            if let Some(original) = objc2::ffi::method_setImplementation(method, ours) {
+                let _ = DECIDE.set(original);
+            }
+        }
+    }
+
+    // ------------------------------------------------ building the rules
 
     /// Called from the updater thread.
     pub fn lists_changed() {
@@ -535,45 +712,42 @@ mod platform {
         });
     }
 
-    /// Bring the compiled rules in line with the settings: rules already in use stay,
-    /// stored ones are looked up, and only a list never seen in this version is
-    /// converted (on a worker thread) and compiled. The old rules stay attached until
-    /// every new source is ready, so a list update leaves no gap in blocking.
+    /// Bring the compiled rules in line with the settings. Rules in use stay; stored
+    /// versions are looked up; a list version never compiled is converted (on a worker
+    /// thread) and compiled. Nothing in use is dropped, and nothing stored is deleted,
+    /// until every wanted source is ready; a list version that will not compile is
+    /// recorded, and the list's previous version stays in use.
     pub fn rebuild(cfg: &Adblock) {
         let sources = sources(cfg);
-        let loaded = |s: &Source| RULES.with_borrow(|r| r.keys().any(|k| source_of(k) == s.name));
-        let (done, missing): (Vec<Source>, Vec<Source>) = sources.into_iter().partition(loaded);
-        // Parts still to come per source; `usize::MAX` = not known yet.
-        let want = done.iter().map(|s| (s.name.clone(), 0));
         WANT.set(
-            want.chain(missing.iter().map(|s| (s.name.clone(), usize::MAX)))
+            sources
+                .iter()
+                .map(|s| {
+                    let done = COMPLETE.with_borrow(|c| c.contains(&s.name));
+                    (
+                        s.name.clone(),
+                        if done {
+                            State::Ready
+                        } else {
+                            State::Waiting(usize::MAX)
+                        },
+                    )
+                })
                 .collect(),
         );
-        // Look the parts up by name, all at once; listing the store first would cost a
-        // round trip at every launch. Unused versions are deleted afterwards.
         hold(1);
-        for s in missing {
-            let found = Rc::new(Cell::new((0, 0)));
-            for i in 0..MAX_PARTS {
-                look_up(format!("{}.{i}", s.name), s.clone(), found.clone());
+        for s in sources {
+            if state(&s.name) == Some(State::Ready) {
+                continue;
+            }
+            match s.parts {
+                Some(n) => look_up(s, n.min(MAX_PARTS)),
+                None => build(s),
             }
         }
         release(1);
-        let handler = RcBlock::new(|ids: *mut NSArray<NSString>| {
-            // SAFETY: WebKit passes an array of strings, or null.
-            let ids: Vec<String> = unsafe { ids.as_ref() }
-                .map(|a| a.iter().map(|s| s.to_string()).collect())
-                .unwrap_or_default();
-            remove_unused(&ids);
-        });
-        if let Some(store) = store() {
-            // SAFETY: main thread, live store; the block lives until WebKit calls it.
-            unsafe { store.getAvailableContentRuleListIdentifiers(Some(&handler)) };
-        }
     }
 
-    /// The first `notify` (when tabs start) waits for work held here: looking up
-    /// stored rules, and compiling the small host lists. Big lists do not hold it up.
     fn hold(n: usize) {
         PENDING.set(PENDING.get() + n);
     }
@@ -583,37 +757,54 @@ mod platform {
         settle();
     }
 
-    fn set_parts(name: &str, n: usize) {
-        WANT.with_borrow_mut(|w| {
-            if let Some(left) = w.get_mut(name) {
-                *left = n;
-            }
-        });
+    /// Look up the `n` stored parts of a source; if any is missing, build it again.
+    fn look_up(source: Source, n: usize) {
+        let Some(store) = store() else { return };
+        set_state(&source.name, State::Waiting(n));
+        let found = Rc::new(Cell::new((0, 0)));
+        for i in 0..n {
+            let id = format!("{}.{i}", source.name);
+            let (found, source) = (found.clone(), source.clone());
+            hold(1);
+            let name = NSString::from_str(&id);
+            let handler = RcBlock::new(move |list: *mut WKContentRuleList, _: *mut NSError| {
+                // SAFETY: WebKit hands us a valid rule list or null.
+                let list = unsafe { Retained::retain(list) };
+                let (answers, hits) = found.get();
+                let (answers, hits) = (answers + 1, hits + list.is_some() as usize);
+                found.set((answers, hits));
+                if let Some(list) = list
+                    && state(&source.name).is_some()
+                {
+                    RULES.with_borrow_mut(|r| r.insert(id.clone(), list));
+                }
+                if answers == n {
+                    if hits == n {
+                        ready(&source.name);
+                    } else if source.list.is_some() || !source.hosts.is_empty() {
+                        build(source.clone()); // stored by another WebKit version, or cleared
+                    } else {
+                        set_state(&source.name, State::Failed);
+                    }
+                }
+                release(1);
+            });
+            // SAFETY: main thread, live store; the block lives until WebKit calls it.
+            unsafe {
+                store.lookUpContentRuleListForIdentifier_completionHandler(
+                    Some(&name),
+                    Some(&handler),
+                )
+            };
+        }
     }
 
-    /// Look up one stored part. `found` counts (answers, hits) over the source's
-    /// `MAX_PARTS` lookups: with all answered, no hit means it was never compiled
-    /// (or was stored by another WebKit version), so it is built now.
-    fn look_up(id: String, source: Source, found: Rc<Cell<(usize, usize)>>) {
-        let Some(store) = store() else { return };
-        hold(1);
-        let name = NSString::from_str(&id);
-        let handler = RcBlock::new(move |list: *mut WKContentRuleList, _: *mut NSError| {
-            let (answers, hits) = found.get();
-            // SAFETY: WebKit hands us a valid rule list or null.
-            let hit = unsafe { Retained::retain(list) }.map(|list| loaded(&id, list));
-            found.set((answers + 1, hits + hit.is_some() as usize));
-            match found.get() {
-                (MAX_PARTS, 0) => build(source.clone()),
-                (MAX_PARTS, _) => set_parts(&source.name, 0),
-                _ => {}
-            }
-            release(1);
-        });
-        // SAFETY: as above.
-        unsafe {
-            store.lookUpContentRuleListForIdentifier_completionHandler(Some(&name), Some(&handler))
-        };
+    fn ready(name: &str) {
+        if state(name).is_some() {
+            set_state(name, State::Ready);
+            COMPLETE.with_borrow_mut(|c| c.insert(name.to_string()));
+            VERSION.set(VERSION.get() + 1);
+        }
     }
 
     /// Convert a source on a worker thread, then compile its parts here.
@@ -633,106 +824,161 @@ mod platform {
                     s.name,
                     parts.len()
                 );
-                let wanted = WANT.with_borrow(|w| w.contains_key(&s.name));
-                if wanted {
-                    set_parts(&s.name, parts.len());
-                    if small {
-                        hold(parts.len());
-                    }
-                    for (i, json) in parts.into_iter().enumerate() {
-                        compile(format!("{}.{i}", s.name), json, small);
-                    }
+                if state(&s.name).is_some() {
+                    compile_all(s, parts, small);
                 }
                 if small { release(1) } else { settle() }
             });
         });
     }
 
-    fn compile(id: String, json: String, small: bool) {
+    fn compile_all(s: Source, parts: Vec<String>, small: bool) {
         let Some(store) = store() else { return };
-        let started = Instant::now();
-        let size = json.len();
-        let name = id.clone();
-        let handler = RcBlock::new(move |list: *mut WKContentRuleList, err: *mut NSError| {
-            // SAFETY: as above.
-            match unsafe { Retained::retain(list) } {
-                Some(list) => {
-                    eprintln!(
-                        "wisp: compiled {name} ({} KB) in {:?}",
-                        size / 1024,
-                        started.elapsed()
-                    );
-                    loaded(&name, list);
-                }
-                None => {
-                    // SAFETY: WebKit passes an error with a null list.
-                    let why = unsafe { err.as_ref() }.map(|e| e.localizedDescription().to_string());
-                    eprintln!("wisp: ad block rules {name} failed to compile: {why:?}");
-                    part_done(&name);
-                }
-            }
-            if small { release(1) } else { settle() }
-        });
-        // SAFETY: as above.
-        unsafe {
-            store.compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler(
-                Some(&NSString::from_str(&id)),
-                Some(&NSString::from_str(&json)),
-                Some(&handler),
-            )
-        };
-    }
-
-    fn loaded(id: &str, list: Retained<WKContentRuleList>) {
-        if WANT.with_borrow(|w| w.contains_key(source_of(id))) {
-            RULES.with_borrow_mut(|r| r.insert(id.to_string(), list));
-            VERSION.set(VERSION.get() + 1);
+        let n = parts.len();
+        if n == 0 {
+            return ready(&s.name);
         }
-        part_done(id);
+        set_state(&s.name, State::Waiting(n));
+        let failed = Rc::new(Cell::new(false));
+        let left = Rc::new(Cell::new(n));
+        if small {
+            hold(n);
+        }
+        for (i, json) in parts.into_iter().enumerate() {
+            let id = format!("{}.{i}", s.name);
+            let (s, failed, left) = (s.clone(), failed.clone(), left.clone());
+            let (started, size) = (Instant::now(), json.len());
+            let name = NSString::from_str(&id);
+            let handler = RcBlock::new(move |list: *mut WKContentRuleList, err: *mut NSError| {
+                // SAFETY: WebKit hands us a valid rule list, or null and an error.
+                match unsafe { Retained::retain(list) } {
+                    Some(list) => {
+                        eprintln!(
+                            "wisp: compiled {id} ({} KB) in {:?}",
+                            size / 1024,
+                            started.elapsed()
+                        );
+                        if state(&s.name).is_some() {
+                            RULES.with_borrow_mut(|r| r.insert(id.clone(), list));
+                        }
+                    }
+                    None => {
+                        let why =
+                            unsafe { err.as_ref() }.map(|e| e.localizedDescription().to_string());
+                        eprintln!("wisp: ad block rules {id} failed to compile: {why:?}");
+                        failed.set(true);
+                    }
+                }
+                left.set(left.get() - 1);
+                if left.get() == 0 {
+                    finished(&s, n, failed.get());
+                }
+                if small { release(1) } else { settle() }
+            });
+            // SAFETY: as above.
+            unsafe {
+                store.compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler(
+                    Some(&name),
+                    Some(&NSString::from_str(&json)),
+                    Some(&handler),
+                )
+            };
+        }
     }
 
-    fn part_done(id: &str) {
-        WANT.with_borrow_mut(|w| {
-            if let Some(n) = w.get_mut(source_of(id)).filter(|n| **n != usize::MAX) {
-                *n = n.saturating_sub(1);
+    /// Every part of a build has answered: record the result for the next launch.
+    fn finished(s: &Source, parts: usize, failed: bool) {
+        let record = |kind: &str, text: String| {
+            if let Some(id) = s.list_id {
+                let _ = fs::write(record_path(id, kind), text);
             }
-        });
+        };
+        if !failed {
+            record("compiled", format!("{} {parts}", s.name));
+            if let Some(id) = s.list_id {
+                let _ = fs::remove_file(record_path(id, "failed"));
+            }
+            return ready(&s.name);
+        }
+        // Not used half-built: drop its parts and keep the list's last good version.
+        record("failed", s.name.clone());
+        RULES.with_borrow_mut(|r| r.retain(|k, _| source_of(k) != s.name));
+        set_state(&s.name, State::Failed);
+        if let (Some(id), Some((good, n))) = (s.list_id, s.list_id.and_then(super::record)) {
+            let loaded = COMPLETE.with_borrow(|c| c.contains(&good));
+            if good != s.name && !loaded {
+                WANT.with_borrow_mut(|w| w.insert(good.clone(), State::Waiting(n)));
+                look_up(
+                    Source {
+                        name: good,
+                        list_id: Some(id),
+                        list: None,
+                        hosts: Vec::new(),
+                        parts: Some(n),
+                    },
+                    n,
+                );
+            }
+        }
     }
 
-    /// Once every wanted source is complete, drop rules no longer wanted; tell the app
-    /// whenever nothing is waiting on a lookup (the first time, tabs start loading).
+    /// When nothing is waiting: drop rules no longer wanted (keeping a list's previous
+    /// version while its new one failed), delete stored versions no longer used, and
+    /// tell the app. While only big lists are compiling, just tell the app.
     fn settle() {
         if PENDING.get() > 0 {
             return;
         }
-        if WANT.with_borrow(|w| w.values().all(|n| *n == 0)) {
-            let before = RULES.with_borrow(|r| r.len());
-            RULES.with_borrow_mut(|r| {
-                r.retain(|k, _| WANT.with_borrow(|w| w.contains_key(source_of(k))))
+        let done = WANT.with_borrow(|w| w.values().all(|s| !matches!(s, State::Waiting(_))));
+        if done {
+            let failed: HashSet<String> = WANT.with_borrow(|w| {
+                w.iter()
+                    .filter(|(_, s)| **s == State::Failed)
+                    .map(|(k, _)| list_of(k).to_string())
+                    .collect()
             });
+            let keep = |source: &str| {
+                state(source) == Some(State::Ready)
+                    || failed.contains(list_of(source))
+                        && COMPLETE.with_borrow(|c| c.contains(source))
+            };
+            let before = RULES.with_borrow(|r| r.len());
+            RULES.with_borrow_mut(|r| r.retain(|k, _| keep(source_of(k))));
+            COMPLETE.with_borrow_mut(|c| c.retain(|s| keep(s)));
             if RULES.with_borrow(|r| r.len()) != before {
                 VERSION.set(VERSION.get() + 1);
             }
+            remove_unused();
         }
         notify();
     }
 
-    /// Delete stored rules of list versions no longer in use (and the old single
-    /// "wisp" list), so the store does not grow with every update.
-    fn remove_unused(ids: &[String]) {
-        let Some(store) = store() else { return };
-        for id in ids {
-            let ours = id == "wisp" || id.starts_with("wisp-");
-            if ours && !WANT.with_borrow(|w| w.contains_key(source_of(id))) {
-                // SAFETY: as above; no completion handler needed.
-                unsafe {
-                    store.removeContentRuleListForIdentifier_completionHandler(
-                        Some(&NSString::from_str(id)),
-                        Some(&RcBlock::new(|_: *mut NSError| {})),
-                    )
-                };
+    /// Delete stored rules no longer in use (and the old single "wisp" list).
+    fn remove_unused() {
+        let Some(listing) = store() else { return };
+        let handler = RcBlock::new(|ids: *mut NSArray<NSString>| {
+            let Some(store) = store() else { return };
+            // SAFETY: WebKit passes an array of strings, or null.
+            let ids: Vec<String> = unsafe { ids.as_ref() }
+                .map(|a| a.iter().map(|s| s.to_string()).collect())
+                .unwrap_or_default();
+            for id in ids {
+                let ours = id == "wisp" || id.starts_with("wisp-");
+                let used = RULES.with_borrow(|r| r.contains_key(&id))
+                    || state(source_of(&id)).is_some_and(|s| s != State::Failed);
+                if ours && !used {
+                    // SAFETY: main thread, live store.
+                    unsafe {
+                        store.removeContentRuleListForIdentifier_completionHandler(
+                            Some(&NSString::from_str(&id)),
+                            Some(&RcBlock::new(|_: *mut NSError| {})),
+                        )
+                    };
+                }
             }
-        }
+        });
+        // SAFETY: main thread, live store; the block lives until WebKit calls it.
+        unsafe { listing.getAvailableContentRuleListIdentifiers(Some(&handler)) };
     }
 }
 
@@ -740,11 +986,12 @@ mod platform {
 
 #[cfg(windows)]
 mod platform {
-    use super::{ATTACHED, is_blocked, notify, sources};
+    use super::{ATTACHED, is_blocked, notify, sources, switch};
     use crate::{config::Adblock, filters, filters::matcher::Matcher};
     use std::sync::{Arc, RwLock};
     use webview2_com::{
-        Microsoft::Web::WebView2::Win32::*, WebResourceRequestedEventHandler, take_pwstr,
+        Microsoft::Web::WebView2::Win32::*, NavigationStartingEventHandler,
+        WebResourceRequestedEventHandler, take_pwstr,
     };
     use windows_core::{HSTRING, Interface, PWSTR};
     use wry::{WebView, WebViewExtWindows};
@@ -840,9 +1087,20 @@ mod platform {
             }
             Ok(())
         }));
+        // The per-site switch, set before each page (main-frame) navigation goes out.
+        let starting = NavigationStartingEventHandler::create(Box::new(move |_, args| {
+            if let Some(args) = args {
+                let mut uri = PWSTR::null();
+                // SAFETY: COM call on the arguments WebView2 passed to this callback.
+                unsafe { args.Uri(&mut uri)? };
+                switch(key, &take_pwstr(uri), |_, _| {});
+            }
+            Ok(())
+        }));
         // SAFETY: plain COM calls on a live webview.
         unsafe {
             let mut token = 0;
+            let _ = core.add_NavigationStarting(&starting, &mut token);
             let _ = core.AddWebResourceRequestedFilter(
                 &HSTRING::from("*"),
                 COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,

@@ -1700,12 +1700,12 @@ impl App {
                 if started && self.find_last.as_ref().is_some_and(|f| f.0 == id) {
                     self.find_last = None; // a new page: the next search starts over
                 }
-                // adblock: a page of a site with blocking turned off (or back on).
+                // adblock: the rules were already set for this site before it loaded; this
+                // only catches a page that arrived some other way. Never reloads.
                 if let Some(w) = self.tab(id).and_then(|t| t.webview.as_ref())
                     && started
-                    && adblock::attach(w, &url)
                 {
-                    let _ = w.reload();
+                    adblock::attach(w, &url);
                 }
                 if let Some(tab) = self.tab_mut(id) {
                     if started {
@@ -1774,11 +1774,15 @@ impl App {
             }
             UserEvent::AdblockReady => {
                 // adblock: new rules, a list fetched, or a site switched on or off.
+                // Only the tab in view is loaded again when its site was just switched (by
+                // the user, from the shield), and as a fresh GET of its address, so a form
+                // is never sent twice. Other tabs take the change on their next page.
                 for tab in &self.tabs {
                     if let Some(w) = &tab.webview
                         && adblock::attach(w, &tab.url)
+                        && Some(tab.id) == self.active
                     {
-                        let _ = w.reload();
+                        let _ = w.load_url(&tab.url);
                     }
                 }
                 for w in self.uis() {
