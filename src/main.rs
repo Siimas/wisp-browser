@@ -13,6 +13,7 @@ mod config;
 #[cfg(all(target_os = "macos", debug_assertions))]
 mod debug_shot;
 mod native;
+mod store;
 mod update;
 
 use config::{Config, SavedTab, Session};
@@ -128,6 +129,9 @@ enum Msg {
     SaveSettings {
         config: Box<Config>,
     },
+    /// History, bookmarks and suggestions: see `store::Msg`.
+    #[serde(untagged)]
+    Library(store::Msg),
 }
 
 enum UserEvent {
@@ -304,6 +308,8 @@ struct App {
     update_note: String,
     /// Started with `--private`: every tab is private and nothing is saved.
     private_window: bool,
+    /// History and bookmarks.
+    store: store::Store,
     started: bool,
     quit: bool,
 }
@@ -473,6 +479,7 @@ impl App {
             "settings": self.settings_open,
             "peek": self.peek,
             "private": self.private_window,
+            "bookmarked": self.active_tab().is_some_and(|t| self.store.is_bookmarked(&t.url)),
             "mac": cfg!(target_os = "macos"),
             "glass": self.glass.is_some(),
             "version": env!("CARGO_PKG_VERSION"),
@@ -940,6 +947,7 @@ impl App {
                 return self.focus_url();
             }
             "private_window" => return open_private_window(),
+            "history" | "bookmarks" | "bookmark_page" => return self.library_action(name),
             "check_update" => return self.check_update(true),
             "restart_update" => return self.restart_into_update(),
             "licenses" => {
@@ -1280,6 +1288,7 @@ impl App {
                     }
                 }
                 Msg::SaveSettings { config } => self.apply_config(*config),
+                Msg::Library(msg) => self.library(msg),
             },
             UserEvent::PageKey(id, combo) => {
                 // A page can only have keyboard focus while it is the one on screen, so a
@@ -1291,6 +1300,7 @@ impl App {
             UserEvent::Title(id, title) => {
                 if let Some(tab) = self.tab_mut(id) {
                     tab.title = title;
+                    self.retitled(id);
                     self.sync();
                 }
             }
@@ -1301,6 +1311,7 @@ impl App {
                     self.sync();
                     if !started {
                         self.save_session(); // saved as you browse, so a crash loses nothing
+                        self.visited(id);
                     }
                 }
             }
@@ -1433,6 +1444,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         update: None,
         update_note: String::new(),
         private_window,
+        store: store::Store::load(config::dir(), private_window),
         started: false,
         quit: false,
     };
@@ -1492,6 +1504,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             Event::LoopDestroyed => {
                 app.save_session();
+                app.store.flush_if_unsaved();
                 // The quiet path: a downloaded update goes in as the app closes.
                 if let Some(ready) = app.update.take()
                     && let Err(e) = ready.install()

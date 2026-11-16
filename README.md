@@ -102,6 +102,8 @@ Wisp keeps nothing anywhere else. See [PRIVACY.md](PRIVACY.md).
 | Reload / home | `Mod+R` / `Mod+Shift+H` |
 | Zoom in / out / reset | `Mod+=` / `Mod+-` / `Mod+0` |
 | Settings | `Mod+,` |
+| History / bookmarks | `Mod+Y` / `Mod+Shift+O` |
+| Bookmark this page | `Mod+D` |
 
 ## Settings file
 
@@ -170,7 +172,9 @@ as before and offer no automatic update.
   opened from the sidebar stay inside it). Page corners are square on Windows.
 - A private window runs as a second copy of the app, so it shows its own
   Dock or taskbar icon.
-- No bookmarks, history view, or find-in-page yet.
+- No find-in-page yet.
+- The suggestions list under a docked address bar hides the page while it is
+  open. Bookmarks are one flat list (no folders, no import).
 
 ## Privacy
 
