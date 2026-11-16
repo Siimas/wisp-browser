@@ -28,7 +28,7 @@ objc2-web-kit = { version = "0.3", features = [
 
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.39"
-windows-core = "0.62"
+windows-core = "0.100"
 
 [profile.release]
 lto = true
