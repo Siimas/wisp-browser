@@ -159,10 +159,12 @@ impl Slot {
     /// Take a report from the page, if it is within its limit. True if anything changed.
     pub fn report(&mut self, report: Report) -> bool {
         let now = Instant::now();
-        if !self.limit.take(now) {
+        let new = report.check();
+        // "Gone" only ever takes the player away, so it is never dropped: a burst of
+        // reports must not leave a stuck player behind.
+        if new.is_some() && !self.limit.take(now) {
             return false;
         }
-        let new = report.check();
         if new.as_ref().is_some_and(|m| m.playing) && !self.playing() {
             self.started = Some(now);
             self.dismissed = false;

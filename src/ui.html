@@ -544,9 +544,14 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
 .m-head { display: flex; align-items: center; gap: var(--sp-2); height: var(--row); padding-left: var(--sp-1); border-radius: var(--r-md); }
 .m-head:hover { background: var(--hover); }
 .m-text { flex: 1; min-width: 0; line-height: 1.25; }
-.m-title, .m-sub { overflow: hidden; white-space: nowrap;
+.m-title, .m-sub > b, .m-sub > .cut { overflow: hidden; white-space: nowrap;
   -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - var(--fade)), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - var(--fade)), transparent); }
-.m-sub { color: var(--mute); font-size: var(--text-xs); }
+/* the site (the app's word) comes first and always stays in view; the artist (the
+   page's) follows and gives way first */
+.m-sub { display: flex; min-width: 0; color: var(--mute); font-size: var(--text-xs); white-space: nowrap; }
+.m-sub > span { flex: 0 1 auto; min-width: 0; overflow: hidden; }
+.m-sub > b { flex: 0 1000 auto; min-width: 0; font-weight: inherit; }
+.m-sub > span:not(:empty) + b:not(:empty)::before { content: "\b7"; margin: 0 var(--sp-1); }
 .m-card.private .m-title { font-style: italic; }
 .m-card.private .fav { background: none; color: var(--accent); }
 .m-x { visibility: hidden; border-radius: max(0px, var(--r-md) - var(--sp-1)); }
@@ -1809,7 +1814,7 @@ function mediaCard() {
   };
   return el('div', { className: 'm-card' },
     el('div', { className: 'm-head', title: 'Go to this tab', onclick: () => S.media && post({ cmd: 'select_tab', id: S.media.id }) },
-      el('span', { className: 'fav' }), el('div', { className: 'm-text' }, el('div', { className: 'm-title' }), el('div', { className: 'm-sub' })),
+      el('span', { className: 'fav' }), el('div', { className: 'm-text' }, el('div', { className: 'm-title' }), el('div', { className: 'm-sub' }, el('span'), el('b'))),
       mbtn('m-x', 'Close player', 'dismiss')),
     bar,
     el('div', { className: 'm-ctl' }, mbtn('m-prev', 'Previous', 'prev'), mbtn('m-pp', 'Play', 'play'), mbtn('m-next', 'Next', 'next'), mbtn('m-mute', 'Mute', 'mute')));
@@ -1820,8 +1825,13 @@ function updateCard(card, m) {
   card.classList.toggle('private', m.private);
   setFav(q('.fav'), host, m.private);
   q('.m-title').textContent = m.title || m.tab_title || host || 'Media';
-  q('.m-sub').textContent = m.artist || host;
-  q('.m-head').title = 'Go to the tab: ' + (host || m.tab_title); // the real site, whatever the page calls itself
+  // Where the sound comes from is always said, from the address the app knows; the
+  // page's own words (the artist) only come before it.
+  const site = q('.m-sub > span');
+  site.textContent = host;
+  q('.m-sub > b').textContent = m.artist;
+  site.classList.toggle('cut', site.scrollWidth > site.clientWidth); // fade only a host that does not fit
+  q('.m-head').title = 'Go to the tab: ' + (host || 'this tab');
   if (!q('.m-x').firstChild) q('.m-x').append(svg('close'));
   setIcon(q('.m-prev'), 'm-prev', 'Previous');
   setIcon(q('.m-next'), 'm-next', 'Next');
@@ -1829,15 +1839,19 @@ function updateCard(card, m) {
   setIcon(q('.m-pp'), m.playing ? 'm-pause' : 'm-play', m.playing ? 'Pause' : 'Play');
   q('.m-pp').onclick = e => { e.stopPropagation(); mediaOp(m.playing ? 'pause' : 'play'); };
   setIcon(q('.m-mute'), m.muted ? 'muted' : 'speaker', m.muted ? 'Unmute' : 'Mute');
-  // Progress runs on its own between reports: one linear transition to the end, so
-  // nothing is polled or redrawn by script while it plays.
+  // Progress runs on its own between reports: one transition to the end, in steps of
+  // about a pixel (at most a few a second), so nothing is polled or redrawn by script.
   const bar = q('.m-bar'), i = bar.firstChild, key = [m.id, m.pos, m.dur, m.rate, m.playing].join();
   bar.hidden = !m.dur;
   if (bar.dataset.key === key || seekAt !== null || !m.dur) return;
   bar.dataset.key = key;
   i.style.transition = 'none';
   i.style.transform = `scaleX(${Math.min(1, m.pos / m.dur)})`;
-  if (m.playing && m.rate > 0) { void i.offsetWidth; i.style.transition = `transform ${(m.dur - m.pos) / m.rate}s linear`; i.style.transform = 'scaleX(1)'; }
+  if (m.playing && m.rate > 0) {
+    const secs = (m.dur - m.pos) / m.rate, px = (1 - m.pos / m.dur) * bar.offsetWidth;
+    const steps = Math.max(1, Math.min(Math.round(px), Math.ceil(secs * 4)));
+    void i.offsetWidth; i.style.transition = `transform ${secs}s steps(${steps}, end)`; i.style.transform = 'scaleX(1)';
+  }
 }
 function renderMedia() {
   const box = $('#media'), m = S.media;

@@ -167,12 +167,29 @@ enum PageMsg {
     Media(media::Report),
 }
 
+/// Scheme, host and port of an address ("https://example.com:8443"); `None` for
+/// addresses without a host (about:, data:, file:).
+fn origin(url: &str) -> Option<&str> {
+    let (scheme, rest) = url.split_once("://")?;
+    let host = &rest[..rest.find(['/', '?', '#']).unwrap_or(rest.len())];
+    (!host.is_empty() && !host.contains('@')).then(|| &url[..scheme.len() + 3 + host.len()])
+}
+
+/// Every frame of a page can reach the message handler (on macOS), so a message counts
+/// only if it comes from the document the tab shows: same origin as the tab's address,
+/// or, for an address without one (a blank tab, a local file), that very address.
+fn same_origin(from: &str, tab_url: &str) -> bool {
+    let doc = |u: &str| u.split('#').next().unwrap_or_default().to_string();
+    match origin(tab_url) {
+        Some(o) => origin(from) == Some(o),
+        None => !from.is_empty() && doc(from) == doc(tab_url),
+    }
+}
+
 enum UserEvent {
     Ui(Msg),
-    /// Hotkey reported by the page in tab `.0`.
-    PageKey(u32, String),
-    /// What the page in tab `.0` says it is playing (unchecked yet).
-    PageMedia(u32, Box<media::Report>),
+    /// A message from the page in tab `.0`, sent by a frame at address `.1` (unchecked yet).
+    Page(u32, String, Box<PageMsg>),
     Title(u32, String),
     Load(u32, bool, String),
     /// A page in tab `.0` asked for a new window.
@@ -608,9 +625,10 @@ impl App {
             .with_initialization_script(keys_script(&self.cfg))
             .with_initialization_script(include_str!("media.js"))
             // Pages are untrusted: the only messages accepted from them are a hotkey press,
-            // only while their tab is the active one (see `PageKey`), and what they are
-            // playing, checked and rate-limited (see media.rs). The tab is the one this
-            // handler belongs to, whatever the message says.
+            // only while their tab is the active one, and what they are playing, checked
+            // and rate-limited (see media.rs); both only from the document the tab shows,
+            // not from frames of other sites inside it (see `UserEvent::Page`). The tab is
+            // the one this handler belongs to, whatever the message says.
             // ponytail: the active page can still fake a press (e.g. close its own tab)
             // or swallow hotkeys while focused. Upgrade path: native key capture per
             // platform instead of the injected listener.
@@ -618,11 +636,10 @@ impl App {
                 if req.body().len() > media::MAX_MESSAGE {
                     return;
                 }
-                let _ = match serde_json::from_str(req.body()) {
-                    Ok(PageMsg::Key { combo }) => p1.send_event(UserEvent::PageKey(id, combo)),
-                    Ok(PageMsg::Media(r)) => p1.send_event(UserEvent::PageMedia(id, Box::new(r))),
-                    Err(_) => Ok(()),
-                };
+                if let Ok(msg) = serde_json::from_str(req.body()) {
+                    let from = req.uri().to_string();
+                    let _ = p1.send_event(UserEvent::Page(id, from, Box::new(msg)));
+                }
             })
             .with_document_title_changed_handler(move |title| {
                 let _ = p2.send_event(UserEvent::Title(id, title));
@@ -1411,17 +1428,31 @@ impl App {
                 Msg::Media { id, op, at } => self.media_op(id, op, at),
                 Msg::Library(msg) => self.library(msg),
             },
-            UserEvent::PageKey(id, combo) => {
-                // A page can only have keyboard focus while it is the one on screen, so a
-                // key from a background tab, or while the interface covers the page, is forged.
-                if self.active == Some(id) && self.page_visible() {
-                    self.handle(UserEvent::Ui(Msg::Key { combo }));
+            UserEvent::Page(id, from, msg) => {
+                // Checked against the address the view shows now (it follows redirects
+                // before the tab's own record does). On macOS `from` is the sending frame's
+                // address; WebView2 only hears the top document, so there it always matches.
+                let view = self.tab(id).and_then(|t| t.webview.as_ref());
+                if !view
+                    .and_then(|w| w.url().ok())
+                    .is_some_and(|u| same_origin(&from, &u))
+                {
+                    return;
                 }
-            }
-            UserEvent::PageMedia(id, report) => {
-                let changed = self.tab_mut(id).is_some_and(|t| t.media.report(*report));
-                if changed {
-                    self.sync();
+                match *msg {
+                    // A page can only have keyboard focus while it is the one on screen, so a
+                    // key from a background tab, or while the interface covers the page, is forged.
+                    PageMsg::Key { combo } => {
+                        if self.active == Some(id) && self.page_visible() {
+                            self.handle(UserEvent::Ui(Msg::Key { combo }));
+                        }
+                    }
+                    PageMsg::Media(report) => {
+                        let changed = self.tab_mut(id).is_some_and(|t| t.media.report(report));
+                        if changed {
+                            self.sync();
+                        }
+                    }
                 }
             }
             UserEvent::Title(id, title) => {
@@ -1687,8 +1718,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        App, CLOSED_MAX, PageMsg, Side, Tab, Zone, ease_out, group_pinned, place_tab,
-        remember_closed, zone,
+        App, CLOSED_MAX, PageMsg, Side, Tab, Zone, ease_out, group_pinned, origin, place_tab,
+        remember_closed, same_origin, zone,
     };
 
     fn tab(id: u32, workspace: u32, pinned: bool) -> Tab {
@@ -1860,5 +1891,37 @@ mod tests {
             page(r#"{"cmd":"media","id":3,"op":"dismiss"}"#),
             Ok(PageMsg::Media(_))
         ));
+    }
+
+    #[test]
+    fn only_the_tabs_own_document_may_speak_for_it() {
+        let tab = "https://bank.example/account?x=1#top";
+        assert!(same_origin("https://bank.example/", tab));
+        assert!(same_origin("https://bank.example/other/page", tab));
+        // Frames of other sites, and lookalikes, do not count.
+        for other in [
+            "https://ads.example/frame",
+            "http://bank.example/",
+            "https://bank.example:8443/",
+            "https://bank.example.evil.test/",
+            "https://bank.example@evil.test/",
+            "about:blank",
+            "about:srcdoc",
+            "file:///bank.example/",
+            "data:text/html,hi",
+            "",
+        ] {
+            assert!(!same_origin(other, tab), "{other}");
+        }
+        // Without an origin (a blank tab, a local file) only that same document counts.
+        assert!(same_origin("about:blank", "about:blank"));
+        assert!(same_origin("file:///a.html", "file:///a.html#x"));
+        assert!(!same_origin("file:///b.html", "file:///a.html"));
+        assert!(!same_origin("about:srcdoc", "about:blank"));
+        assert_eq!(
+            origin("https://a.example:1/b?c"),
+            Some("https://a.example:1")
+        );
+        assert_eq!(origin("https://a.example?q"), Some("https://a.example"));
     }
 }

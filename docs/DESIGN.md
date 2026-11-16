@@ -267,7 +267,7 @@ Rules:
 | Suggestions under the address bar | Scales from 96% at the bar, `--d-2`; the chosen row is raised (`--surface`, `--shadow-1`) |
 | Find bar opened (Mod+F) or closed | A row appears between the hotbar and the page: it drops 8 px and fades in over `--d-2` while the page card glides down to make room |
 | Address bar focus | Lifts to `--surface`, accent ring grows, `--d-2` |
-| Media player appears or goes (another tab starts or stops having media) | Rises 6 px and fades in, `--d-2` `--ease-out`; leaves the same way over `--d-1` `--ease-in`. Its progress line runs as one linear transition between reports, so nothing polls while it plays |
+| Media player appears or goes (another tab starts or stops having media) | Rises 6 px and fades in, `--d-2` `--ease-out`; leaves the same way over `--d-1` `--ease-in`. Its progress line runs as one transition between reports, in steps of about a pixel (at most four a second), so nothing polls while it plays |
 | Page loading | Spinner in the tab, sweep under the hotbar |
 | Hover, press | Background `--d-1`; press scale as above |
 
