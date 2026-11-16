@@ -207,7 +207,13 @@ impl App {
 
     /// Search the page on screen for `query`: the first match, or the next/previous one.
     pub(crate) fn find(&mut self, query: String, back: bool) {
-        let (Some(id), Some(webview)) = (self.active, self.active_webview()) else {
+        let Some(id) = self.active.filter(|_| self.active_webview().is_some()) else {
+            return;
+        };
+        if self.find_last.as_ref().is_some_and(|f| f.0 != id) {
+            self.find_stop_last(); // the focus moved to another split tile: leave that one clean
+        }
+        let Some(webview) = self.active_webview() else {
             return;
         };
         if query.is_empty() {
@@ -224,8 +230,16 @@ impl App {
         self.find_last = Some(key);
     }
 
+    /// End the last search in the tab it ran in (a split tile may have lost the focus since).
+    fn find_stop_last(&mut self) {
+        let last = self.find_last.take().map(|f| f.0);
+        if let Some(w) = last.and_then(|id| self.tab(id)?.webview.as_ref()) {
+            native::find_stop(w);
+        }
+    }
+
     pub(crate) fn find_close(&mut self) {
-        self.find_last = None;
+        self.find_stop_last();
         if let Some(webview) = self.active_webview() {
             native::find_stop(webview);
             if self.page_visible() {

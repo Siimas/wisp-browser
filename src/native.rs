@@ -118,6 +118,22 @@ mod imp {
         let _ = webview.reparent(window.ns_window().cast());
     }
 
+    /// Does the page view hold the keyboard focus (is it, or something inside it, the
+    /// window's first responder)?
+    pub fn is_focused(webview: &WebView, window: &Window) -> bool {
+        let view = webview.webview();
+        // SAFETY: main-thread messages to the live window and views.
+        unsafe {
+            let responder: *mut AnyObject =
+                msg_send![window.ns_window() as *mut AnyObject, firstResponder];
+            let Some(class) = AnyClass::get(c"NSView").filter(|_| !responder.is_null()) else {
+                return false;
+            };
+            let is_view: bool = msg_send![responder, isKindOfClass: class];
+            is_view && msg_send![responder, isDescendantOf: &*view]
+        }
+    }
+
     /// The system web engine reports no browser name, and sites such as Google then
     /// serve a stripped-down legacy page. It is the same engine as the installed
     /// Safari, so identify as that Safari version.
@@ -444,7 +460,8 @@ mod imp {
     };
     use windows::Win32::System::Com::IStream;
     use windows::Win32::UI::WindowsAndMessaging::{
-        HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos,
+        GUITHREADINFO, GetGUIThreadInfo, HWND_TOP, IsChild, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+        SetWindowPos,
     };
     use windows_core::{BOOL, HSTRING, Interface, PWSTR};
     use wry::WebViewExtWindows;
@@ -603,6 +620,21 @@ mod imp {
         let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
         // SAFETY: plain Win32 call on the webview's own live window.
         let _ = unsafe { SetWindowPos(webview.hwnd(), Some(HWND_TOP), 0, 0, 0, 0, flags) };
+    }
+
+    /// Does the page hold the keyboard focus? The focused window of the foreground
+    /// thread (WebView2 draws pages in windows of its own process) lies inside its view.
+    pub fn is_focused(webview: &WebView, _window: &Window) -> bool {
+        let mut info = GUITHREADINFO {
+            cbSize: size_of::<GUITHREADINFO>() as u32,
+            ..Default::default()
+        };
+        let host = webview.hwnd();
+        // SAFETY: plain Win32 calls with a properly sized struct.
+        unsafe {
+            GetGUIThreadInfo(0, &mut info).is_ok()
+                && (info.hwndFocus == host || IsChild(host, info.hwndFocus).as_bool())
+        }
     }
 
     /// WebView2 already identifies as a full Chromium browser.
@@ -788,6 +820,9 @@ mod imp {
     use super::*;
     pub fn round_corners(_webview: &WebView, _radius: f64) {}
     pub fn raise(_webview: &WebView, _window: &Window) {}
+    pub fn is_focused(_webview: &WebView, _window: &Window) -> bool {
+        false
+    }
     pub fn user_agent() -> Option<String> {
         None
     }
@@ -852,6 +887,6 @@ pub use imp::Glass;
 #[cfg(windows)]
 pub use imp::SnapButton;
 pub use imp::{
-    find, find_stop, media_busy, on_power_change, page_menu, power, raise, round_corners,
-    set_background, take_private, user_agent,
+    find, find_stop, is_focused, media_busy, on_power_change, page_menu, power, raise,
+    round_corners, set_background, take_private, user_agent,
 };
