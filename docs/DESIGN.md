@@ -83,6 +83,14 @@ floating bar sits over the page, which is a separate native view, so on macOS a
 native frosted pane (`native::Glass`) is placed directly beneath it. Windows has
 no such pane yet and keeps the floating bar opaque.
 
+A menu that would spill over the page is drawn the same way: by the overlay, the
+raised copy of the interface (see `src/overlay.rs`), on the native pane, with
+the floating bar's glass. The overlay is placed over the menu and its shadow
+only, so the rest of the page stays live, and clicking anywhere else closes the
+menu. Menus are described as data for this (`openMenu` in `ui.html`): rows of
+icon, label and the user's hotkey (or a switch), hairlines, small headings, and
+rows of small buttons (zoom, light and dark).
+
 ### Icons
 
 Line icons only: 16 px grid, 1.5 px stroke, round caps and joins, `currentColor`.

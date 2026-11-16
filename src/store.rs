@@ -422,9 +422,6 @@ impl crate::App {
             return self.sync();
         }
         // The sheets belong to the interface; it shows and hides them (and the page).
-        if self.settings_open {
-            self.set_settings_open(false);
-        }
         let _ = self.chrome.focus();
         let script = format!("wisp.sheet({})", json!(name));
         let _ = self.chrome.evaluate_script(&script);

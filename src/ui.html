@@ -455,6 +455,44 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
 .grid8 button.sw { padding: var(--sp-1); border-radius: 50%; background: var(--c) content-box; }
 .grid8 button.sw.on { background: var(--c) content-box; box-shadow: inset 0 0 0 1.5px var(--c); }
 
+/* ================= MENUS AS DATA, AND THE OVERLAY =================
+   Menu rows: icon, label, then the hotkey or a switch on the right; or a row of small
+   buttons (zoom, light and dark). In the overlay copy a menu floats above the page on
+   the native glass pane (where there is one), so it carries the floating bar's glass
+   rather than blurring itself. */
+.mi .lbl { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.mi kbd { flex: none; margin-left: auto; font: inherit; font-size: var(--text-sm); color: var(--mute); letter-spacing: .02em; }
+.mi:disabled { color: var(--mute); opacity: .55; }
+.mi:disabled:hover { background: none; }
+.pop .mi:focus { outline: none; background: var(--hover); }
+.mi .switch { flex: none; position: relative; width: 24px; height: 14px; border-radius: var(--r-full); background: var(--field); box-shadow: var(--shadow-0); transition: background var(--d-1); }
+.mi .switch::after { content: ""; position: absolute; left: 2px; top: 2px; width: 10px; height: 10px; border-radius: 50%; background: var(--surface); box-shadow: var(--shadow-1); transition: transform var(--d-2) var(--ease-out); }
+:root[data-theme=dark] .mi .switch::after { background: var(--fg); }
+.mi .switch.on { background: var(--accent); }
+.mi .switch.on::after { transform: translateX(10px); background: #fff; }
+.mi.btns { padding-top: 0; padding-bottom: 0; padding-right: 0; gap: var(--sp-0); }
+.mi.btns > .lbl, .mi.btns > .what { margin-left: calc(var(--sp-2) - var(--sp-0)); } /* icon to label stays --sp-2 */
+.mi.btns:hover { background: none; }
+.mi.btns .ib { border-radius: max(0px, var(--r-lg) - var(--sp-2)); }
+.mi.btns .ib.on { background: var(--surface); color: var(--fg); box-shadow: var(--shadow-1); }
+.mi.btns .ib.txt { width: auto; min-width: calc(var(--ctl) * 1.75); padding: 0 var(--sp-1); color: var(--fg); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+.mi .what { flex: 1; min-width: 0; padding: var(--sp-1) 0; }
+.mi .what .name { display: block; overflow: hidden; white-space: nowrap;
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - var(--fade)), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - var(--fade)), transparent); }
+.pop .mi small { display: block; padding: 0; color: var(--mute); font-size: var(--text-sm); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.mi.danger small { color: inherit; }
+.mi i.spin { width: 16px; height: 16px; flex: none; display: grid; place-items: center; }
+.mi i.spin::before { content: ""; width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--accent); border-right-color: transparent; animation: spin .7s linear infinite; }
+/* the Settings tab: its mark is an icon, not a site's */
+.tab .fav.icon { background: none; color: var(--fg); }
+/* A sheet or Customize opened over the Settings tab takes the page area from it. */
+:root[data-sheet] #settings, :root[data-customizing] #settings { display: none; }
+/* In the overlay copy: no blur of its own (nothing lies behind it in this view). Where the
+   app puts native glass beneath, the floating bar's glass; otherwise nearly solid. */
+:root[data-floater] .pop { -webkit-backdrop-filter: none; backdrop-filter: none; background: color-mix(in srgb, var(--bg) 94%, transparent); }
+:root[data-floater][data-glass][data-menu] .pop { background: color-mix(in srgb, var(--tint) var(--glass-k), transparent); box-shadow: var(--shadow-pop), inset 0 1px 0 #ffffff1a; }
+/* ================= END MENUS AS DATA ================= */
+
 /* ================= PAGE TOOLS: find bar, downloads =================
    The find bar is a row of its own between the hotbar and the page card: the main
    interface cannot draw over a page, so the card makes room and glides down. */
@@ -483,7 +521,7 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
 /* the downloads button turns a ring while something is downloading */
 .ib.busy { position: relative; color: var(--accent); }
 .ib.busy::before { content: ""; position: absolute; inset: 2px; border-radius: 50%; border: 1.5px solid var(--accent); border-right-color: transparent; animation: spin .7s linear infinite; }
-.pop:has(#dl-list) { width: var(--dl-w); max-width: calc(100vw - var(--sp-3)); }
+.pop.wide { width: var(--dl-w); max-width: calc(100vw - var(--sp-3)); }
 .dl { display: flex; align-items: center; gap: var(--sp-2); min-height: var(--row); padding: var(--sp-1) 0 var(--sp-1) var(--sp-2); }
 .dl .state { width: 16px; height: 16px; flex: none; display: grid; place-items: center; color: var(--mute); }
 .dl.active .state::before { content: ""; width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--accent); border-right-color: transparent; animation: spin .7s linear infinite; }
@@ -848,7 +886,7 @@ const ITEMS = {
   private_window: { label: 'New private window', icon: 'window', act: 'private_window' },
   shield: { label: 'Ad blocking', icon: 'shield' },
   downloads: { label: 'Downloads', icon: 'download', run: e => downloadsMenu(e) },
-  settings: { label: 'Settings', icon: 'settings', act: 'settings' },
+  settings: { label: 'Menu and settings', icon: 'settings', run: e => appMenu(e) }, // MENUS AS DATA
   spacer: { label: 'Flexible space' },
 };
 const AREAS = ['hotbar', 'before_tabs', 'after_tabs'];
@@ -875,6 +913,7 @@ function makeItem(name) {
   else {
     e = el('button', { className: 'ib', title: def.label, ariaLabel: def.label }, svg(def.icon));
     e.onclick = name === 'shield' ? () => { cfg.adblock.enabled = !cfg.adblock.enabled; save(); } : def.run ? () => def.run(e) : () => act(def.act);
+    if (def.run) warm(e);
   }
   e.dataset.item = name;
   e.dataset.label = def.label;
@@ -923,16 +962,18 @@ function makeTab(id) {
   return tab;
 }
 function updateTab(node, t) {
-  const host = hostOf(t.url), name = t.title || host || 'New Tab';
+  const settings = t.kind === 'settings', host = settings ? '' : hostOf(t.url), name = settings ? 'Settings' : t.title || host || 'New Tab';
   for (const [cls, on] of Object.entries({ active: t.id === S.active, private: t.private, loading: t.loading })) node.classList.toggle(cls, on);
   node.title = name;
   node.setAttribute('aria-selected', t.id === S.active);
   node.children[1].textContent = name;
-  const key = t.private ? 'private' : host;
+  const key = settings ? ':settings' : t.private ? 'private' : host;
   if (node.dataset.fav !== key) { // site icon, or a letter when there is none
     node.dataset.fav = key;
     const fav = node.children[0], letter = (host.replace(/^www\./, '')[0] || '•').toUpperCase();
-    if (t.private) fav.replaceChildren(svg('private'));
+    fav.classList.toggle('icon', settings);
+    if (settings) fav.replaceChildren(svg('settings'));
+    else if (t.private) fav.replaceChildren(svg('private'));
     else if (!host.includes('.')) fav.replaceChildren(letter);
     else { const img = el('img', { alt: '', src: `https://${host}/favicon.ico` }); img.onerror = () => fav.replaceChildren(letter); fav.replaceChildren(img); }
   }
@@ -1104,65 +1145,267 @@ function wsEditor(ws, anchor, fresh) {
 // ---------- menus ----------
 const mi = (label, onclick, opt = {}) => el('button', { className: 'mi' + (opt.danger ? ' danger' : ''), onclick: () => { closePop(); onclick(); } },
   ...[].concat(label), ...(opt.checked ? [el('span', { className: 'check', textContent: '✓' })] : []));
-function tabMenu(id, e) {
-  const others = cfg.workspaces.filter(w => w.id !== S.workspace), t = S.tabs.find(t => t.id === id) || {};
-  openPop(e, [
-    ...(t.private ? [] : [mi(t.pinned ? 'Unpin tab' : 'Pin tab', () => post({ cmd: 'pin_tab', id, pinned: !t.pinned }))]),
-    mi('Duplicate tab', () => post({ cmd: 'duplicate_tab', id })), el('hr'),
-    ...(S.private ? [] : others.map(w => mi([wsMark(w), 'Move to ' + w.name], () => post({ cmd: 'move_tab', id, workspace: w.id })))),
-    ...(others.length && !S.private ? [el('hr')] : []),
-    ...(S.tabs.some(o => o.id !== id && !o.pinned) ? [mi('Close other tabs', () => post({ cmd: 'close_other_tabs', id }))] : []),
-    mi('Close tab', () => post({ cmd: 'close_tab', id }), { danger: true }),
-  ]);
-}
 // Open Settings at the About card (version, check for updates, restart to update).
 function showAbout() {
   if (!S.settings) act('settings');
   setTimeout(() => $('#about-version').closest('.card').scrollIntoView({ block: 'center' }), ms('--d-3'));
 }
-function barMenu(e) {
-  const l = cfg.layout, mode = (m, label) => mi(label, () => { l.mode = m; save(); }, { checked: l.mode === m });
-  openPop(e, [
-    mode('sidebar-right', 'Sidebar on the right'), mode('sidebar-left', 'Sidebar on the left'),
-    mode('top-relaxed', 'Top bar, relaxed'), mode('top-compact', 'Top bar, compact'), el('hr'),
-    mi('Collapse the bar', () => act('toggle_bar'), { checked: l.collapsed }),
-    mi('Show when the mouse comes near', () => { l.hover_expand = !l.hover_expand; save(); }, { checked: l.hover_expand }), el('hr'),
-    mi('Customize toolbar…', () => setCustomizing(true)), el('hr'),
-    mi('About Wisp ' + S.version + ' and updates', showAbout),
-  ]);
+
+// ================= MENUS AS DATA, AND THE OVERLAY =================
+// Most menus are described as plain data (the shape is `overlay::Menu` in Rust): a list
+// of entries, each choice a number. The main copy keeps what each number does. When a
+// menu would spill over the page, which this view cannot draw over, the description goes
+// to the app, which shows it in the raised copy of this page (the overlay, above the
+// tabs) and sends back the number chosen. Otherwise, or where the overlay is not
+// available, it is drawn here, hiding the page where it overlaps.
+// Menus with fields in them (the workspace editor, "Clear browsing data") stay plain
+// elements drawn here: see openPop.
+Object.assign(ICON, {
+  zoom: 'M7 2.500a4.500 4.500 0 1 0 0 9 4.500 4.500 0 0 0 0-9M10.200 10.200l3.300 3.300M7 5v4M5 7h4',
+  info: 'M8 2.500a5.500 5.500 0 1 0 0 11 5.500 5.500 0 0 0 0-11M8 7.200v3.600M8 5.200v.100',
+});
+let menuFns = []; // while a menu is built: what each number does
+const reg = (fn, keep) => menuFns.push({ fn, keep }) - 1;
+// An entry you can choose; `keep` leaves the menu open (a switch, the zoom buttons).
+const item = (label, fn, { keep, ...o } = {}) => ({ t: 'item', id: reg(fn, keep), label, ...o });
+const btn = (label, fn, { keep, ...o } = {}) => ({ id: reg(fn, keep), label, ...o });
+const sep = () => ({ t: 'sep' });
+// A hotkey as menus show it: ⇧⌘T on a Mac, Ctrl+Shift+T elsewhere.
+const keyHint = name => {
+  const combo = cfg.hotkeys[name];
+  if (!combo) return undefined;
+  if (!S.mac) return pretty(combo).replaceAll(' + ', '+');
+  const parts = combo.split('+'), key = parts.pop(), sym = { Ctrl: '⌃', Alt: '⌥', Shift: '⇧', Mod: '⌘', Meta: '⌘' };
+  return parts.sort((a, b) => 'CtrlAltShiftModMeta'.indexOf(a) - 'CtrlAltShiftModMeta'.indexOf(b)).map(p => sym[p] || p).join('') + pretty(key);
+};
+
+// Draw a menu description; `pick(n)` runs when choice n is made. Shared by both copies.
+function menuEls({ entries }, pick) {
+  return entries.map(e => {
+    if (e.t === 'sep') return el('hr');
+    if (e.t === 'label') return el('label', { textContent: e.text });
+    if (e.t === 'note') return el('div', { className: 'dl-empty', textContent: e.text });
+    const mark = e.icon === 'spin' ? el('i', { className: 'spin' }) : e.icon ? svg(e.icon) : e.color ? el('i', { className: 'dot' }) : null;
+    if (mark && e.color) mark.style.setProperty('--c', e.color);
+    const text = e.sub ? el('span', { className: 'what' }, el('span', { className: 'name', textContent: e.label }), el('small', { textContent: e.sub }))
+      : el('span', { className: 'lbl', textContent: e.label });
+    const tail = [e.hint && el('kbd', { textContent: e.hint }), e.checked && el('span', { className: 'check', textContent: '✓' }),
+      e.on != null && el('i', { className: 'switch' + (e.on ? ' on' : '') })];
+    const btns = (e.buttons || []).map(b => el('button', { className: 'ib' + (b.on ? ' on' : '') + (b.text ? ' txt' : ''), title: b.label, ariaLabel: b.label,
+      disabled: !!b.disabled, onclick: ev => { ev.stopPropagation(); pick(b.id); } }, b.icon ? svg(b.icon) : b.text));
+    const kids = [mark, text, ...tail, ...btns].filter(Boolean), cls = 'mi' + (e.danger ? ' danger' : '');
+    if (btns.length) return el('div', { className: cls + ' btns', role: 'group', ariaLabel: e.label }, ...kids);
+    const row = el('button', { className: cls, disabled: !!e.disabled, role: e.on != null ? 'menuitemcheckbox' : 'menuitem', onclick: () => pick(e.id) }, ...kids);
+    if (e.on != null) row.setAttribute('aria-checked', e.on);
+    return row;
+  });
 }
 
+// The menu open in this copy: where it hangs from, how to build it, and what each choice does.
+let curMenu = null;
+function openMenu(at, build, wide) {
+  const a = at.getBoundingClientRect ? at.getBoundingClientRect() : { left: at.clientX, right: at.clientX, top: at.clientY, bottom: at.clientY };
+  curMenu = { anchor: { left: a.left, right: a.right, top: a.top, bottom: a.bottom, getBoundingClientRect() { return this; } }, build, wide };
+  showMenu(false);
+}
+// Build it (again: every new state rebuilds an open menu, so it stays current).
+function showMenu(again) {
+  const m = curMenu;
+  menuFns = [];
+  const entries = m.build();
+  if (!entries) return closePop(); // what it was about is gone
+  const desc = { entries, wide: !!m.wide }, json = JSON.stringify(desc);
+  if (again && json === m.json) return;
+  m.json = json; m.fns = menuFns;
+  $('#pop').classList.toggle('wide', !!m.wide);
+  openPop(m.anchor, menuEls(desc, menuPick), again, g => {
+    if (!m.overlay && (again || !overlayOk())) return false;
+    m.overlay = true;
+    post({ cmd: 'menu', menu: desc, rect: [g.x, g.y, g.w, g.h], origin: [g.ox, g.oy], pad: 3 * px('--float-shadow'), /* the whole of --shadow-pop */
+      radius: parseFloat(getComputedStyle($('#pop')).borderTopLeftRadius) || 0, again });
+    return true;
+  });
+}
+// The overlay draws a menu that spills over a page on screen; over a sheet this copy can.
+const overlayOk = () => !FLOATER && !S.peek && !S.settings && !customizing && !sheet;
+function menuPick(n) {
+  const h = curMenu?.fns[n];
+  if (!h) return;
+  if (!h.keep) closePop();
+  h.fn?.();
+}
+wisp.menuPick = menuPick; // chosen in the overlay
+wisp.menuClosed = () => { if (curMenu?.overlay) { curMenu = null; post({ cmd: 'busy', on: false }); } };
+wisp.menuFallback = () => { // the overlay could not show it: draw it here after all
+  if (!curMenu?.overlay) return;
+  curMenu.overlay = false;
+  $('#pop').hidden = false;
+  popCovers = true;
+  updateCover();
+};
+
+// ---- in the overlay copy ----
+// The app has placed this view over the menu and passed its description; choices go
+// back by number. Losing focus (a click on the page, or anywhere else) closes it.
+let overlayShown = false;
+wisp.menu = m => {
+  if (!FLOATER) return;
+  const pop = $('#pop'), was = [...pop.querySelectorAll('button')].indexOf(document.activeElement);
+  pop.classList.toggle('wide', !!m.menu.wide);
+  pop.replaceChildren(...menuEls(m.menu, id => post({ cmd: 'menu_pick', id })));
+  Object.assign(pop.style, { left: m.x + 'px', top: m.y + 'px', width: m.w + 'px' });
+  pop.style.setProperty('--ox', m.origin[0] + 'px');
+  pop.style.setProperty('--oy', m.origin[1] + 'px');
+  pop.hidden = false;
+  if (!m.again) { pop.style.animation = 'none'; void pop.offsetWidth; pop.style.animation = ''; }
+  else if (was >= 0) pop.querySelectorAll('button')[was]?.focus(); // rebuilt: keep the keyboard's place
+  overlayShown = true;
+  flag('menu', true);
+};
+wisp.menuHide = () => { overlayShown = false; flag('menu', false); $('#pop').hidden = true; };
+addEventListener('blur', () => { if (overlayShown) post({ cmd: 'menu_close' }); });
+
+// ---- keyboard, in any menu: arrows, Home/End, Enter, Escape, and typing a label's start ----
+let typed = '', typedAt = 0;
+addEventListener('keydown', e => {
+  const pop = $('#pop');
+  if ((pop.hidden && !curMenu?.overlay) || !S || window.__wispRecording || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === 'Escape') {
+    e.preventDefault(); e.stopImmediatePropagation();
+    return FLOATER && overlayShown ? post({ cmd: 'menu_close', focus: true }) : closePop();
+  }
+  if (pop.hidden || e.target.matches?.('input, textarea')) return;
+  const items = [...pop.querySelectorAll('button:not(:disabled)')], n = items.length, i = items.indexOf(document.activeElement);
+  const go = k => { e.preventDefault(); items[(k + n) % n]?.focus(); };
+  if (e.key === 'ArrowDown') go(i + 1);
+  else if (e.key === 'ArrowUp') go(i < 0 ? -1 : i - 1);
+  else if (e.key === 'Home') go(0);
+  else if (e.key === 'End') go(-1);
+  else if (e.key.length === 1 && e.key !== ' ') {
+    typed = (Date.now() - typedAt > 700 ? '' : typed) + e.key.toLowerCase();
+    typedAt = Date.now();
+    const from = typed.length > 1 ? Math.max(i, 0) : i + 1;
+    const k = [...items.keys()].map(k => (k + from) % n).find(k => items[k].textContent.trim().toLowerCase().startsWith(typed));
+    if (k != null) go(k);
+  }
+}, true);
+// A menu is likely soon: let the app have the overlay ready, so the first one is instant.
+const warm = node => node.addEventListener('pointerenter', () => FLOATER || post({ cmd: 'overlay_warm' }));
+
+// ---- the menus ----
+function tabMenu(id, e) {
+  openMenu(e, () => {
+    const others = cfg.workspaces.filter(w => w.id !== S.workspace), t = S.tabs.find(t => t.id === id);
+    if (!t) return null;
+    const web = t.kind !== 'settings';
+    return [
+      ...(t.private || !web ? [] : [item(t.pinned ? 'Unpin tab' : 'Pin tab', () => post({ cmd: 'pin_tab', id, pinned: !t.pinned }))]),
+      ...(web ? [item('Duplicate tab', () => post({ cmd: 'duplicate_tab', id })), sep()] : []),
+      ...(S.private ? [] : others.map(w => item('Move to ' + w.name, () => post({ cmd: 'move_tab', id, workspace: w.id }),
+        { icon: WS_ICONS.includes(w.icon) && w.icon ? w.icon : undefined, color: w.color }))),
+      ...(others.length && !S.private ? [sep()] : []),
+      ...(S.tabs.some(o => o.id !== id && !o.pinned) ? [item('Close other tabs', () => post({ cmd: 'close_other_tabs', id }))] : []),
+      item('Close tab', () => post({ cmd: 'close_tab', id }), { danger: true }),
+    ];
+  });
+}
+function barMenu(e) {
+  openMenu(e, () => {
+    const l = cfg.layout, mode = (m, label) => item(label, () => { l.mode = m; save(); }, { checked: l.mode === m });
+    return [
+      mode('sidebar-right', 'Sidebar on the right'), mode('sidebar-left', 'Sidebar on the left'),
+      mode('top-relaxed', 'Top bar, relaxed'), mode('top-compact', 'Top bar, compact'), sep(),
+      item('Collapse the bar', () => act('toggle_bar'), { checked: l.collapsed }),
+      item('Show when the mouse comes near', () => { l.hover_expand = !l.hover_expand; save(); }, { checked: l.hover_expand }), sep(),
+      item('Customize toolbar…', () => setCustomizing(true)), sep(),
+      item('About Wisp ' + S.version + ' and updates', showAbout),
+    ];
+  });
+}
+// The app menu, from the settings button: everyday actions and quick settings, with
+// each action's hotkey from the user's own bindings.
+function appMenu(at) {
+  openMenu(at, () => {
+    const cur = S.tabs.find(t => t.id === S.active), page = !!cur && cur.kind !== 'settings';
+    const k = name => ({ hint: keyHint(name) }), a = cfg.appearance;
+    const zoom = (label, name, o) => btn(label, () => act(name), { keep: true, disabled: !page, ...o });
+    const theme = (v, icon, label) => btn(label, () => { a.theme = v; save(); }, { keep: true, icon, on: a.theme === v });
+    return [
+      item('New tab', () => act('new_tab'), { icon: 'plus', ...k('new_tab') }),
+      ...(S.private ? [] : [item('New private tab', () => act('new_private_tab'), { icon: 'private', ...k('new_private_tab') })]),
+      item('New private window', () => act('private_window'), { icon: 'window', ...k('private_window') }),
+      sep(),
+      item('History', () => act('history'), { icon: 'clock', ...k('history') }),
+      item('Bookmarks', () => act('bookmarks'), { icon: 'book', ...k('bookmarks') }),
+      item('Downloads', () => downloadsMenu(at), { icon: 'download' }),
+      sep(),
+      item('Find in page', () => act('find'), { icon: 'search', disabled: !page, ...k('find') }),
+      item('Zoom', null, { icon: 'zoom', buttons: [zoom('Zoom out', 'zoom_out', { icon: 'minus' }),
+        zoom('Reset to 100%', 'zoom_reset', { text: Math.round((page ? cur.zoom : 1) * 100) + '%' }), zoom('Zoom in', 'zoom_in', { icon: 'plus' })] }),
+      sep(),
+      item('Block ads and trackers', () => { cfg.adblock.enabled = !cfg.adblock.enabled; save(); }, { icon: 'shield', on: cfg.adblock.enabled, keep: true }),
+      item('Appearance', null, { icon: root.dataset.theme === 'dark' ? 'moon' : 'sun',
+        buttons: [theme('system', 'sparkle', 'Match system'), theme('light', 'sun', 'Light'), theme('dark', 'moon', 'Dark')] }),
+      item('Collapse the bar', () => act('toggle_bar'), { icon: 'sidebar', on: cfg.layout.collapsed, ...k('toggle_bar') }),
+      sep(),
+      item('Settings', () => act('settings'), { icon: 'settings', ...k('settings') }),
+      item('About Wisp and updates', showAbout, { icon: 'info' }),
+    ];
+  });
+}
+// ================= END MENUS AS DATA =================
+
 // A popover opens at an element or a mouse event. Tab webviews sit above this view,
-// so when it would spill over the page the page is hidden while it is open.
+// so when it would spill over the page the page is hidden while it is open, unless
+// `overlay(geometry)` takes it (it then floats in the overlay; see openMenu).
 let popCovers = false;
-function openPop(at, kids) {
+function openPop(at, kids, again, overlay) {
+  if (!overlay && !again) curMenu = null; // a plain popover replaces a data menu
   const pop = $('#pop');
   pop.replaceChildren(...kids);
   pop.hidden = false;
-  pop.style.animation = 'none'; void pop.offsetWidth; pop.style.animation = '';
+  if (!again) { pop.style.animation = 'none'; void pop.offsetWidth; pop.style.animation = ''; }
   const a = at.getBoundingClientRect ? at.getBoundingClientRect() : { left: at.clientX, right: at.clientX, top: at.clientY, bottom: at.clientY };
   const gap = 6, sb = $('#sidebar').getBoundingClientRect();
   // Opened from the sidebar it stays inside it (narrowing to fit), so the page is not disturbed.
-  const inSidebar = root.dataset.side !== 'top' && sb.width > 0 && a.left >= sb.left && a.right <= sb.right;
+  // (Not when the overlay can float it over the page instead, at its full width.)
+  const inSidebar = !(overlay && (overlayOk() || curMenu?.overlay)) && root.dataset.side !== 'top' && sb.width > 0 && a.left >= sb.left && a.right <= sb.right;
   pop.style.width = inSidebar ? Math.min(232, sb.width - 2 * gap) + 'px' : '';
   const w = pop.offsetWidth, h = pop.offsetHeight;
   const minX = inSidebar ? sb.left + gap : gap, maxX = (inSidebar ? sb.right : innerWidth) - w - gap;
   const x = Math.max(minX, Math.min(a.left, maxX));
-  const y = a.bottom + gap + h <= innerHeight ? a.bottom + gap : Math.max(gap, a.top - gap - h);
+  // (A floating top bar's view grows downwards to fit it, see floaterGrow: never flip up there.)
+  const room = FLOATER && root.dataset.side === 'top' ? Infinity : innerHeight;
+  const y = a.bottom + gap + h <= room ? a.bottom + gap : Math.max(gap, a.top - gap - h);
   Object.assign(pop.style, { left: x + 'px', top: y + 'px' });
-  pop.style.setProperty('--ox', Math.max(0, a.left - x) + 'px');
-  pop.style.setProperty('--oy', (y < a.top ? h : 0) + 'px');
+  const ox = Math.max(0, a.left - x), oy = y < a.top ? h : 0;
+  pop.style.setProperty('--ox', ox + 'px');
+  pop.style.setProperty('--oy', oy + 'px');
   const p = $('#page').getBoundingClientRect();
   popCovers = x < p.right && x + w > p.left && y < p.bottom && y + h > p.top;
+  if ((popCovers || (overlay && curMenu?.overlay)) && overlay?.({ x, y, w, h, ox, oy })) { pop.hidden = true; popCovers = false; }
   updateCover();
-  post({ cmd: 'busy', on: true });
+  if (FLOATER) floaterGrow();
+  if (!again) post({ cmd: 'busy', on: true });
 }
 function closePop() {
+  if (FLOATER && overlayShown) return post({ cmd: 'menu_close' }); // the app hides it
+  const m = curMenu;
+  curMenu = null;
+  if (m?.overlay) { post({ cmd: 'menu_close' }); post({ cmd: 'busy', on: false }); }
   if ($('#pop').hidden) return;
   $('#pop').hidden = true;
   popCovers = false;
   updateCover();
+  if (FLOATER) floaterGrow();
   post({ cmd: 'busy', on: false });
+}
+// A floating top bar grows its view downwards while one of its menus or its
+// suggestions hang below it, so they are not cut off.
+let grown = false;
+function floaterGrow() {
+  const want = !overlayShown && (sug.open || !$('#pop').hidden);
+  if (want !== grown) { grown = want; post({ cmd: 'grow', on: want }); }
 }
 let covering = false;
 function updateCover() {
@@ -1173,7 +1416,6 @@ function updateCover() {
 
 // ---------- customize mode: drag items between areas ----------
 function setCustomizing(on) {
-  if (on && S.settings) act('settings');
   customizing = on;
   closePop();
   render();
@@ -1429,14 +1671,14 @@ wisp.suggestions = (query, rows) => {
   const w = Math.min(Math.max(a.width, 420), frame.right - frame.left - 2 * gap);
   const x = Math.max(frame.left + gap, Math.min(a.left, frame.right - w - gap));
   Object.assign(box.style, { left: x + 'px', top: a.bottom + gap + 'px', width: w + 'px' });
-  if (!sug.open) { sug.open = true; if (FLOATER) post({ cmd: 'grow', on: true }); else updateCover(); }
+  if (!sug.open) { sug.open = true; if (FLOATER) floaterGrow(); else updateCover(); }
 };
 function sugClose(keep) {
   if (!keep) sug.input = null;
   if (!sug.open) return;
   sug.open = false; sug.rows = [];
   $('#sug').hidden = true;
-  if (FLOATER) post({ cmd: 'grow', on: false }); else updateCover();
+  if (FLOATER) floaterGrow(); else updateCover();
 }
 function sugAccept(n) {
   const r = sug.rows[n], input = sug.input;
@@ -1485,7 +1727,7 @@ function renderLibrary() { // with every state
     b.setAttribute('aria-pressed', on);
   }
   // Anything else taking the page area, or another tab coming up, closes the sheet.
-  if (sheet && (S.settings || customizing || S.active !== libActive)) setSheet('');
+  if (sheet && (customizing || S.active !== libActive)) setSheet(''); // (a sheet may lie over the Settings tab)
   if (sheet === 'bookmarks' && on !== libMarked) sheetAsk();
   libActive = S.active; libMarked = on;
   $('#hist-clear').hidden = S.private;
@@ -1580,7 +1822,6 @@ function reportPage(animate = false) {
 }
 function render() {
   const l = cfg.layout, side = l.mode.startsWith('top') ? 'top' : l.mode.split('-')[1];
-  if (S.settings && customizing) { customizing = false; updateCover(); }
   root.dataset.mode = l.mode;
   root.dataset.side = side;
   applyLook();
@@ -1604,6 +1845,7 @@ function render() {
   if (S.settings && !FLOATER) renderSettings();
   renderTools();
   reportPage(true);
+  if (curMenu) showMenu(true); // an open menu stays current
 }
 
 // ---------- events ----------
@@ -1634,7 +1876,7 @@ $('#cz-reset').onclick = () => { cfg.layout.areas = structuredClone(DEFAULT_AREA
 // right-click for layout options.
 const EMPTY = '#hotbar, #sidebar, #tabs, #pins, .area, .spacer';
 addEventListener('mousedown', e => {
-  if (!$('#pop').hidden && !e.target.closest('#pop')) closePop();
+  if ((!$('#pop').hidden || curMenu?.overlay) && !e.target.closest('#pop')) closePop();
   if (customizing || e.button !== 0 || !e.target.matches(EMPTY)) return;
   post({ cmd: e.detail === 2 ? 'maximize' : 'drag' });
 });
@@ -1697,25 +1939,20 @@ if (!FLOATER) {
   $('#find-close').onclick = () => setFind(false);
 }
 // ---------- downloads ----------
-const dlRows = () => !S.downloads.length ? [el('div', { className: 'dl-empty', textContent: 'No downloads yet' })] : S.downloads.map(d => {
-  const op = (name, label, icon) => el('button', { className: 'ib', title: label, ariaLabel: label,
-    onclick: () => { closePop(); post({ cmd: 'download', id: d.id, op: name }); } }, svg(icon));
-  const note = [d.host, d.state === 'active' ? 'Downloading…' : d.state === 'failed' ? 'Failed' : ''].filter(Boolean).join(' · ');
-  return el('div', { className: 'dl ' + d.state, title: d.name },
-    el('i', { className: 'state' }, ...(d.state === 'active' ? [] : [svg(d.state === 'failed' ? 'close' : 'file')])),
-    el('div', { className: 'what' }, el('div', { className: 'name', textContent: d.name }), el('small', { textContent: note })),
-    ...(d.state === 'done' ? [op('open', 'Open', 'open'), op('show', 'Show in folder', 'folder')] : []));
-});
-function downloadsMenu(anchor) {
-  if (!customizing) openPop(anchor, [el('label', { textContent: 'Downloads' }), el('div', { id: 'dl-list' }, ...dlRows())]);
+function downloadsMenu(anchor) { // MENUS AS DATA: a live list, rebuilt as downloads change
+  if (customizing) return;
+  openMenu(anchor, () => [{ t: 'label', text: 'Downloads' }, ...(!S.downloads.length ? [{ t: 'note', text: 'No downloads yet' }] : S.downloads.map(d => {
+    const op = (name, label, icon) => btn(label, () => post({ cmd: 'download', id: d.id, op: name }), { icon });
+    const note = [d.host, d.state === 'active' ? 'Downloading…' : d.state === 'failed' ? 'Failed' : ''].filter(Boolean).join(' · ');
+    return item(d.name, null, { icon: d.state === 'active' ? 'spin' : d.state === 'failed' ? 'close' : 'file', sub: note, danger: d.state === 'failed',
+      buttons: d.state === 'done' ? [op('open', 'Open', 'open'), op('show', 'Show in folder', 'folder')] : [] });
+  }))], true);
 }
 // Called with every new state.
 function renderTools() {
   flag('find', findOpen && !S.settings && !customizing && !FLOATER);
   const b = itemEls.downloads, busy = S.downloads.some(d => d.state === 'active');
   if (b) { b.classList.toggle('busy', busy); b.title = busy ? 'Downloading…' : 'Downloads'; }
-  const list = $('#dl-list');
-  if (list && !$('#pop').hidden) list.replaceChildren(...dlRows()); // an open list stays current
 }
 // ================= END PAGE TOOLS =================
 
@@ -1744,7 +1981,7 @@ $('#grip').onpointerdown = e => {
 };
 $('#grip').ondblclick = () => { cfg.layout.sidebar_width = 220; root.style.setProperty('--side-w', '220px'); reportPage(true); save(); };
 new ResizeObserver(() => S && reportPage()).observe($('#page'));
-post({ cmd: 'ready' });
+post({ cmd: FLOATER ? 'overlay_ready' : 'ready' });
 </script>
 </body>
 </html>
