@@ -2,6 +2,13 @@ name: Release
 
 # Push a tag like v0.2.0 (matching the version in Cargo.toml) to build installers
 # and publish them as a GitHub release.
+#
+# Automatic updates: when the repository has the update signing key configured
+#   - secret   WISP_UPDATE_PRIVATE_KEY (and WISP_UPDATE_PRIVATE_KEY_PASSWORD)
+#   - variable WISP_UPDATE_PUBKEY
+# the app is built with the public key, the update files are signed, and latest.json
+# is published so installed copies update themselves. Without the key the release is
+# built as before and offers no automatic update.
 on:
   push:
     tags: ["v*"]
@@ -17,9 +24,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: macOS Apple Silicon, os: macos-latest, target: aarch64-apple-darwin, format: dmg }
-          - { name: macOS Intel, os: macos-latest, target: x86_64-apple-darwin, format: dmg }
-          - { name: Windows x64, os: windows-latest, target: x86_64-pc-windows-msvc, format: nsis }
+          - { name: macOS Apple Silicon, os: macos-latest, target: aarch64-apple-darwin, arch: aarch64, formats: "app,dmg" }
+          - { name: macOS Intel, os: macos-latest, target: x86_64-apple-darwin, arch: x64, formats: "app,dmg" }
+          - { name: Windows x64, os: windows-latest, target: x86_64-pc-windows-msvc, arch: x64, formats: "nsis" }
+    env:
+      WISP_UPDATE_PUBKEY: ${{ vars.WISP_UPDATE_PUBKEY }}
+      SIGN_UPDATES: ${{ secrets.WISP_UPDATE_PRIVATE_KEY != '' && vars.WISP_UPDATE_PUBKEY != '' }}
+      PACKAGE: cargo packager --release --formats ${{ matrix.formats }} --target ${{ matrix.target }} --binaries-dir target/${{ matrix.target }}/release --out-dir dist
     steps:
       - uses: actions/checkout@v4
       - run: rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
@@ -28,23 +39,43 @@ jobs:
           key: ${{ matrix.target }}
       - run: cargo install cargo-packager --locked --version 0.11.8
       - run: cargo build --release --target ${{ matrix.target }}
-      - run: cargo packager --release --formats ${{ matrix.format }} --target ${{ matrix.target }} --binaries-dir target/${{ matrix.target }}/release --out-dir dist
+      - name: Package and sign update files
+        if: env.SIGN_UPDATES == 'true'
+        shell: bash
+        run: $PACKAGE
+        env:
+          CARGO_PACKAGER_SIGN_PRIVATE_KEY: ${{ secrets.WISP_UPDATE_PRIVATE_KEY }}
+          CARGO_PACKAGER_SIGN_PRIVATE_KEY_PASSWORD: ${{ secrets.WISP_UPDATE_PRIVATE_KEY_PASSWORD }}
+      - name: Package (no update signing key configured)
+        if: env.SIGN_UPDATES != 'true'
+        shell: bash
+        run: $PACKAGE
+      - name: Name the macOS update archive after its architecture
+        if: runner.os == 'macOS' && env.SIGN_UPDATES == 'true'
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | python3 -c "import json,sys; print(json.load(sys.stdin)['packages'][0]['version'])")
+          mv dist/Wisp.app.tar.gz "dist/Wisp_${version}_${{ matrix.arch }}.app.tar.gz"
+          mv dist/Wisp.app.tar.gz.sig "dist/Wisp_${version}_${{ matrix.arch }}.app.tar.gz.sig"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
           path: |
             dist/*.dmg
             dist/*.exe
+            dist/*.app.tar.gz
+            dist/*.sig
           if-no-files-found: error
 
   publish:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+      - run: python3 .github/latest-json.py dist "$GITHUB_REF_NAME" "$GITHUB_REPOSITORY"
       - run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "Wisp $GITHUB_REF_NAME" --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}

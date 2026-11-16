@@ -13,6 +13,7 @@ mod config;
 #[cfg(all(target_os = "macos", debug_assertions))]
 mod debug_shot;
 mod native;
+mod update;
 
 use config::{Config, SavedTab, Session};
 use serde::Deserialize;
@@ -38,6 +39,8 @@ const LEAVE_MARGIN: f64 = 36.0;
 const LEAVE_DELAY: Duration = Duration::from_millis(300);
 /// How often the cursor is checked while the bar is collapsed.
 const POLL: Duration = Duration::from_millis(60);
+/// Look for a new version this often (and once shortly after start).
+const UPDATE_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
 /// The page card gliding to a new size (keep in step with --d-3 in ui.html).
 const PAGE_GLIDE: Duration = Duration::from_millis(320);
 const FRAME: Duration = Duration::from_millis(8);
@@ -120,6 +123,8 @@ enum UserEvent {
     /// A page in tab `.0` asked for a new window.
     NewTab(u32, String),
     AdblockReady,
+    /// An update check finished: a version ready to install, none, or why it failed.
+    Update(Result<Option<Box<update::Ready>>, String>),
 }
 
 struct Tab {
@@ -212,6 +217,10 @@ struct App {
     away_since: Option<Instant>,
     /// Development only: keep the bar revealed whatever the cursor does.
     hold_peek: bool,
+    /// A newer version, downloaded and waiting for quit (or "Restart to update").
+    update: Option<update::Ready>,
+    /// What the last update check found, for the settings page.
+    update_note: String,
     /// Started with `--private`: every tab is private and nothing is saved.
     private_window: bool,
     started: bool,
@@ -385,6 +394,12 @@ impl App {
             "private": self.private_window,
             "mac": cfg!(target_os = "macos"),
             "glass": self.glass.is_some(),
+            "version": env!("CARGO_PKG_VERSION"),
+            "update": {
+                "supported": update::supported(),
+                "ready": self.update.as_ref().map(|u| u.version.as_str()),
+                "note": self.update_note,
+            },
         });
         let js = format!("window.wisp && wisp.state({state})");
         for ui in self.uis() {
@@ -708,6 +723,8 @@ impl App {
                 return self.focus_url();
             }
             "private_window" => return open_private_window(),
+            "check_update" => return self.check_update(true),
+            "restart_update" => return self.restart_into_update(),
             "next_tab" | "prev_tab" => {
                 let step = if name == "next_tab" { 1 } else { -1 };
                 if let Some(id) = Self::cycle(&self.workspace_tabs(), self.active, step) {
@@ -774,6 +791,47 @@ impl App {
             self.ensure_floater();
         }
         self.sync();
+    }
+
+    /// Look for a new version on a background thread; the answer arrives as an event.
+    /// `asked` = the user pressed the button (so report back even when nothing is new).
+    fn check_update(&mut self, asked: bool) {
+        if !update::supported() || self.private_window || self.update.is_some() {
+            return;
+        }
+        if !asked && !self.cfg.behavior.auto_update {
+            return;
+        }
+        if asked {
+            self.update_note = "Checking\u{2026}".into();
+            self.sync();
+        }
+        let proxy = self.proxy.clone();
+        std::thread::spawn(move || {
+            let found = update::fetch().map(|ready| ready.map(Box::new));
+            let _ = proxy.send_event(UserEvent::Update(found));
+        });
+    }
+
+    /// Install the downloaded version now and start it.
+    fn restart_into_update(&mut self) {
+        let Some(ready) = self.update.take() else {
+            return;
+        };
+        self.save_session();
+        match ready.install() {
+            Ok(()) => {
+                // (On Windows the installer has taken over and this line is never reached.)
+                if let Ok(exe) = std::env::current_exe() {
+                    let _ = std::process::Command::new(exe).spawn();
+                }
+                self.quit = true;
+            }
+            Err(e) => {
+                self.update_note = format!("Could not install the update: {e}");
+                self.sync();
+            }
+        }
     }
 
     fn recompile_adblock(&self) {
@@ -864,6 +922,15 @@ impl App {
             self.new_tab(&home, false);
         } else {
             self.select_workspace(start_ws);
+        }
+        // First launch after an update: show what changed.
+        if config::updated_from().is_some() {
+            let notes = concat!(
+                env!("CARGO_PKG_REPOSITORY"),
+                "/releases/tag/v",
+                env!("CARGO_PKG_VERSION")
+            );
+            self.new_tab(notes, false);
         }
     }
 
@@ -1009,6 +1076,20 @@ impl App {
                 let private = self.tab(opener).is_some_and(|t| t.private);
                 self.new_tab(&url, private);
             }
+            UserEvent::Update(found) => {
+                match found {
+                    Ok(Some(ready)) => {
+                        self.update_note = format!(
+                            "Version {} is ready. It installs when you quit.",
+                            ready.version
+                        );
+                        self.update = Some(*ready);
+                    }
+                    Ok(None) => self.update_note = "Wisp is up to date.".into(),
+                    Err(e) => self.update_note = format!("Could not check for updates: {e}"),
+                }
+                self.sync();
+            }
             UserEvent::AdblockReady => {
                 if adblock::REATTACH_AFTER_COMPILE {
                     let pages = self.tabs.iter().filter_map(|t| t.webview.as_ref());
@@ -1116,6 +1197,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         bar_busy: false,
         away_since: None,
         hold_peek: false,
+        update: None,
+        update_note: String::new(),
         private_window,
         started: false,
         quit: false,
@@ -1126,6 +1209,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     #[cfg(all(target_os = "macos", debug_assertions))]
     let launched = Instant::now();
+    let mut next_update_check = Instant::now() + Duration::from_secs(5);
     event_loop.run(move |event, _, control_flow| {
         match event {
             Event::UserEvent(e) => app.handle(e),
@@ -1140,6 +1224,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Event::MainEventsCleared => {
                 app.tick();
                 app.poll_cursor();
+                if app.started && Instant::now() >= next_update_check {
+                    next_update_check = Instant::now() + UPDATE_EVERY;
+                    app.check_update(false);
+                }
                 // Development: WISP_PEEK=1 reveals the collapsed bar after 3s and holds it;
                 // WISP_ACT=<action> runs an action after 3s; WISP_JS=<script> runs in the
                 // interface after 4s;
@@ -1169,7 +1257,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
-            Event::LoopDestroyed => app.save_session(),
+            Event::LoopDestroyed => {
+                app.save_session();
+                // The quiet path: a downloaded update goes in as the app closes.
+                if let Some(ready) = app.update.take()
+                    && let Err(e) = ready.install()
+                {
+                    eprintln!("wisp: could not install the update: {e}");
+                }
+            }
             _ => {}
         }
         *control_flow = if app.quit {
@@ -1179,7 +1275,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else if app.cfg.layout.collapsed || cfg!(debug_assertions) {
             ControlFlow::WaitUntil(Instant::now() + POLL)
         } else {
-            ControlFlow::Wait
+            ControlFlow::WaitUntil(next_update_check)
         };
     });
 }

@@ -259,6 +259,8 @@ i.dot { display: block; width: 8px; height: 8px; border-radius: 50%; background:
    bar is see-through. Only floating things are glass; docked bars stay solid. */
 :root[data-floater] #app { border-radius: calc(var(--r-lg) + 4px); }
 :root[data-floater][data-glass] #app { background: color-mix(in srgb, var(--bg) 40%, transparent); box-shadow: var(--shadow-pop), inset 0 1px 0 #ffffff1a; }
+/* The address must never blend with page pixels, glass or not. */
+:root[data-floater][data-glass] .url { background: color-mix(in srgb, var(--bg) 88%, var(--fg)); }
 :root[data-floater][data-glass][data-side=right] #app { --from: 14px; }
 :root[data-floater][data-glass][data-side=left] #app { --from: -14px; }
 @keyframes float-in { from { opacity: 0; transform: translateX(var(--from)) scale(.985); } }
@@ -288,6 +290,7 @@ i.dot { display: block; width: 8px; height: 8px; border-radius: 50%; background:
 }
 .btn { font-weight: 500; font-size: var(--text-md); white-space: nowrap; }
 .btn.primary { background: var(--fg); border-color: transparent; color: var(--bg); }
+.btn[hidden], .row[hidden] { display: none; }
 .row input[type=text] { width: 300px; max-width: 55vw; }
 .row input[type=number] { width: 80px; }
 .row textarea { width: 100%; min-height: 90px; padding: var(--sp-2) var(--sp-3); resize: vertical; font-family: var(--font-mono); }
@@ -486,6 +489,15 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
           <textarea data-k="adblock.extra_hosts" spellcheck="false"></textarea></label>
       </div>
 
+      <h2>About</h2>
+      <div class="card">
+        <div class="row"><span>Wisp <span id="about-version"></span><small id="about-note"></small></span>
+          <span class="chips"><button class="btn" data-act="check_update" id="about-check">Check for updates</button>
+            <button class="btn primary" data-act="restart_update" id="about-restart">Restart to update</button></span></div>
+        <label class="row" id="about-auto"><span>Update automatically<small>New versions download in the background and install as you quit, so the next launch is up to date; the release notes open in a tab</small></span>
+          <input type="checkbox" data-k="behavior.auto_update"></label>
+      </div>
+
       <h2>Hotkeys</h2>
       <div class="card" id="hotkeys"></div>
       <p><button class="btn" id="reset-keys">Reset hotkeys to defaults</button></p>
@@ -672,18 +684,15 @@ function renderAreas() {
 }
 
 // ---------- tabs (keyed, so only new tabs animate in) ----------
-// The resting address: scheme and any user:password dropped, the site's own domain
-// emphasized so a look-alike host is easy to spot.
-// ponytail: "own domain" = the last two labels, which is wrong for suffixes such as
-// .co.uk (shows "co.uk" bold). Upgrade path: the public suffix list.
+// The resting address: scheme and any user:password dropped, and the whole host
+// emphasized. (Emphasizing only the "registrable" part needs the public suffix list;
+// guessing it wrong would highlight the wrong owner, so the whole host it is.)
 function showUrl(box, full) {
   let u = null;
   try { u = new URL(full); } catch {}
   if (!u || !/^https?:$/.test(u.protocol)) return box.replaceChildren(full);
-  const labels = u.host.split('.'), keep = /^[\d.:]+$/.test(u.host) ? labels.length : 2;
-  const sub = labels.slice(0, -keep).join('.'), site = labels.slice(-keep).join('.');
   const rest = (u.pathname === '/' ? '' : u.pathname) + u.search + u.hash;
-  box.replaceChildren(u.protocol === 'http:' ? 'http://' : '', sub ? sub + '.' : '', el('b', { textContent: site }), rest);
+  box.replaceChildren(u.protocol === 'http:' ? 'http://' : '', el('b', { textContent: u.host }), rest);
 }
 const hostOf = url => { try { return new URL(url).host; } catch { return ''; } };
 const tabEls = new Map();
@@ -1014,6 +1023,12 @@ function renderSettings() {
   }));
 
   renderTed();
+  const up = S.update;
+  $('#about-version').textContent = S.version;
+  $('#about-note').textContent = up.supported ? up.note : 'This copy was not installed from a release, so it does not update itself.';
+  $('#about-check').hidden = !up.supported || !!up.ready;
+  $('#about-restart').hidden = !up.ready;
+  $('#about-auto').hidden = !up.supported;
 
   if (!$('#ws-list').contains(document.activeElement)) {
     $('#ws-list').replaceChildren(...cfg.workspaces.map((w, i) => {

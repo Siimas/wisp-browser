@@ -123,6 +123,8 @@ pub struct Behavior {
     pub search_url: String,
     pub restore_session: bool,
     pub default_zoom: f64,
+    /// Download new versions in the background and install them on quit.
+    pub auto_update: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
@@ -180,6 +182,7 @@ impl Default for Behavior {
             search_url: "https://duckduckgo.com/?q=%s".into(),
             restore_session: true,
             default_zoom: 1.0,
+            auto_update: true,
         }
     }
 }
@@ -353,6 +356,19 @@ pub struct SavedTab {
     pub title: String,
     pub workspace: u32,
     pub active: bool,
+}
+
+/// The version that ran last time, if it differs from this one: the app was updated
+/// since. Records this version for next time. `None` on a first run or no change.
+pub fn updated_from() -> Option<String> {
+    let now = env!("CARGO_PKG_VERSION");
+    let before = fs::read_to_string(dir().join("version")).ok();
+    if before.as_deref().map(str::trim) != Some(now) {
+        write("version", now);
+    }
+    before
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty() && v != now)
 }
 
 pub fn load_session() -> Session {

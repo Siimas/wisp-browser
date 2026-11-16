@@ -48,6 +48,16 @@ The installers are not code-signed yet, so the first launch needs one extra step
   `xattr -cr /Applications/Wisp.app` in Terminal, then open it.
 - **Windows**: on the SmartScreen prompt choose **More info**, then **Run anyway**.
 
+## Updates
+
+Installed copies update themselves. A new version downloads in the background,
+is installed as you quit, and is simply there the next time you open Wisp, with
+its release notes in a tab. You can turn this off, or check by hand, in
+Settings > About.
+
+Every update file is signed, and Wisp refuses any file whose signature does not
+match the key it was built with. Copies you build yourself do not update.
+
 ## Default hotkeys
 
 `Mod` is `Cmd` on macOS and `Ctrl` on Windows.
@@ -98,6 +108,26 @@ cargo packager --release --formats dmg   # or: --formats nsis on Windows
 To cut a release, bump `version` in `Cargo.toml`, merge, then push a matching
 tag (`git tag v0.2.0 && git push origin v0.2.0`). The Release workflow builds
 the installers and publishes them.
+
+### Update signing key (one-time setup)
+
+Automatic updates need a signing key pair. Generate it once and keep the
+private half safe: anyone holding it can ship an update to every installed copy,
+and if it is lost, installed copies can no longer be updated automatically.
+
+```bash
+cargo packager signer generate --path ~/.wisp/update.key
+```
+
+Then, in the repository's settings on GitHub (Secrets and variables > Actions):
+
+- secret `WISP_UPDATE_PRIVATE_KEY`: the contents of `~/.wisp/update.key`
+- secret `WISP_UPDATE_PRIVATE_KEY_PASSWORD`: the password you chose
+- variable `WISP_UPDATE_PUBKEY`: the contents of `~/.wisp/update.key.pub`
+
+From the next release on, the workflow signs the update files and publishes
+`latest.json`, which installed copies read. Without the key, releases are built
+as before and offer no automatic update.
 
 ## Known limits
 
