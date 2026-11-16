@@ -1,1 +1,19 @@
-{"max": {}}
+{
+ "_about": "Limits for bench/perf_check.py on the GitHub-hosted runners, checked against the median of 3 runs. Raising one: see CONTRIBUTING.md (Performance budget). 'measured' is the runner's median when the limit was set, for reference.",
+ "darwin": {
+  "max": {
+   "binary_kb": 1800,
+   "launch_s": 5,
+   "memory_mb": 175,
+   "idle_cpu_pct": 3,
+   "launch_s_collapsed": 5,
+   "memory_mb_collapsed": 200,
+   "idle_cpu_pct_collapsed": 4
+  },
+  "measured": {}
+ },
+ "win32": {
+  "max": {"binary_kb": 1400},
+  "measured": {"binary_kb": 1328}
+ }
+}

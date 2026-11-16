@@ -227,7 +227,7 @@ def main():
     runs = measure(args)
     if args.out:
         args.out.write_text(json.dumps(runs, indent=1) + "\n")
-    budget = json.loads(args.budget.read_text())["max"]
+    budget = json.loads(args.budget.read_text())[sys.platform]["max"]  # "darwin" or "win32"
     base = json.loads(args.base.read_text()) if args.base and args.base.exists() else {}
 
     print(f"\n{'metric':<26}{'median':>9}  {'runs':<22}{'base':>9}{'change':>9}{'budget':>9}")
