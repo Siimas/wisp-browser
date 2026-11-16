@@ -43,9 +43,10 @@
   --tex: none; --tex-op: 0; --tex-blend: normal;
 
   /* Elevation */
-  --shadow-1: 0 1px 2px #00000014, 0 0 0 1px #0000000a;
-  --shadow-card: 0 0 0 1px var(--line), 0 6px 24px #0000001f;
-  --shadow-pop: 0 0 0 1px var(--line), 0 12px 32px #00000033, 0 2px 6px #0000001a;
+  --shadow-0: inset 0 0 0 1px var(--line);                       /* recessed: fields at rest */
+  --shadow-1: 0 1px 2px #0000001f, 0 0 0 1px #0000000d;           /* raised: the current thing, cards, buttons */
+  --shadow-card: 0 0 0 1px var(--line), 0 10px 30px #00000029, 0 2px 6px #00000014;  /* the page card */
+  --shadow-pop: 0 0 0 1px var(--line), 0 18px 44px #0000003d, 0 4px 10px #0000001f;  /* floating: menus, the revealed bar */
 
   /* Motion: three durations, three curves */
   --d-1: 130ms;   /* feedback: hover, press, focus; anything leaving */
@@ -60,9 +61,10 @@
   --bg: #17161b; --fg: #ececf1; --mute: #9d9da8;
   --surface: #ffffff14; --hover: #ffffff0d; --field: #ffffff0f; --line: #ffffff14;
   --danger: #ff7b6b;
-  --shadow-1: none;
-  --shadow-card: 0 0 0 1px var(--line), 0 6px 24px #00000059;
-  --shadow-pop: 0 0 0 1px #ffffff1f, 0 16px 40px #00000099, 0 2px 8px #00000066;
+  /* on dark paint a drop shadow alone disappears: each level adds a lit top edge */
+  --shadow-1: 0 1px 3px #00000066, inset 0 1px 0 #ffffff12, inset 0 0 0 1px #ffffff08;
+  --shadow-card: 0 0 0 1px #ffffff17, 0 12px 34px #00000085, 0 2px 8px #00000059;
+  --shadow-pop: 0 0 0 1px #ffffff21, 0 22px 54px #000000a6, 0 4px 12px #00000073, inset 0 1px 0 #ffffff14;
   color-scheme: dark;
 }
 :root[data-mode=top-compact] { --tabs-h: 34px; --hotbar-h: 34px; --ctl: 24px; }
@@ -115,7 +117,7 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: var(--sp-1) var(-
 .ib:hover { color: var(--fg); }
 .ib.on { color: var(--accent); }
 .url { flex: 1 1 200px; max-width: 720px; min-width: 0; height: var(--ctl); position: relative; display: flex; align-items: center;
-  border-radius: var(--r-md); background: var(--field); box-shadow: 0 0 0 1px transparent;
+  border-radius: var(--r-md); background: var(--field); box-shadow: var(--shadow-0);
   transition: background var(--d-1), box-shadow var(--d-2) var(--ease-out); }
 .url:hover { background: color-mix(in srgb, var(--field), var(--hover)); }
 .url:focus-within { background: var(--surface); box-shadow: 0 0 0 1.5px var(--accent), 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent); }
@@ -137,7 +139,7 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: var(--sp-1) var(-
 .chip:hover { color: var(--fg); }
 i.dot { display: block; width: 8px; height: 8px; border-radius: 50%; background: var(--c, var(--ws)); flex: none; }
 .chip > * { transition: transform var(--d-2) var(--ease-out); }
-.chip.active { background: var(--surface); color: var(--c, var(--fg)); }
+.chip.active { background: var(--surface); color: var(--c, var(--fg)); box-shadow: var(--shadow-1); }
 .chip.active > * { transform: scale(1.1); }
 :root[data-private] .wsbar, :root[data-private] #ws-head { display: none; }
 
@@ -279,7 +281,7 @@ i.dot { display: block; width: 8px; height: 8px; border-radius: 50%; background:
 .sheet h1 { font-size: var(--text-xl); margin: 0 0 var(--sp-1); display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2); }
 .sheet h2 { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: .06em; color: var(--mute); margin: var(--sp-5) 0 var(--sp-2); }
 .sheet p { color: var(--mute); margin: var(--sp-2) 0; }
-.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); }
+.card { background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--shadow-1); }
 .row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); padding: var(--sp-2) var(--sp-3); min-height: 44px; }
 .row + .row { border-top: 1px solid var(--line); }
 .row.col { flex-direction: column; align-items: stretch; gap: var(--sp-2); padding: var(--sp-3); }
@@ -288,7 +290,8 @@ i.dot { display: block; width: 8px; height: 8px; border-radius: 50%; background:
   font: inherit; color: var(--fg); background: var(--field); border: 1px solid var(--line);
   border-radius: var(--r-md); padding: 0 var(--sp-3); min-height: var(--ctl);
 }
-.btn { font-weight: 500; font-size: var(--text-md); white-space: nowrap; }
+.btn { font-weight: 500; font-size: var(--text-md); white-space: nowrap; box-shadow: var(--shadow-1); border-color: transparent !important; }
+.btn:hover { background: color-mix(in srgb, var(--field), var(--hover)); }
 .btn.primary { background: var(--fg); border-color: transparent; color: var(--bg); }
 .btn[hidden], .row[hidden] { display: none; }
 .row input[type=text] { width: 300px; max-width: 55vw; }
@@ -319,8 +322,8 @@ input[type=color] { width: 40px; height: var(--ctl); padding: 0; border: 1px sol
 
 /* ================= THEME EDITOR =================
    Drag the dots: direction from the center picks the hue, distance the vividness. */
-.ted { align-self: center; width: 320px; max-width: 100%; padding: var(--sp-2); border-radius: var(--r-lg); background: var(--field); box-shadow: 0 0 0 1px var(--line); }
-.ted-canvas { position: relative; height: 280px; border-radius: var(--r-md); touch-action: none;
+.ted { align-self: center; width: 320px; max-width: 100%; padding: var(--sp-2); border-radius: var(--r-lg); background: var(--field); box-shadow: var(--shadow-1); }
+.ted-canvas { position: relative; height: 280px; border-radius: var(--r-md); touch-action: none; box-shadow: inset 0 1px 4px #00000040, var(--shadow-0);
   background: radial-gradient(color-mix(in srgb, var(--fg) 16%, transparent) 1px, transparent 1.4px) 0 0 / 9px 9px, color-mix(in srgb, var(--bg) 60%, transparent); }
 .ted-bar { position: absolute; left: 0; right: 0; display: flex; justify-content: center; gap: var(--sp-4); }
 #ted-modes { top: var(--sp-3); } #ted-tools { bottom: var(--sp-3); }

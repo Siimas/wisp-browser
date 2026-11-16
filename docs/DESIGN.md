@@ -27,7 +27,7 @@ shouts; emphasis comes from spacing and from one accent color.
 | Type | `--text-xs` … `--text-xl`, `--font-ui`, `--font-mono` | All derived from the user's text size (`--font`). Weights: 400 body, 500 emphasis. No bold. |
 | Size | `--ctl` 28 (buttons, inputs), `--row` 36 (a sidebar tab), `--hotbar-h` 40, `--tabs-h` 40, `--side-w` 220 | `top-compact` shrinks `--ctl`, `--hotbar-h`, `--tabs-h`. |
 | Color | `--bg`, `--fg`, `--mute`, `--surface`, `--hover`, `--field`, `--line`, `--accent`, `--ws`, `--danger`, `--paint` | Semantic. Light values on `:root`, dark on `[data-theme=dark]`. |
-| Elevation | `--shadow-1` (active tab), `--shadow-card` (page card), `--shadow-pop` (menus, floating bar) | Three levels. Each includes a hairline ring so edges stay crisp on any paint. |
+| Elevation | `--shadow-0`, `--shadow-1`, `--shadow-card`, `--shadow-pop` | Four levels, see Elevation below. |
 | Motion | `--d-1`, `--d-2`, `--d-3`, `--ease-out`, `--ease-in`, `--ease-move` | See below. |
 
 ### Color roles
@@ -44,6 +44,23 @@ shouts; emphasis comes from spacing and from one accent color.
   text is picked from the background's brightness.
 - Filled buttons are `--fg` on `--bg`, never white on `--accent`, so they stay
   readable whatever accent the user picks.
+
+### Elevation
+
+Shadows say how far something stands off the paint, and give it an edge where
+color alone would not. Four levels, used by role:
+
+| Token | Level | Used for |
+| --- | --- | --- |
+| `--shadow-0` | Recessed | Things you type into at rest (the address bar, the editor canvas): an inner hairline. |
+| `--shadow-1` | Raised | The current thing and anything pressable that needs an edge: the active tab, the active workspace, buttons, cards. |
+| `--shadow-card` | Card | The page. |
+| `--shadow-pop` | Floating | Menus and the revealed bar. |
+
+Every level carries a hairline ring so the edge survives on any background. On
+dark paint a drop shadow alone is invisible, so the dark values add a lit top
+edge (an inset highlight): that, not the shadow, is what reads as "raised".
+Never add a one-off `box-shadow`; pick a level.
 
 ### Glass
 
