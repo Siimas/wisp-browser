@@ -21,6 +21,10 @@ All notable changes to Wisp are recorded here. The format follows
   scroll position is restored). A page that was the result of a form
   submission reloads as a plain visit. Typed text is noticed in the page's own
   fields and editors, not inside frames or shadow DOM.
+- The settings button in the toolbar opens an app menu: new tabs and windows,
+  History, Bookmarks, Downloads, Find in page, zoom, and quick switches for ad
+  blocking, light or dark, and collapsing the bar, each with its hotkey.
+- Menus now float over the page on glass instead of hiding it while open.
 - Low-power mode (Settings > Behavior): solid surfaces instead of glass and no
   animation. Automatic, the default, turns it on in the system's power saving
   mode, on a low battery, or on a computer with 4 GB of memory or less or two
@@ -35,6 +39,8 @@ All notable changes to Wisp are recorded here. The format follows
 
 ### Changed
 
+- Settings opens as a tab of its own, which you can leave and come back to.
+  It is not restored after a restart.
 - The interface uses about 50 MB less memory: the background texture is drawn
   without a separate window-sized layer, and looks the same.
 - With the bar collapsed, the cursor is checked less often while it is far from

@@ -266,7 +266,7 @@ pub fn default_hotkeys() -> BTreeMap<String, String> {
 }
 
 /// `#rrggbb` only: these values are placed into the browser UI's CSS.
-fn is_hex_color(s: &str) -> bool {
+pub(crate) fn is_hex_color(s: &str) -> bool {
     s.len() == 7 && s.starts_with('#') && s[1..].chars().all(|c| c.is_ascii_hexdigit())
 }
 
