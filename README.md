@@ -137,10 +137,10 @@ change, and [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
 `main` is protected: open a pull request, and CI (`cargo fmt --check`,
 `cargo clippy`, `cargo test` on macOS and Windows) must pass before merging.
 
-To cut a release, move the Unreleased entries in `CHANGELOG.md` under the new
-version, bump `version` in `Cargo.toml`, merge, then push a matching
-tag (`git tag v0.2.0 && git push origin v0.2.0`). The Release workflow builds
-the installers and publishes them.
+A release is published automatically when the version in `Cargo.toml` changes
+on `main`: move the Unreleased entries in `CHANGELOG.md` under the new version,
+bump `version`, and merge. The Release workflow builds the installers and
+publishes them; ordinary merges publish nothing.
 
 ### Update signing key (one-time setup)
 

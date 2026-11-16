@@ -23,7 +23,7 @@ pub const MODES: [&str; 4] = [
 ];
 pub const TEXTURES: [&str; 5] = ["none", "grain", "dots", "lines", "grid"];
 /// Everything the user can place in a toolbar area. `spacer` may appear many times.
-pub const ITEMS: [&str; 16] = [
+pub const ITEMS: [&str; 17] = [
     "collapse",
     "back",
     "forward",
@@ -35,6 +35,7 @@ pub const ITEMS: [&str; 16] = [
     "private_tab",
     "private_window",
     "shield",
+    "downloads",
     "settings",
     "bookmark",
     "history",
@@ -72,8 +73,17 @@ impl Default for Areas {
         let v = |items: &[&str]| items.iter().map(|s| s.to_string()).collect();
         Self {
             hotbar: v(&[
-                "back", "forward", "reload", "spacer", "url", "spacer", "bookmark", "shield",
-                "settings", "collapse",
+                "back",
+                "forward",
+                "reload",
+                "spacer",
+                "url",
+                "spacer",
+                "bookmark",
+                "shield",
+                "downloads",
+                "settings",
+                "collapse",
             ]),
             before_tabs: v(&[]),
             after_tabs: v(&["workspaces"]),
@@ -224,6 +234,7 @@ pub fn default_hotkeys() -> BTreeMap<String, String> {
         ("prev_workspace", "Mod+Alt+ArrowLeft".to_string()),
         ("toggle_bar", "Mod+Shift+B".to_string()),
         ("focus_url", "Mod+L".to_string()),
+        ("find", "Mod+F".to_string()),
         ("reload", "Mod+R".to_string()),
         ("back", "Mod+BracketLeft".to_string()),
         ("forward", "Mod+BracketRight".to_string()),

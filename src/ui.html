@@ -432,6 +432,46 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
 .grid8 button.on { background: var(--hover); box-shadow: inset 0 0 0 1.5px var(--accent); }
 .grid8 button.sw { width: 18px; height: 18px; margin: 4px auto; border-radius: 50%; background: var(--c); }
 .grid8 button.sw.on { background: var(--c); box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--c); }
+   The find bar is a row of its own between the hotbar and the page card: the main
+   interface cannot draw over a page, so the card makes room and glides down. */
+:root { --find-w: 280px; --dl-w: 320px; }
+#find { grid-area: find; display: none; align-items: center; justify-content: flex-end; gap: var(--sp-1); min-width: 0;
+  padding: 0 var(--gap) calc((var(--hotbar-h) - var(--ctl)) / 2); animation: bar-in-top var(--d-2) var(--ease-out); }
+:root[data-find] #find { display: flex; }
+:root[data-find][data-sheet] #find { display: none; } /* a History or Bookmarks sheet has the page area */
+:root[data-find][data-side=right] #app { grid-template: "hot hot" auto "find side" auto "page side" minmax(0, 1fr) / minmax(0, 1fr) auto; }
+:root[data-find][data-side=left] #app  { grid-template: "hot hot" auto "side find" auto "side page" minmax(0, 1fr) / auto minmax(0, 1fr); }
+:root[data-find][data-side=top] #app   { grid-template: "side" auto "hot" auto "find" auto "page" minmax(0, 1fr) / minmax(0, 1fr); }
+:root[data-side=right]:not([data-hidden]) #find { padding-right: 0; }
+:root[data-side=left]:not([data-hidden]) #find { padding-left: 0; }
+/* top bar tucked away on macOS: the find bar shares the strip with the window buttons */
+:root[data-find][data-lights=strip] #find { padding: var(--sp-1) var(--gap) var(--sp-1) var(--lights); }
+:root[data-find][data-lights=strip] #page { margin-top: 0; }
+.findbox { display: flex; align-items: center; gap: var(--sp-2); width: var(--find-w); min-width: 0; height: var(--ctl); padding: 0 var(--sp-2);
+  border-radius: var(--r-md); background: var(--field); box-shadow: var(--shadow-0); color: var(--mute);
+  transition: background var(--d-1), box-shadow var(--d-2) var(--ease-out); }
+.findbox:focus-within { background: var(--surface); box-shadow: 0 0 0 1.5px var(--accent), 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent); }
+.findbox svg { width: 14px; height: 14px; }
+.findbox input { flex: 1; min-width: 0; border: 0; background: none; color: var(--fg); font: inherit; letter-spacing: inherit; outline: none; }
+.findbox input::placeholder { color: var(--mute); }
+#find-n { font-size: var(--text-sm); white-space: nowrap; font-variant-numeric: tabular-nums; }
+#find-n.none { color: var(--danger); }
+
+/* the downloads button turns a ring while something is downloading */
+.ib.busy { position: relative; color: var(--accent); }
+.ib.busy::before { content: ""; position: absolute; inset: 2px; border-radius: 50%; border: 1.5px solid var(--accent); border-right-color: transparent; animation: spin .7s linear infinite; }
+.pop:has(#dl-list) { width: var(--dl-w); max-width: calc(100vw - var(--sp-3)); }
+.dl { display: flex; align-items: center; gap: var(--sp-2); min-height: var(--row); padding: var(--sp-1) 0 var(--sp-1) var(--sp-2); }
+.dl .state { width: 16px; height: 16px; flex: none; display: grid; place-items: center; color: var(--mute); }
+.dl.active .state::before { content: ""; width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--accent); border-right-color: transparent; animation: spin .7s linear infinite; }
+.dl.failed .state, .dl.failed small { color: var(--danger); }
+.dl .what { flex: 1; min-width: 0; }
+.dl .name { overflow: hidden; white-space: nowrap;
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent); }
+.pop .dl small { display: block; padding: 0; color: var(--mute); font-size: var(--text-sm); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.dl-empty { padding: var(--sp-3) var(--sp-2); color: var(--mute); text-align: center; }
+/* ================= END PAGE TOOLS ================= */
+=======
 
 /* ================= LIBRARY: suggestions, history, bookmarks ================= */
 .ib.on[data-item=bookmark] svg { fill: currentColor; }
@@ -463,7 +503,8 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
 .sheet input.find::placeholder { color: var(--mute); }
 .sheet .list .card { padding: var(--sp-1); }
 .pop small { display: block; color: var(--mute); font-size: var(--text-xs); padding: 0 var(--sp-2) var(--sp-1); }
-</style>
+
+/* ================= PAGE TOOLS: find bar, downloads ==========</style>
 <style id="user-css"></style>
 </head>
 <body>
@@ -480,6 +521,13 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
     <div class="area" data-area="after_tabs"></div>
   </aside>
   <div id="edge"></div>
+  <!-- page tools: the find bar (filled in by the PAGE TOOLS script block) -->
+  <div id="find" role="search">
+    <div class="findbox"><input id="find-q" type="text" placeholder="Find in page" aria-label="Find in page" spellcheck="false" autocomplete="off"><span id="find-n" aria-live="polite"></span></div>
+    <button class="ib" id="find-prev" title="Previous match" aria-label="Previous match"></button>
+    <button class="ib" id="find-next" title="Next match" aria-label="Next match"></button>
+    <button class="ib" id="find-close" title="Close" aria-label="Close find"></button>
+  </div>
   <main id="page">
     <section id="customize" class="sheet"><div>
       <h1>Customize toolbar
@@ -773,11 +821,12 @@ const ITEMS = {
   private_tab: { label: 'New private tab', icon: 'private', act: 'new_private_tab' },
   private_window: { label: 'New private window', icon: 'window', act: 'private_window' },
   shield: { label: 'Ad blocking', icon: 'shield' },
+  downloads: { label: 'Downloads', icon: 'download', run: e => downloadsMenu(e) },
   settings: { label: 'Settings', icon: 'settings', act: 'settings' },
   spacer: { label: 'Flexible space' },
 };
 const AREAS = ['hotbar', 'before_tabs', 'after_tabs'];
-const DEFAULT_AREAS = { hotbar: ['back', 'forward', 'reload', 'spacer', 'url', 'spacer', 'bookmark', 'shield', 'settings', 'collapse'],
+const DEFAULT_AREAS = { hotbar: ['back', 'forward', 'reload', 'spacer', 'url', 'spacer', 'bookmark', 'shield', 'downloads', 'settings', 'collapse'],
   before_tabs: [], after_tabs: ['workspaces'] };
 const itemEls = {};
 
@@ -799,7 +848,7 @@ function makeItem(name) {
   } else if (name === 'workspaces') e = el('div', { className: 'wsbar' });
   else {
     e = el('button', { className: 'ib', title: def.label, ariaLabel: def.label }, svg(def.icon));
-    e.onclick = name === 'shield' ? () => { cfg.adblock.enabled = !cfg.adblock.enabled; save(); } : () => act(def.act);
+    e.onclick = name === 'shield' ? () => { cfg.adblock.enabled = !cfg.adblock.enabled; save(); } : def.run ? () => def.run(e) : () => act(def.act);
   }
   e.dataset.item = name;
   e.dataset.label = def.label;
@@ -1513,6 +1562,7 @@ function render() {
   renderDynamic();
   renderLibrary();
   if (S.settings && !FLOATER) renderSettings();
+  renderTools();
   reportPage(true);
 }
 
@@ -1566,6 +1616,67 @@ function onField(e) {
 }
 $('#settings').addEventListener('input', onField);   // live preview
 $('#settings').addEventListener('change', onField);  // persist
+
+// ================= PAGE TOOLS: find bar, downloads =================
+Object.assign(ICON, {
+  search: 'M7 2.500a4.500 4.500 0 1 0 0 9 4.500 4.500 0 0 0 0-9M10.300 10.300l3.200 3.200',
+  up: 'M4 10l4-4 4 4',
+  download: 'M8 2.500v8M4.500 7.500 8 11l3.500-3.500M3 13.500h10',
+  open: 'M9.500 3H13v3.500M13 3 7.500 8.500M11 9.500V13H3V5h3.500',
+  file: 'M4 2.500h5l3 3v8H4zM9 2.500v3h3',
+});
+// ---------- find in page ----------
+// The query goes to the app, which searches the page natively; `wisp.found` brings
+// back whether there was a match and, where the platform counts them, how many.
+let findOpen = false;
+const findQ = $('#find-q'), findN = $('#find-n');
+const findGo = back => post({ cmd: 'find', query: findQ.value, back });
+const findNote = (text, none) => { findN.textContent = text; findN.classList.toggle('none', !!none); };
+function setFind(on) {
+  if (FLOATER || !S) return;
+  const was = findOpen;
+  findOpen = on;
+  renderTools();
+  reportPage(true); // the page card glides to make room
+  if (on) { findQ.focus(); findQ.select(); }
+  else if (was) { findNote(''); post({ cmd: 'find_close' }); }
+}
+wisp.find = () => setFind(true);
+wisp.found = r => { if (findQ.value) findNote(!r.found ? 'No matches' : r.count == null ? '' : r.count + (r.count === 1 ? ' match' : ' matches'), !r.found); };
+if (!FLOATER) {
+  $('.findbox').prepend(svg('search'));
+  $('#find-prev').append(svg('up')); $('#find-next').append(svg('chevron')); $('#find-close').append(svg('close'));
+  findQ.oninput = () => { findNote(''); findGo(false); };
+  findQ.onkeydown = e => {
+    if (e.key === 'Enter') { e.preventDefault(); findGo(e.shiftKey); }
+    if (e.key === 'Escape') { e.stopPropagation(); setFind(false); }
+  };
+  $('#find-prev').onclick = () => findGo(true);
+  $('#find-next').onclick = () => findGo(false);
+  $('#find-close').onclick = () => setFind(false);
+}
+// ---------- downloads ----------
+const dlRows = () => !S.downloads.length ? [el('div', { className: 'dl-empty', textContent: 'No downloads yet' })] : S.downloads.map(d => {
+  const op = (name, label, icon) => el('button', { className: 'ib', title: label, ariaLabel: label,
+    onclick: () => { closePop(); post({ cmd: 'download', id: d.id, op: name }); } }, svg(icon));
+  const note = [d.host, d.state === 'active' ? 'Downloading…' : d.state === 'failed' ? 'Failed' : ''].filter(Boolean).join(' · ');
+  return el('div', { className: 'dl ' + d.state, title: d.name },
+    el('i', { className: 'state' }, ...(d.state === 'active' ? [] : [svg(d.state === 'failed' ? 'close' : 'file')])),
+    el('div', { className: 'what' }, el('div', { className: 'name', textContent: d.name }), el('small', { textContent: note })),
+    ...(d.state === 'done' ? [op('open', 'Open', 'open'), op('show', 'Show in folder', 'folder')] : []));
+});
+function downloadsMenu(anchor) {
+  if (!customizing) openPop(anchor, [el('label', { textContent: 'Downloads' }), el('div', { id: 'dl-list' }, ...dlRows())]);
+}
+// Called with every new state.
+function renderTools() {
+  flag('find', findOpen && !S.settings && !customizing && !FLOATER);
+  const b = itemEls.downloads, busy = S.downloads.some(d => d.state === 'active');
+  if (b) { b.classList.toggle('busy', busy); b.title = busy ? 'Downloading…' : 'Downloads'; }
+  const list = $('#dl-list');
+  if (list && !$('#pop').hidden) list.replaceChildren(...dlRows()); // an open list stays current
+}
+// ================= END PAGE TOOLS =================
 
 addEventListener('keydown', e => {
   if (e.key !== 'Escape' || !S || window.__wispRecording) return;

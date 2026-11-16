@@ -76,10 +76,12 @@ only after checking that it is compatible with shipping Wisp under MIT.
 
 ## Releases
 
+A release is published when the version in `Cargo.toml` changes on `main`.
 Maintainers: move the **Unreleased** entries in `CHANGELOG.md` under the new
-version, bump `version` in `Cargo.toml`, merge, then push a matching tag. The
-[README](README.md#contributing) has the details, including the update signing
-key.
+version, bump `version` in `Cargo.toml`, and merge that pull request. The
+Release workflow sees a version with no tag, builds the installers, signs the
+update files, and publishes the release (which creates the tag). Ordinary merges
+publish nothing. Installed copies then update themselves.
 
 ## License
 
