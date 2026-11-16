@@ -113,8 +113,9 @@ jobs:
             x86_64-pc-windows-msvc) name="Wisp-${TAG#v}-Windows-x64" ;;
           esac
           if [ "$RUNNER_OS" = "macOS" ]; then
+            # (the signature first: afterwards "*.dmg" would match two files)
+            if ls ./*.dmg.sig > /dev/null 2>&1; then mv ./*.dmg.sig "$name.dmg.sig"; fi
             mv ./*.dmg "$name.dmg"
-            rm -f ./*.dmg.sig   # nothing reads a signature for the disk image
             if [ -f Wisp.app.tar.gz ]; then
               mv Wisp.app.tar.gz "$name.update.tar.gz"
               mv Wisp.app.tar.gz.sig "$name.update.tar.gz.sig"
@@ -163,7 +164,7 @@ jobs:
             echo "| Mac with an Intel processor | \`Wisp-$v-macOS-Intel.dmg\` |"
             echo "| Windows 10 or 11 | \`Wisp-$v-Windows-x64-Setup.exe\` |"
             echo
-            echo "The other files (\`.update.tar.gz\`, \`.sig\`, \`latest.json\`) are what installed copies use to update themselves. You do not need to download them."
+            echo "The other files (\`.update.tar.gz\`, \`.sig\`, \`latest.json\`) are what installed copies of Wisp use to update themselves: each \`.sig\` is the signature Wisp checks before installing the file it is named after. You do not need to download them."
             echo
           } > notes.md
       - run: gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Wisp $TAG" --notes-file notes.md --generate-notes
