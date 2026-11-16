@@ -118,6 +118,22 @@ mod imp {
         let _ = webview.reparent(window.ns_window().cast());
     }
 
+    /// Does the page view hold the keyboard focus (is it, or something inside it, the
+    /// window's first responder)?
+    pub fn is_focused(webview: &WebView, window: &Window) -> bool {
+        let view = webview.webview();
+        // SAFETY: main-thread messages to the live window and views.
+        unsafe {
+            let responder: *mut AnyObject =
+                msg_send![window.ns_window() as *mut AnyObject, firstResponder];
+            let Some(class) = AnyClass::get(c"NSView").filter(|_| !responder.is_null()) else {
+                return false;
+            };
+            let is_view: bool = msg_send![responder, isKindOfClass: class];
+            is_view && msg_send![responder, isDescendantOf: &*view]
+        }
+    }
+
     /// The system web engine reports no browser name, and sites such as Google then
     /// serve a stripped-down legacy page. It is the same engine as the installed
     /// Safari, so identify as that Safari version.
@@ -175,6 +191,33 @@ mod imp {
 
     /// Nothing to end: WebKit's find leaves the last match selected, as Safari does.
     pub fn find_stop(_webview: &WebView) {}
+
+    /// Is the page making sound, or using the camera or microphone? A muted or silent
+    /// video does not count. An older system that cannot say counts as busy, so
+    /// nothing that might be playing is unloaded.
+    /// (WebKit's public `requestMediaPlaybackState` does not answer this: it reports
+    /// whether the app paused the page's media, and says "playing" for any page with
+    /// a video on it. `_isPlayingAudio` is what Safari's tab speaker icon follows.)
+    pub fn media_busy(webview: &WebView, done: impl Fn(bool)) {
+        let view = webview.webview();
+        // SAFETY: main-thread messages to a live WKWebView, each checked to exist
+        // first (the capture states since macOS 12).
+        let busy = unsafe {
+            let has = |sel| -> bool { msg_send![&*view, respondsToSelector: sel] };
+            if !has(sel!(_isPlayingAudio)) || !has(sel!(cameraCaptureState)) {
+                return done(true);
+            }
+            let audio: bool = msg_send![&*view, _isPlayingAudio];
+            // WKMediaCaptureState: 0 none, 1 active, 2 muted (still in the call).
+            let camera: isize = msg_send![&*view, cameraCaptureState];
+            let microphone: isize = msg_send![&*view, microphoneCaptureState];
+            audio || camera != 0 || microphone != 0
+        };
+        done(busy)
+    }
+
+    /// WebKit lowers a hidden page's priority by itself.
+    pub fn set_background(_webview: &WebView, _background: bool) {}
 
     thread_local! {
         /// The page view whose right-click menu was opened last.
@@ -410,14 +453,15 @@ mod imp {
         Microsoft::Web::WebView2::Win32::{
             COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_COMMAND,
             COREWEBVIEW2_CONTEXT_MENU_TARGET_KIND_IMAGE,
-            COREWEBVIEW2_CONTEXT_MENU_TARGET_KIND_PAGE, ICoreWebView2_11, ICoreWebView2_28,
-            ICoreWebView2Environment9, ICoreWebView2Environment15,
+            COREWEBVIEW2_CONTEXT_MENU_TARGET_KIND_PAGE, ICoreWebView2_8, ICoreWebView2_11,
+            ICoreWebView2_28, ICoreWebView2Environment9, ICoreWebView2Environment15,
         },
         take_pwstr,
     };
     use windows::Win32::System::Com::IStream;
     use windows::Win32::UI::WindowsAndMessaging::{
-        HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos,
+        GUITHREADINFO, GetGUIThreadInfo, HWND_TOP, IsChild, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+        SetWindowPos,
     };
     use windows_core::{BOOL, HSTRING, Interface, PWSTR};
     use wry::WebViewExtWindows;
@@ -578,6 +622,21 @@ mod imp {
         let _ = unsafe { SetWindowPos(webview.hwnd(), Some(HWND_TOP), 0, 0, 0, 0, flags) };
     }
 
+    /// Does the page hold the keyboard focus? The focused window of the foreground
+    /// thread (WebView2 draws pages in windows of its own process) lies inside its view.
+    pub fn is_focused(webview: &WebView, _window: &Window) -> bool {
+        let mut info = GUITHREADINFO {
+            cbSize: size_of::<GUITHREADINFO>() as u32,
+            ..Default::default()
+        };
+        let host = webview.hwnd();
+        // SAFETY: plain Win32 calls with a properly sized struct.
+        unsafe {
+            GetGUIThreadInfo(0, &mut info).is_ok()
+                && (info.hwndFocus == host || IsChild(host, info.hwndFocus).as_bool())
+        }
+    }
+
     /// WebView2 already identifies as a full Chromium browser.
     pub fn user_agent() -> Option<String> {
         None
@@ -639,6 +698,28 @@ mod imp {
                 let _ = find.Stop();
             }
         }
+    }
+
+    /// Is the page making sound? WebView2 does not say whether the camera or
+    /// microphone is in use, so a call where everyone is silent counts as idle.
+    /// Untested: written without a Windows machine at hand.
+    pub fn media_busy(webview: &WebView, done: impl Fn(bool)) {
+        let mut playing = BOOL(1);
+        // SAFETY: COM call on the live webview, on its own thread.
+        let asked = unsafe {
+            webview
+                .webview()
+                .cast::<ICoreWebView2_8>()
+                .and_then(|w| w.IsDocumentPlayingAudio(&mut playing))
+        };
+        done(asked.is_err() || playing.as_bool()); // unknown counts as playing
+    }
+
+    /// A hidden page asks WebView2 to keep less in memory (it may page some out); a
+    /// cheap first step before unloading. Untested, like `media_busy`.
+    pub fn set_background(webview: &WebView, background: bool) {
+        use wry::MemoryUsageLevel::{Low, Normal};
+        let _ = webview.set_memory_usage_level(if background { Low } else { Normal });
     }
 
     /// Add link and image entries to the top of WebView2's right-click menu. A chosen
@@ -739,6 +820,9 @@ mod imp {
     use super::*;
     pub fn round_corners(_webview: &WebView, _radius: f64) {}
     pub fn raise(_webview: &WebView, _window: &Window) {}
+    pub fn is_focused(_webview: &WebView, _window: &Window) -> bool {
+        false
+    }
     pub fn user_agent() -> Option<String> {
         None
     }
@@ -751,6 +835,10 @@ mod imp {
     ) {
     }
     pub fn find_stop(_webview: &WebView) {}
+    pub fn media_busy(_webview: &WebView, done: impl Fn(bool)) {
+        done(true)
+    }
+    pub fn set_background(_webview: &WebView, _background: bool) {}
     pub fn page_menu(_webview: &WebView, _pick: impl Fn(String, bool)) {}
     pub fn take_private(_webview: &WebView) -> bool {
         false
@@ -799,6 +887,6 @@ pub use imp::Glass;
 #[cfg(windows)]
 pub use imp::SnapButton;
 pub use imp::{
-    find, find_stop, on_power_change, page_menu, power, raise, round_corners, take_private,
-    user_agent,
+    find, find_stop, is_focused, media_busy, on_power_change, page_menu, power, raise,
+    round_corners, set_background, take_private, user_agent,
 };

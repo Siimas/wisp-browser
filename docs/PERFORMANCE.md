@@ -28,6 +28,49 @@ Memory is the whole process tree's *physical footprint* (what Activity Monitor s
 
 The 80 MB increase is all in the two web-content processes (81 → 156 MB), and the page's own process was unchanged before, so it is the interface page that grew. The progress-bar animation is still in `main` (`src/ui.html`, `#progress::after`), so the idle cost is still there, though lower. Neither change was investigated further. With 268 MB, Wisp's one-tab memory is now *higher* than Chrome's 239 MB.
 
+**Follow-up: the idle fix and the interface's memory** (measured later the same day, Wisp only, release builds)
+
+*Idle CPU.* The progress-bar fix (branch `fix-idle-cpu`, `d404afd`, PR #19: the animation runs only while `#progress.on` and moves with `transform`) against `main` (`6b110d9`), three runs each, same method as above:
+
+| Wisp | `main` | With the fix |
+|---|---|---|
+| Idle CPU, one simple tab | 13.8 % (13.2–15.0) | **0.01 %** (0.01–0.04) |
+| Idle CPU, ten sites loaded | 33.7 % (3.6–36.3) | **11.7 %** (7.7–15.3) |
+| Idle CPU, ten restored, one shown | 16.3 % (9.9–17.7) | **0.24 %** (0.20–0.74) |
+| Wake-ups per second, ten loaded | 467 | 237 |
+| Memory, one simple tab | 268 MB | 167 MB |
+
+With the fix, one idle tab costs less than Chrome (0.25 %) and about the same as Zen (0.02 %), and ten loaded sites cost about what Chrome's did (13.0 %). The 3.6 % run on `main` is almost certainly a window covered by other windows (WebKit stops painting it). Nothing else in the interface animates at idle: with one tab the whole tree is 0.06–0.12 % with the default layout. **With the bar collapsed it is 0.87 %**, all in the Wisp process, from the 25 ms cursor poll (`POLL` in `src/main.rs`; release builds poll only when collapsed, debug builds always). That is now the largest idle cost Wisp itself adds.
+
+These runs overlapped with other sessions building and running Wisp on the same machine, and the owner closed some benchmark windows by hand; runs where the instance ended early were thrown away and repeated (the script now does this itself, and its test page asks to be left open). Treat the ten-tab CPU figures as noisy.
+
+*Interface memory.* The ~80 MB that one-tab memory grew between `73f906f` and `main` comes from the brand-themes merge (PR #15, `c7df944`), and it is GPU memory for the grain texture. Measured with `bench/interface_memory.py` (one simple tab, 40 s after load; the interface is the first web-content process Wisp starts; "graphics" is the `footprint` tool's GPU-memory category), medians of three:
+
+| Build or setting | Whole tree | Interface process | of which graphics |
+|---|---|---|---|
+| `bb84f62` = `73f906f` (auto-update) | 178 MB | 46 MB | 29 MB |
+| `581201f` tab basics | 180 | 44 | 26 |
+| `fa83afb` history, bookmarks | 184 | 50 | 33 |
+| `35f96c8` page tools | 187 | 51 | 33 |
+| **`c7df944` brand themes** | **269** | **129** | **110** |
+| `main` | 273 | 129 | 110 |
+| `main`, `"texture": "none"` | 203 | 58 | 40 |
+| `main`, `"texture": "dots"` | 257 | 112 | 94 |
+| `main`, flat background (one colour) | 269 | 129 | 110 |
+| `main`, flat background and no texture | 193 | 59 | 40 |
+| fix (`d404afd`) | 173 | 91 | 75 |
+| fix, `"texture": "none"` | **122** | **40** | **24** |
+| fix, grain as a background layer (below) | **122** | **41** | **24** |
+
+What it shows:
+
+- History and bookmarks, the page tools and tab basics add about 5 MB together; the README merge, release workflows and spacing pass add nothing measurable.
+- The gradient paint costs nothing: a flat background measures the same.
+- The texture layer costs 70–80 MB of GPU memory, and it is the *layer*, not the grain or the overlay blend: the dots texture, which is a plain CSS gradient with normal blending, costs nearly as much. `body::before` is a `position: fixed` layer over the whole window with `opacity` and `mix-blend-mode`, so WebKit gives it its own window-sized backing store, and the blend makes it composite the window behind it as a separate group too. At 1280 × 820 on a 2× display one such buffer is 17 MB; 77 MB is about four and a half of them.
+- The progress-bar fix also frees 35 MB of graphics memory: the endlessly animating element kept its own layers (and the texture over it busy) even while invisible.
+
+*What wins it back without losing the look.* Paint the grain as a second background image of `body` instead of a layer over the window: `background: var(--tex), var(--paint); background-blend-mode: overlay, normal;` and drop `body::before`. Tried here through `custom_css` (no code change): on the fixed build the whole tree goes from 173 to 122 MB, the same as having no texture at all. Two things to handle in the real change, both cosmetic: `background-blend-mode` has no per-layer opacity, so the strength setting has to be baked into the tile (`grain()` already draws it; scale each pixel's distance from mid-grey by the strength, which for overlay is the same as opacity); and the grain would sit under the interface's buttons and text instead of over them, so it should be checked by eye. With both fixes, Wisp's one-tab footprint would be about 122 MB, against 239 MB for Chrome and 716 MB for Zen.
+
 **Where Wisp wins**
 
 - **Size.** Wisp is 250 to 300 times smaller to download than Zen or Chrome, and its app is under 2 MB. This is real, but only because the engine is the system's: the comparison is "Wisp + WebKit already on every Mac" against browsers that ship their own engine.
@@ -44,10 +87,11 @@ The 80 MB increase is all in the two web-content processes (81 → 156 MB), and 
 
 **What would help most**
 
-1. **Stop the hidden progress bar animating** (`src/ui.html`, `#progress::after`): give the animation only while `#progress.on`, or use `display: none` / `animation-play-state: paused` when off, and animate `transform` instead of `left` so it stays on the compositor. This is a one-line change and is the biggest single win measured here: about 18 % of a core at idle (19.3 % → 1.5 % in the A/B test), all the time the window is on screen.
-2. **Unload background tabs.** Drop the `WebView` of a tab not shown for N minutes (keeping its URL and title, as a restored tab already is) and rebuild it on select. The lazy-restore path in `App::select` already does the rebuilding, so this is mostly a timer and a `tab.webview = None`. This would not have changed the ten-tab number above (Chrome did not discard anything in 100 s either), but it bounds memory over a long day with many tabs, which is what Memory Saver is for.
-3. **Then look at the collapsed bar.** With the bar collapsed the event loop wakes every 25 ms to poll the cursor (`POLL` in `src/main.rs`). Measured, it adds about 1 % of a core (Wisp process 3.3 % → 4.5 %). Small next to item 1, but it will be most of what is left once item 1 is fixed; tracking the mouse with an `NSTrackingArea` or a window-edge event instead of polling would remove it.
-4. **Show per-tab cost.** Even a list of web-content processes and their footprint in settings would let people find the heavy tab; WebKit gives no per-tab process id through public API, so this is harder than it sounds.
+1. **Stop the hidden progress bar animating** (done in PR #19, see the follow-up above) (`src/ui.html`, `#progress::after`): give the animation only while `#progress.on`, or use `display: none` / `animation-play-state: paused` when off, and animate `transform` instead of `left` so it stays on the compositor. This is a one-line change and is the biggest single win measured here: about 18 % of a core at idle (19.3 % → 1.5 % in the A/B test), all the time the window is on screen.
+2. **Unload background tabs.** (Merged into `main` in PR #33 after these measurements; not measured here.) Drop the `WebView` of a tab not shown for N minutes (keeping its URL and title, as a restored tab already is) and rebuild it on select. The lazy-restore path in `App::select` already does the rebuilding, so this is mostly a timer and a `tab.webview = None`. This would not have changed the ten-tab number above (Chrome did not discard anything in 100 s either), but it bounds memory over a long day with many tabs, which is what Memory Saver is for.
+3. **Paint the grain as a background layer** (follow-up above): about 50 MB with one tab.
+4. **Then look at the collapsed bar.** With the bar collapsed the event loop wakes every 25 ms to poll the cursor (`POLL` in `src/main.rs`). Measured, it adds about 1 % of a core (Wisp process 3.3 % → 4.5 %). With the progress-bar fix it is the largest idle cost left: 0.87 % against 0.1 % with the bar pinned; tracking the mouse with an `NSTrackingArea` or a window-edge event instead of polling would remove it.
+5. **Show per-tab cost.** Even a list of web-content processes and their footprint in settings would let people find the heavy tab; WebKit gives no per-tab process id through public API, so this is harder than it sounds.
 
 **Not measured, and why**
 
@@ -186,6 +230,17 @@ Not like-for-like:
 - **User agents differ.** Wisp presents itself as Safari 26.5.2, so sites may serve it different pages from the ones Chrome and Zen get.
 - **Wisp's 14 web-content processes for ten tabs** are one for the interface, one per site, and a few WebKit keeps for cross-site navigations; all counted.
 
+#### Ten real sites with tab unloading
+
+Measured after the report above, on the tab-unloading change (#33): the same ten sites, loaded the same way (`window.open` from a local page), in the release `Wisp.app` with the same process accounting. Unloading was set to 1 minute so the sample at 150 s falls after the nine background tabs became due. Other Wisp benchmarks ran on the machine at the same time, so treat single runs with some care.
+
+| | Footprint, three runs | Page processes |
+|---|---|---|
+| Wisp, all ten loaded (unloading off) | 2,357 / 2,303 / 2,422 MB | 12-14 WebContent |
+| Wisp, nine unloaded | **497 / 519 / 516 MB** | 2 WebContent |
+
+Coming back to an unloaded tab, from selecting it to the page's `load` event (warm disk cache): Wikipedia 3.6 s, GitHub 0.80, Hacker News 0.28, BBC 0.40, The Guardian 0.21, Stack Overflow 0.68, MDN 0.16, The New York Times 1.15, Amazon 1.45, YouTube 0.99 s; median about 0.74 s. Pages draw before `load`. The default is 30 minutes, and tabs making sound, in a call, with typed text, private or pinned stay loaded (see `unload_due` and `keeps` in `src/main.rs`). The feature table below describes the code before this change.
+
 ### Idle cost
 
 CPU of the whole tree over one minute with the ten tabs open and nothing happening, right after the memory sample.
@@ -283,4 +338,10 @@ python3 bench/bench.py tentabs
 python3 bench/bench.py speedometer --src /tmp/speedometer
 ```
 
-Each command merges its results into `docs/performance-data.json`. `--browsers wisp,zen` limits the set, `--runs N` changes the count. Close nothing beforehand: the script starts and stops only its own instances. Expect about an hour in all.
+For the interface's memory by build or setting (labels are free text; `:config.json` is optional):
+
+```bash
+python3 bench/interface_memory.py before=path/to/old/Wisp.app after=target/release/Wisp.app no-grain=target/release/Wisp.app:no-grain.json
+```
+
+`--wisp-app path/to/Wisp.app` makes `bench.py` measure another build. Each `bench.py` command merges its results into `docs/performance-data.json`. `--browsers wisp,zen` limits the set, `--runs N` changes the count. Close nothing beforehand: the script starts and stops only its own instances. Expect about an hour in all.

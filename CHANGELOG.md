@@ -19,6 +19,27 @@ All notable changes to Wisp are recorded here. The format follows
 - The shield button turns blocking off, or back on, for the site in the
   current tab, and shows whether blocking is on there. Sites turned off are
   listed in Settings > Ad blocking.
+- Split view: show two to four tabs of a workspace side by side, in rows and
+  columns. Drag a tab from the list onto any side of the page (the tiles make
+  room to show where it lands), choose "Split with current tab" in a tab's menu,
+  or press `Cmd/Ctrl+Shift+\`. Drag the gap between tiles to resize, double-click
+  it to even them out, and drag a tile's tab onto another tile to rearrange. The
+  tile you click in gets the address bar, find and page hotkeys. A split reads
+  as one row in the tab list, survives workspace switches and restarts, and
+  "Remove from split" or "Unsplit tabs" in a tab's menu take it apart.
+- Tab unloading: a background tab not looked at for 30 minutes (Settings >
+  Tabs and browsing > Performance: Never to 4 hours) gives its memory back and
+  reloads, at the same scroll position, when you return to it. Tabs playing sound, in a call or with
+  typed text, private tabs and (unless allowed) pinned tabs stay loaded. An
+  unloaded tab's icon rests faded. "Unload tab" and "Unload other tabs" are in
+  the tab's right-click menu. Ten busy sites went from 2.3 GB to 0.5 GB with
+  nine unloaded.
+  An unloaded tab comes back as a fresh load of its current address, so it
+  loses its back and forward history, `sessionStorage` and any state held in
+  the page, and the position of scrolling areas inside the page (the page's own
+  scroll position is restored). A page that was the result of a form
+  submission reloads as a plain visit. Typed text is noticed in the page's own
+  fields and editors, not inside frames or shadow DOM.
 - The settings button in the toolbar opens an app menu: new tabs and windows,
   History, Bookmarks, Downloads, Find in page, zoom, and quick switches for ad
   blocking, light or dark, and collapsing the bar, each with its hotkey.
