@@ -25,7 +25,7 @@ shouts; emphasis comes from spacing and from one accent color.
 | Space | `--sp-0` (2 px), `--sp-1` … `--sp-6` (4, 8, 12, 16, 24, 32 px), `--gap` (8 px), `--fade` (18 px) | `--gap` is the one distance between window edge, page card and bars. `--sp-0` is only for neighbors in one tight list. `--fade` is how far a long title fades out. |
 | Shape | `--r-sm`, `--r-md`, `--r-lg`, `--r-full`, `--page-r` | All derived from the user's roundness (`--radius`). |
 | Type | `--text-xs` … `--text-xl`, `--font-ui`, `--font-mono` | All derived from the user's text size (`--font`). Weights: 400 body, 500 emphasis. No bold. |
-| Size | `--ctl` 28 (buttons, inputs), `--row` 36 (a sidebar tab), `--hotbar-h` 40, `--tabs-h` 40, `--side-w` 220, `--lights` 82, `--strip` 28 | `top-compact` shrinks `--ctl`, `--hotbar-h`, `--tabs-h`. `--lights` and `--strip` are the room kept for the macOS window buttons. |
+| Size | `--ctl` 28 (buttons, inputs), `--row` 36 (a sidebar tab), `--hotbar-h` 40, `--tabs-h` 40, `--side-w` 220, `--lights` 82, `--strip` 28 | `top-compact` shrinks `--ctl`, `--hotbar-h`, `--tabs-h`. `--lights` and `--strip` are the room kept for the window buttons (on Windows: three 46 px `--cap-w` buttons plus `--gap`, and a 32 px strip). |
 | Color | `--bg`, `--fg`, `--mute`, `--surface`, `--hover`, `--field`, `--line`, `--accent`, `--ws`, `--danger`, `--paint` | Semantic. Light values on `:root`, dark on `[data-theme=dark]`. |
 | Elevation | `--shadow-0`, `--shadow-1`, `--shadow-card`, `--shadow-pop` | Four levels, see Elevation below. |
 | Motion | `--d-1`, `--d-2`, `--d-3`, `--ease-out`, `--ease-in`, `--ease-move` | See below. |
@@ -104,6 +104,11 @@ Workspace icons are picked from the same set and take the workspace's color.
 - **macOS window buttons** are moved to sit on the center line of the first
   row of controls, at `--gap` + 5 px from the left edge. While a tucked-away
   top bar floats in, they move onto its tab row the same way.
+- **Windows window buttons** are drawn by the interface (`#caption`), as the
+  system draws them: 46 px wide, the full height of the first row, flush with
+  the window's top-right corner, glyphs from Segoe Fluent Icons (Segoe MDL2
+  Assets on Windows 10), close turning #c42b1c on hover. The first row is the
+  title bar; there is no other.
 
 ### The theme editor
 
@@ -218,7 +223,7 @@ Measured, not eyeballed: check a change with `WISP_SHOT` captures and with
    of spilling out.
 9. **The window buttons are part of the row.** Content after them starts at
    `--lights`, keeping the same 9 px from the last button that the buttons keep
-   from each other.
+   from each other (on Windows, content before them stops `--gap` short).
 
 ## Motion
 

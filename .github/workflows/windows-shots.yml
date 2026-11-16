@@ -1,12 +1,11 @@
 name: Windows screenshots
 
 # Pictures of Wisp running on Windows, for checking how it looks there without a
-# Windows machine: run it from the Actions tab, then `gh run download <run id>`.
+# Windows machine: run it from the Actions tab (or `gh workflow run windows-shots.yml
+# --ref <branch>`), then `gh run download <run id>`. Cases: .github/windows-shots.ps1.
 # Not a required check.
 on:
   workflow_dispatch:
-  push:
-    branches: ['claude/windows-titlebar-*']
 
 permissions:
   contents: read
