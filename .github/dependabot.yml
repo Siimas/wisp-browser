@@ -7,6 +7,21 @@ updates:
     groups:
       cargo:
         patterns: ["*"]
+    # These must match the versions wry itself uses, so skip major/minor bumps
+    # (they move when wry moves). Patch releases still come through.
+    ignore:
+      - dependency-name: "windows-core"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "webview2-com"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "block2"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "objc2"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "objc2-foundation"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "objc2-web-kit"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
