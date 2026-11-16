@@ -4,16 +4,20 @@
 //! The window holds three kinds of webview, bottom to top:
 //! 1. the interface ("chrome"), filling the whole window: hotbar, sidebar, settings;
 //! 2. one webview per tab. The interface reports the gap it leaves for the page
-//!    (`Msg::PageRect`) and the active tab is placed exactly there, as a rounded card;
-//! 3. the "floater": a second copy of the interface, shown only while a collapsed
-//!    bar is revealed, so that the bar can float over the page.
+//!    (`Msg::PageRect`) and the active tab is placed exactly there, as a rounded card
+//!    (or, in split view, its split's tabs are tiled there: see split.rs);
+//! 3. the "floater": a second copy of the interface raised above the tabs. It shows a
+//!    revealed collapsed bar floating over the page, or a menu (see overlay.rs).
 
 mod adblock;
 mod config;
 #[cfg(all(target_os = "macos", debug_assertions))]
 mod debug_shot;
+mod media;
 mod native;
+mod overlay;
 mod page_tools;
+mod split;
 mod store;
 mod update;
 
@@ -40,8 +44,13 @@ const OVERSHOOT: f64 = 120.0;
 const LEAVE_MARGIN: f64 = 36.0;
 /// How long the cursor must stay away before the bar hides again.
 const LEAVE_DELAY: Duration = Duration::from_millis(180);
-/// How often the cursor is checked while the bar is collapsed.
+/// How often the cursor is checked while the bar is collapsed and the cursor is near
+/// its edge (or the bar is revealed).
 const POLL: Duration = Duration::from_millis(25);
+/// low-power: further away the cursor is checked less often, as often as it could
+/// reach the edge moving this fast (px/s), but at least this often.
+const CURSOR_SPEED: f64 = 4000.0;
+const POLL_FAR: Duration = Duration::from_millis(150);
 /// Look for a new version this often (and once shortly after start).
 const UPDATE_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
 /// The page card gliding to a new size (keep in step with --d-3 in ui.html).
@@ -55,6 +64,13 @@ enum Msg {
     Ready,
     Drag,
     Maximize,
+    // Windows: the interface draws the window buttons and the top resize edge.
+    Minimize,
+    Close,
+    /// Resize from the top edge ("n") or a top corner ("ne", "nw").
+    Resize {
+        edge: String,
+    },
     Key {
         combo: String,
     },
@@ -92,6 +108,13 @@ enum Msg {
     CloseOtherTabs {
         id: u32,
     },
+    /// Give a background tab's memory back; it reloads when shown again.
+    UnloadTab {
+        id: u32,
+    },
+    UnloadOtherTabs {
+        id: u32,
+    },
     /// Where things go, as distances from each window edge (left, top, right, bottom):
     /// the gap left for the page, and the area a floating bar would take.
     PageRect {
@@ -104,15 +127,19 @@ enum Msg {
         panel: [f64; 4],
         #[serde(default)]
         panel_radius: f64,
-        /// macOS: where the window buttons go: x of the first one, and the vertical
-        /// center of the row they share with the bar.
+        /// Where the window buttons go (macOS's, or the ones the interface draws on
+        /// Windows): the box they take on the row they share with the bar, as left, top,
+        /// width, height.
         #[serde(default)]
-        lights: [f64; 2],
-        /// macOS: the same while a tucked-away top bar floats in, if they move then.
+        lights: [f64; 4],
+        /// The same while a tucked-away top bar floats in, if they move then.
         #[serde(default)]
-        lights_peek: Option<[f64; 2]>,
+        lights_peek: Option<[f64; 4]>,
         /// Glide to the new size (a layout change) instead of jumping.
         animate: bool,
+        /// Space between split tiles.
+        #[serde(default)]
+        gap: f64,
     },
     /// The interface needs the page area for itself (a menu or sheet is open).
     Cover {
@@ -146,20 +173,93 @@ enum Msg {
         id: u32,
         op: String,
     },
+    // Split view (see split.rs).
+    /// Show tab `id` beside `target`: on `edge`, or along the target's longer side.
+    SplitWith {
+        id: u32,
+        target: u32,
+        #[serde(default)]
+        edge: Option<split::Edge>,
+    },
+    /// Tab `id` is dragged over the page: preview it landing on `edge` of `target`.
+    SplitPreview {
+        id: u32,
+        target: Option<u32>,
+        #[serde(default)]
+        edge: Option<split::Edge>,
+    },
+    /// Take tab `id` out of its split, or end its split (`all`).
+    Unsplit {
+        id: u32,
+        #[serde(default)]
+        all: bool,
+    },
+    /// A divider moved: new shares for the split at `path`. `done` = let go.
+    SplitSizes {
+        path: Vec<usize>,
+        sizes: Vec<f64>,
+        #[serde(default)]
+        animate: bool,
+        #[serde(default)]
+        done: bool,
+    },
+    /// A button of the media player, for the media in tab `id`; `at` is where to seek to.
+    Media {
+        id: u32,
+        op: media::Op,
+        #[serde(default)]
+        at: f64,
+    },
     /// History, bookmarks and suggestions: see `store::Msg`.
     #[serde(untagged)]
     Library(store::Msg),
+    /// Menus floating over the page: see `overlay::Msg`.
+    #[serde(untagged)]
+    Overlay(overlay::Msg),
+}
+
+/// The only messages a page may send (see `build_webview`).
+#[derive(Deserialize)]
+#[serde(tag = "cmd", rename_all = "snake_case")]
+enum PageMsg {
+    Key {
+        combo: String,
+    },
+    /// The page was clicked: the app then asks the system which split tile has the focus.
+    Focus,
+    Media(media::Report),
+}
+
+/// Scheme, host and port of an address ("https://example.com:8443"); `None` for
+/// addresses without a host (about:, data:, file:).
+fn origin(url: &str) -> Option<&str> {
+    let (scheme, rest) = url.split_once("://")?;
+    let host = &rest[..rest.find(['/', '?', '#']).unwrap_or(rest.len())];
+    (!host.is_empty() && !host.contains('@')).then(|| &url[..scheme.len() + 3 + host.len()])
+}
+
+/// Every frame of a page can reach the message handler (on macOS), so a message counts
+/// only if it comes from the document the tab shows: same origin as the tab's address,
+/// or, for an address without one (a blank tab, a local file), that very address.
+fn same_origin(from: &str, tab_url: &str) -> bool {
+    let doc = |u: &str| u.split('#').next().unwrap_or_default().to_string();
+    match origin(tab_url) {
+        Some(o) => origin(from) == Some(o),
+        None => !from.is_empty() && doc(from) == doc(tab_url),
+    }
 }
 
 enum UserEvent {
     Ui(Msg),
-    /// Hotkey reported by the page in tab `.0`.
-    PageKey(u32, String),
+    /// A message from the page in tab `.0`, sent by a frame at address `.1` (unchecked yet).
+    Page(u32, String, Box<PageMsg>),
     Title(u32, String),
     Load(u32, bool, String),
     /// A page in tab `.0` asked for a new window.
     NewTab(u32, String),
     AdblockReady,
+    /// low-power: the power source or battery level changed.
+    Power,
     /// An update check finished: a version ready to install, none, or why it failed.
     Update(Result<Option<Box<update::Ready>>, String>),
     /// A search of the page in tab `.0` came back.
@@ -169,10 +269,117 @@ enum UserEvent {
     /// Chosen in the right-click menu of the page in tab `.0`: open this address in a
     /// (private, if `.2`) tab. Sent by the native menu only, never by the page.
     MenuTab(u32, String, bool),
+    /// Tab `.0` is (`.1`) or is not playing media or in a call: see `App::check_media`.
+    MediaChecked(u32, bool),
+    /// What the page in tab `.0` answered `PROBE` with, before unloading.
+    Probed(u32, String),
+    /// Windows: the pointer on the maximize button, as the system reports it to
+    /// `native::SnapButton`: "hover", "press", "leave" or "click".
+    #[cfg(windows)]
+    Snap(&'static str),
+}
+
+/// Why a tab is being unloaded, which decides what may keep it loaded.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Why {
+    /// Not looked at for a while: anything in use keeps it.
+    Idle,
+    /// "Unload other tabs": the same checks, without the wait.
+    Others,
+    /// "Unload tab": the user picked this one, so it goes.
+    Asked,
+}
+
+/// Unload or keep, from what is known so far: `busy` = playing media or in a call,
+/// `edited` = text typed into the page (no answer counts as typed), `idle` = still not
+/// looked at since it became due.
+fn keeps(why: Why, busy: bool, edited: bool, idle: bool) -> bool {
+    match why {
+        Why::Asked => false,
+        Why::Others => busy || edited,
+        Why::Idle => busy || edited || !idle,
+    }
+}
+
+/// When background tab `t` becomes due for unloading, `after` it was last on screen,
+/// or `None` if it never does. Never: the Settings tab (it has no page); the tab on
+/// screen; one not loaded or already
+/// being checked; a private one, whose cookies live only as long as its page (on
+/// macOS each private tab has its own), so unloading would sign it out; a pinned one,
+/// unless `pinned_too`.
+fn unload_due(
+    t: &Tab,
+    loaded: bool,
+    active: Option<u32>,
+    after: Option<Duration>,
+    pinned_too: bool,
+) -> Option<Instant> {
+    let may = loaded
+        && t.kind == Kind::Web
+        && t.checking.is_none()
+        && active != Some(t.id)
+        && !t.private
+        && (pinned_too || !t.pinned);
+    after.filter(|_| may).map(|a| t.seen + a)
+}
+
+/// Asks a page, before it is unloaded, whether text was typed into it (a changed field
+/// or a focused editor, top frame only) and where it is scrolled to.
+///
+/// It runs in the page's own world, so the page can tamper with everything it touches
+/// (`scrollX`, `querySelectorAll`, getters that throw). The engine turns the result
+/// into JSON and on macOS the app aborts if that fails (a NaN, a Date), so the answer
+/// is only ever a string of literals and integers: "typed,x,y" with typed 0 or 1, or
+/// "keep" if anything went wrong. `parse_probe` reads it.
+const PROBE: &str = r#"(() => { try {
+  const skip = ['hidden', 'checkbox', 'radio', 'submit', 'button', 'reset', 'image', 'file', 'range', 'color'];
+  let typed = false;
+  for (const e of document.querySelectorAll('input, textarea'))
+    if (!skip.includes(e.type) && e.value !== e.defaultValue) { typed = true; break; }
+  const a = document.activeElement;
+  return ((typed || (a && a.isContentEditable)) ? '1' : '0') + ',' + (scrollX | 0) + ',' + (scrollY | 0);
+} catch (e) { return 'keep'; } })()"#;
+
+/// How long a page has to answer `PROBE`. A page that never finished loading may never
+/// answer at all.
+const PROBE_WAIT: Duration = Duration::from_secs(5);
+
+/// `PROBE`'s answer as the engine hands it over (a JSON string): whether text was
+/// typed, and the scroll position. `None` for anything else, which keeps the tab.
+fn parse_probe(out: &str) -> Option<(bool, i32, i32)> {
+    let answer: String = serde_json::from_str(out).ok()?;
+    let mut parts = answer.split(',');
+    let typed = match parts.next()? {
+        "0" => false,
+        "1" => true,
+        _ => return None,
+    };
+    let x = parts.next()?.parse().ok()?;
+    let y = parts.next()?.parse().ok()?;
+    parts.next().is_none().then_some((typed, x, y))
+}
+
+/// The address a tab shows: what its engine reports (single-page sites change it
+/// without a load event), if that is a web address, else the last one loaded.
+fn live_url(t: &Tab) -> String {
+    let live = t.webview.as_ref().and_then(|w| w.url().ok());
+    live.filter(|u| u.starts_with("http://") || u.starts_with("https://"))
+        .unwrap_or_else(|| t.url.clone())
+}
+
+/// What a tab shows. Only the app makes a tab of another kind than `Web`; no address
+/// leads to one, so a page can neither open nor reach it.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Kind {
+    Web,
+    /// The settings sheet of the interface, in the page area. No web view; one at most;
+    /// never saved, so not restored after a restart.
+    Settings,
 }
 
 struct Tab {
     id: u32,
+    kind: Kind,
     workspace: u32,
     private: bool,
     /// Pinned tabs are listed before the others of their workspace.
@@ -183,6 +390,25 @@ struct Tab {
     url: String,
     loading: bool,
     zoom: f64,
+    /// What it is playing, if anything; `media.playing()` says whether it is audible now.
+    media: media::Slot,
+    /// When it was last on screen (or opened).
+    seen: Instant,
+    /// Being checked before unloading (see `App::check_media`): since when, and why.
+    checking: Option<(Instant, Why)>,
+    /// A page finished loading in its current web view.
+    settled: bool,
+    /// Set when the tab is unloaded, used when it comes back.
+    wake: Option<Wake>,
+}
+
+/// An unloaded tab, waiting to be shown again.
+struct Wake {
+    /// The page it showed, and where it was scrolled to.
+    url: String,
+    scroll: Option<(i32, i32)>,
+    /// When it was asked to come back.
+    since: Option<Instant>,
 }
 
 /// A closed tab, remembered for this run so it can be reopened.
@@ -225,6 +451,58 @@ fn place_tab(tabs: &mut Vec<Tab>, id: u32, index: usize) {
 /// Pinned tabs before the others, the order otherwise kept; so it holds in every workspace.
 fn group_pinned(tabs: &mut [Tab]) {
     tabs.sort_by_key(|t| !t.pinned);
+}
+
+/// SETTINGS TAB: the one Settings tab, shown in workspace `ws`: created at the end of
+/// it, or moved there from another workspace. Gives its id.
+/// `private`: in a private window it is private like every other tab, so a page it
+/// turns into (see `settings_to_web`) never touches the saved data store.
+fn settings_tab(tabs: &mut Vec<Tab>, ws: u32, private: bool, next_id: &mut u32) -> u32 {
+    match tabs.iter().position(|t| t.kind == Kind::Settings) {
+        Some(pos) if tabs[pos].workspace == ws => tabs[pos].id,
+        found => {
+            let tab = match found {
+                Some(pos) => tabs.remove(pos),
+                None => {
+                    *next_id += 1;
+                    Tab {
+                        id: *next_id - 1,
+                        kind: Kind::Settings,
+                        workspace: ws,
+                        private,
+                        pinned: false,
+                        webview: None,
+                        title: "Settings".into(),
+                        url: String::new(),
+                        loading: false,
+                        zoom: 1.0,
+                        media: Default::default(),
+                        seen: Instant::now(),
+                        checking: None,
+                        settled: false,
+                        wake: None,
+                    }
+                }
+            };
+            let id = tab.id;
+            tabs.push(Tab {
+                workspace: ws,
+                ..tab
+            });
+            id
+        }
+    }
+}
+
+/// An address typed on the Settings tab: that tab becomes the page, as in other browsers.
+fn settings_to_web(tab: &mut Tab, url: String, zoom: f64, private_window: bool) {
+    (tab.kind, tab.url, tab.title, tab.zoom) = (Kind::Web, url, String::new(), zoom);
+    tab.private |= private_window;
+}
+
+/// Whether a tab goes into the saved session: not a private one, not Settings, not a blank.
+fn saved(t: &Tab) -> bool {
+    t.kind == Kind::Web && !t.private && t.url.starts_with("http")
 }
 
 /// Remember a tab that was just closed from place `index` of its workspace. Private
@@ -304,8 +582,14 @@ struct App {
     /// Gap the interface leaves for the page: left, top, right, bottom. `None` until
     /// the interface has laid itself out once.
     insets: Option<[f64; 4]>,
-    /// A glide in progress: the gap it started from, and when.
-    glide: Option<([f64; 4], Instant)>,
+    /// A glide in progress: where each visible tab started from, and when.
+    glide: Option<(HashMap<u32, [f64; 4]>, Instant)>,
+    /// Split view: the groups of tabs shown together, a drag's preview, tile spacing.
+    groups: Vec<split::Node>,
+    preview: Option<split::Node>,
+    gap: f64,
+    /// The tabs on screen as last marked (`mark_shown`): the focused one and its tiles.
+    on_screen: Vec<u32>,
     /// Area the floating bar takes, same form as `insets`.
     float_insets: [f64; 4],
     page_radius: f64,
@@ -314,12 +598,25 @@ struct App {
     panel_radius: f64,
     /// Frosted glass shown behind the floating bar, where the platform has it.
     glass: Option<native::Glass>,
-    /// macOS: where the window buttons go, at rest and while the bar floats in.
-    lights: [f64; 2],
-    lights_peek: Option<[f64; 2]>,
-    /// macOS: inset of the window buttons, as last applied.
-    lights_at: [f64; 2],
-    settings_open: bool,
+    /// low-power: the mode is on now (set, or decided by "auto"), and glass is off
+    /// (low power, or the system asks for less transparency).
+    low: bool,
+    solid: bool,
+    /// low-power: when to check the cursor next while the bar is collapsed.
+    poll_every: Duration,
+    /// Where the window buttons go, at rest and while the bar floats in.
+    lights: [f64; 4],
+    lights_peek: Option<[f64; 4]>,
+    /// macOS: where they were last put.
+    #[cfg(target_os = "macos")]
+    lights_at: [f64; 4],
+    /// Windows: lies over the interface's maximize button so the system knows it is there.
+    #[cfg(windows)]
+    snap: Option<native::SnapButton>,
+    /// SETTINGS TAB: the tab to go back to when Settings is closed with Done.
+    settings_from: Option<u32>,
+    /// The floater as a layer for menus (overlay.rs).
+    overlay: overlay::Overlay,
     /// A menu or sheet in the interface is using the page area.
     cover: bool,
     /// The collapsed bar is temporarily shown (floating over the page).
@@ -339,6 +636,8 @@ struct App {
     store: store::Store,
     started: bool,
     quit: bool,
+    /// As last told to the interface (Windows draws its own restore/maximize button).
+    maximized: bool,
     /// Page tools: this session's downloads, and the last search (tab, query).
     downloads: page_tools::SharedDownloads,
     find_last: Option<(u32, String)>,
@@ -350,6 +649,10 @@ fn rect(x: f64, y: f64, w: f64, h: f64) -> Rect {
         size: LogicalSize::new(w.max(1.0), h.max(1.0)).into(),
     }
 }
+
+/// Pages say when they are clicked; the app then asks the system which view has the focus.
+const FOCUS_SCRIPT: &str =
+    "addEventListener('pointerdown', () => window.ipc.postMessage('{\"cmd\":\"focus\"}'), true);";
 
 fn keys_script(cfg: &Config) -> String {
     let combos: Vec<&String> = cfg.hotkeys.values().collect();
@@ -416,26 +719,44 @@ impl App {
         rect(l, t, s.width - l - r, s.height - t - b)
     }
 
-    /// The page gap right now: mid-glide, somewhere between the old and the new one.
-    fn page_insets(&self) -> [f64; 4] {
-        let target = self.insets.unwrap_or_default();
-        let Some((from, start)) = self.glide else {
-            return target;
-        };
-        let k = ease_out(start.elapsed().as_secs_f64() / PAGE_GLIDE.as_secs_f64());
-        std::array::from_fn(|i| from[i] + (target[i] - from[i]) * k)
+    /// Where the visible tabs are right now: mid-glide, somewhere between where they
+    /// were and where they are going.
+    fn frames(&self) -> Vec<(u32, [f64; 4])> {
+        let mut frames = self.targets();
+        if let Some((from, start)) = &self.glide {
+            let k = ease_out(start.elapsed().as_secs_f64() / PAGE_GLIDE.as_secs_f64());
+            for (id, to) in &mut frames {
+                if let Some(a) = from.get(id) {
+                    *to = std::array::from_fn(|i| a[i] + (to[i] - a[i]) * k);
+                }
+            }
+        }
+        frames
+    }
+
+    /// The layout is about to change: glide from where the tabs are now.
+    /// (low-power: no glide, the tabs jump.)
+    fn start_glide(&mut self) {
+        if self.insets.is_some() && !self.low {
+            self.glide = Some((self.frames().into_iter().collect(), Instant::now()));
+        }
     }
 
     fn page_visible(&self) -> bool {
-        self.insets.is_some() && !self.settings_open && !self.cover
+        self.insets.is_some() && !self.settings_open() && !self.cover
     }
 
     fn layout_pages(&self) {
-        let page = self.inset_rect(self.page_insets());
+        let (frames, visible) = (self.frames(), self.page_visible());
         for tab in &self.tabs {
             if let Some(w) = &tab.webview {
-                let _ = w.set_bounds(page);
-                let _ = w.set_visible(self.active == Some(tab.id) && self.page_visible());
+                match frames.iter().find(|f| f.0 == tab.id) {
+                    Some(&(_, [x, y, width, height])) => {
+                        let _ = w.set_bounds(rect(x, y, width, height));
+                        let _ = w.set_visible(visible);
+                    }
+                    None => drop(w.set_visible(false)),
+                }
             }
         }
     }
@@ -444,7 +765,8 @@ impl App {
         let s = self.size();
         let _ = self.chrome.set_bounds(rect(0.0, 0.0, s.width, s.height));
         self.layout_pages();
-        if let Some(f) = &self.floater {
+        // (While it shows a menu, the floater is placed by `show_menu` instead.)
+        if let Some(f) = self.floater.as_ref().filter(|_| !self.overlay.open) {
             let _ = f.set_bounds(self.inset_rect(self.float_insets));
         }
     }
@@ -485,6 +807,30 @@ impl App {
             .collect()
     }
 
+    /// The media the player shows: the one started most recently, in any tab but the
+    /// one on screen (which has its own controls), unless dismissed.
+    fn media_tab(&self) -> Option<&Tab> {
+        let shown = self.tabs.iter().filter(|t| self.active != Some(t.id));
+        shown
+            .filter(|t| t.media.shown())
+            .max_by_key(|t| t.media.started)
+    }
+
+    /// A button of the media player.
+    fn media_op(&mut self, id: u32, op: media::Op, at: f64) {
+        let Some(tab) = self.tab_mut(id) else { return };
+        if op == media::Op::Dismiss {
+            tab.media.dismissed = true;
+            return self.sync();
+        }
+        let (Some(m), Some(w)) = (&tab.media.now, &tab.webview) else {
+            return;
+        };
+        if let Some(js) = media::script(op, at, m) {
+            let _ = w.evaluate_script(&js);
+        }
+    }
+
     /// Both copies of the interface.
     fn uis(&self) -> impl Iterator<Item = &WebView> {
         std::iter::once(&self.chrome).chain(&self.floater)
@@ -498,22 +844,33 @@ impl App {
             .filter(|t| t.workspace == self.workspace)
             .map(|t| {
                 json!({"id": t.id, "title": t.title, "url": t.url, "loading": t.loading,
-                       "private": t.private, "pinned": t.pinned})
+                       "private": t.private, "pinned": t.pinned, "zoom": t.zoom,
+                       "asleep": t.kind == Kind::Web && t.webview.is_none(),
+                       "playing": t.media.playing(), "muted": t.media.muted(),
+                       "kind": if t.kind == Kind::Settings { "settings" } else { "web" }})
             })
             .collect();
         let state = json!({
             "tabs": tabs,
             "active": self.active,
+            "split": self.shown_tree(),
+            "groups": self.groups_json(),
             "workspace": self.workspace,
             "config": self.cfg,
-            "settings": self.settings_open,
+            "settings": self.settings_open(),
+            "settings_tab": self.tabs.iter().any(|t| t.kind == Kind::Settings),
             "peek": self.peek,
             "private": self.private_window,
             "bookmarked": self.active_tab().is_some_and(|t| self.store.is_bookmarked(&t.url)),
             "mac": cfg!(target_os = "macos"),
-            "glass": self.glass.is_some(),
+            "win": cfg!(windows),
+            "maximized": self.maximized,
+            "glass": self.glass.is_some() && !self.solid,
+            "low": self.low,
+            "solid": self.solid,
             "version": env!("CARGO_PKG_VERSION"),
             "downloads": self.downloads.borrow().json(),
+            "media": self.media_tab().map(|t| t.media.json(t.id, &t.title, &t.url, t.private)),
             "update": {
                 "supported": update::supported(),
                 "ready": self.update.as_ref().map(|u| u.version.as_str()),
@@ -555,19 +912,29 @@ impl App {
         );
         let mut builder = WebViewBuilder::new()
             .with_url(url)
-            .with_bounds(self.inset_rect(self.page_insets()))
+            .with_bounds(self.inset_rect(self.insets.unwrap_or_default()))
             .with_visible(self.page_visible())
             .with_incognito(private)
             .with_back_forward_navigation_gestures(true)
             .with_initialization_script(keys_script(&self.cfg))
-            // Pages are untrusted: the only message accepted from them is a hotkey press,
-            // and only while their tab is the active one (see `PageKey`).
+            .with_initialization_script(include_str!("media.js"))
+            // A click tells the app to check (natively) which split tile has the focus.
+            .with_initialization_script(FOCUS_SCRIPT)
+            // Pages are untrusted: the only messages accepted from them are a hotkey press,
+            // only while their tab is the active one, and what they are playing, checked
+            // and rate-limited (see media.rs); both only from the document the tab shows,
+            // not from frames of other sites inside it (see `UserEvent::Page`). The tab is
+            // the one this handler belongs to, whatever the message says.
             // ponytail: the active page can still fake a press (e.g. close its own tab)
             // or swallow hotkeys while focused. Upgrade path: native key capture per
             // platform instead of the injected listener.
             .with_ipc_handler(move |req| {
-                if let Ok(Msg::Key { combo }) = serde_json::from_str(req.body()) {
-                    let _ = p1.send_event(UserEvent::PageKey(id, combo));
+                if req.body().len() > media::MAX_MESSAGE {
+                    return;
+                }
+                if let Ok(msg) = serde_json::from_str(req.body()) {
+                    let from = req.uri().to_string();
+                    let _ = p1.send_event(UserEvent::Page(id, from, Box::new(msg)));
                 }
             })
             .with_document_title_changed_handler(move |title| {
@@ -587,7 +954,7 @@ impl App {
         if let Some(ua) = &self.user_agent {
             builder = builder.with_user_agent(ua);
         }
-        let (builder, p5) = (self.with_downloads(builder), self.proxy.clone());
+        let (builder, p5) = (self.with_downloads(builder, id), self.proxy.clone());
         match builder.build_as_child(&self.window) {
             Ok(webview) => {
                 adblock::attach(&webview);
@@ -595,12 +962,18 @@ impl App {
                     let _ = p5.send_event(UserEvent::MenuTab(id, url, private));
                 });
                 native::round_corners(&webview, self.page_radius);
-                let zoom = self.cfg.behavior.default_zoom;
+                let zoom = self
+                    .tab(id)
+                    .map_or(self.cfg.behavior.default_zoom, |t| t.zoom);
                 if zoom != 1.0 {
                     let _ = webview.zoom(zoom);
                 }
-                // New views stack on top; a floating bar must stay above them.
-                if let Some(f) = self.floater.as_ref().filter(|_| self.peek) {
+                // New views stack on top; a floating bar or menu must stay above them.
+                if let Some(f) = self
+                    .floater
+                    .as_ref()
+                    .filter(|_| self.peek || self.overlay.open)
+                {
                     if let Some(glass) = &self.glass {
                         glass.restack(&self.window);
                     }
@@ -621,6 +994,7 @@ impl App {
         self.next_id += 1;
         self.tabs.push(Tab {
             id,
+            kind: Kind::Web,
             workspace: self.workspace,
             private: private || self.private_window,
             pinned: false,
@@ -628,33 +1002,40 @@ impl App {
             title: String::new(),
             url: url.to_string(),
             loading: false,
+            seen: Instant::now(),
+            checking: None,
+            settled: false,
+            wake: None,
             zoom: self.cfg.behavior.default_zoom,
+            media: Default::default(),
         });
         self.select(id);
     }
 
     fn select(&mut self, id: u32) {
-        let Some(tab) = self.tab(id) else { return };
-        let (ws, url, private, unloaded) = (
-            tab.workspace,
-            tab.url.clone(),
-            tab.private,
-            tab.webview.is_none(),
-        );
-        if unloaded {
-            let webview = self.build_webview(id, &url, private);
-            if let Some(tab) = self.tab_mut(id) {
-                tab.webview = webview;
-            }
-        }
+        let Some(ws) = self.tab(id).map(|t| t.workspace) else {
+            return;
+        };
+        self.preview = None;
         self.workspace = ws;
         self.active = Some(id);
         self.last_active.insert(ws, id);
-        self.settings_open = false;
-        self.layout_pages();
-        if let Some(w) = self.active_webview() {
-            let _ = w.focus();
+        // Every tile of its split is shown with it.
+        let shown: Vec<u32> = self.targets().iter().map(|f| f.0).collect();
+        shown.iter().for_each(|&t| self.ensure_webview(t));
+        let from = self.glide.as_ref().map(|g| &g.0);
+        if !shown
+            .iter()
+            .any(|t| from.is_some_and(|f| f.contains_key(t)))
+        {
+            self.glide = None; // another tab entirely: no glide from the old one
         }
+        self.mark_shown();
+        self.layout_pages();
+        let _ = match self.active_webview() {
+            Some(w) => w.focus(),
+            None => self.chrome.focus(), // the settings sheet
+        };
         self.sync();
     }
 
@@ -675,11 +1056,15 @@ impl App {
     }
 
     fn close_tab(&mut self, id: u32) {
+        let tile = self.leave_split(id); // the rest of its split stays on screen
         let Some((ws, pos)) = self.remove_tab(id) else {
             return;
         };
         if self.active == Some(id) {
-            self.show_neighbor(ws, pos);
+            match tile {
+                Some(next) => self.select(next),
+                None => self.show_neighbor(ws, pos),
+            }
         } else {
             self.sync();
         }
@@ -692,6 +1077,7 @@ impl App {
     /// workspace and the list position it had.
     fn remove_tab(&mut self, id: u32) -> Option<(u32, usize)> {
         let pos = self.tabs.iter().position(|t| t.id == id)?;
+        self.leave_split(id);
         let ws = self.tabs[pos].workspace;
         let index = self.tabs[..pos]
             .iter()
@@ -721,10 +1107,16 @@ impl App {
 
     fn set_pinned(&mut self, id: u32, pinned: bool) {
         // A private tab is never saved, so pinning it would promise something untrue.
-        let Some(tab) = self.tab_mut(id).filter(|t| !t.private) else {
+        let Some(tab) = self
+            .tab_mut(id)
+            .filter(|t| !t.private && t.kind == Kind::Web)
+        else {
             return;
         };
         tab.pinned = pinned;
+        if pinned {
+            self.leave_split(id); // pinned tabs keep to their own box, out of splits
+        }
         // To the border between the groups: last of the pinned, or first of the rest.
         self.reorder_tab(id, if pinned { usize::MAX } else { 0 });
     }
@@ -735,12 +1127,16 @@ impl App {
             return;
         };
         let src = &self.tabs[pos];
+        if src.kind != Kind::Web {
+            return;
+        }
         let after = self.tabs[..=pos]
             .iter()
             .filter(|t| t.workspace == src.workspace)
             .count();
         let copy = Tab {
             id: 0, // given by `insert_tab`
+            kind: Kind::Web,
             workspace: src.workspace,
             private: src.private,
             pinned: false,
@@ -748,7 +1144,12 @@ impl App {
             title: src.title.clone(),
             url: src.url.clone(),
             loading: false,
+            seen: Instant::now(),
+            checking: None,
+            settled: false,
+            wake: None,
             zoom: self.cfg.behavior.default_zoom,
+            media: Default::default(),
         };
         self.insert_tab(copy, after);
     }
@@ -783,6 +1184,7 @@ impl App {
         let known = self.cfg.workspaces.iter().any(|w| w.id == closed.workspace);
         let tab = Tab {
             id: 0, // given by `insert_tab`
+            kind: Kind::Web,
             workspace: if known {
                 closed.workspace
             } else {
@@ -794,7 +1196,12 @@ impl App {
             title: closed.title,
             url: closed.url,
             loading: false,
+            seen: Instant::now(),
+            checking: None,
+            settled: false,
+            wake: None,
             zoom: self.cfg.behavior.default_zoom,
+            media: Default::default(),
         };
         self.insert_tab(tab, closed.index);
     }
@@ -815,6 +1222,183 @@ impl App {
         }
     }
 
+    // ---- unloading: background tabs give their memory back ----
+
+    /// How long a background tab stays loaded unseen, or `None` for always.
+    fn unload_after(&self) -> Option<Duration> {
+        // Development: WISP_UNLOAD_SECS=<n> uses seconds instead of the setting.
+        #[cfg(debug_assertions)]
+        if let Some(secs) = std::env::var("WISP_UNLOAD_SECS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
+            return Some(Duration::from_secs(secs));
+        }
+        let minutes = self.cfg.behavior.unload_after as u64;
+        (minutes > 0).then(|| Duration::from_secs(60 * minutes))
+    }
+
+    /// When tab `t` next needs attention: due for unloading, or its check timed out.
+    /// A tab with a download running is never due.
+    fn unload_due(&self, t: &Tab) -> Option<Instant> {
+        if let Some((since, _)) = t.checking {
+            return Some(since + PROBE_WAIT);
+        }
+        if self.downloads.borrow().running_in(t.id) {
+            return None;
+        }
+        if self.on_screen.contains(&t.id) {
+            return None; // a split tile on screen is in use like the focused one
+        }
+        let (after, pinned) = (self.unload_after(), self.cfg.behavior.unload_pinned);
+        unload_due(t, t.webview.is_some(), self.active, after, pinned)
+    }
+
+    /// When the next background tab becomes due for unloading, if any: the event loop
+    /// wakes then, and not at all for this when nothing is loaded in the background.
+    fn next_unload(&self) -> Option<Instant> {
+        if !self.started {
+            return None;
+        }
+        self.tabs.iter().filter_map(|t| self.unload_due(t)).min()
+    }
+
+    /// Check every tab that is due, and unload those not in use. A check the page never
+    /// answered ends here too.
+    fn unload_idle(&mut self) {
+        let now = Instant::now();
+        let due: Vec<(u32, Option<Why>)> = self
+            .tabs
+            .iter()
+            .filter(|t| self.unload_due(t).is_some_and(|at| at <= now))
+            .map(|t| (t.id, t.checking.map(|c| c.1)))
+            .collect();
+        for (id, checking) in due {
+            match checking {
+                None => self.check_media(id, Why::Idle),
+                Some(why) => self.probed(id, None, why),
+            }
+        }
+    }
+
+    /// "Unload other tabs": every other loaded tab of the workspace, except pinned and
+    /// private ones, and those in use (as when unloading for being idle).
+    fn unload_other_tabs(&mut self, keep: u32) {
+        let Some(ws) = self.tab(keep).map(|t| t.workspace) else {
+            return;
+        };
+        let others: Vec<u32> = self
+            .tabs
+            .iter()
+            .filter(|t| t.workspace == ws && t.id != keep && !t.pinned && !t.private)
+            .filter(|t| t.webview.is_some() && !self.on_screen.contains(&t.id))
+            .map(|t| t.id)
+            .collect();
+        for id in others {
+            self.check_media(id, Why::Others);
+        }
+    }
+
+    /// First check: is the page playing media or in a call? (`UserEvent::MediaChecked`)
+    fn check_media(&mut self, id: u32, why: Why) {
+        let proxy = self.proxy.clone();
+        let Some(tab) = self.tab_mut(id).filter(|t| t.webview.is_some()) else {
+            return;
+        };
+        tab.checking = Some((Instant::now(), why));
+        if let Some(w) = &tab.webview {
+            native::media_busy(w, move |busy| {
+                let _ = proxy.send_event(UserEvent::MediaChecked(id, busy));
+            });
+        }
+    }
+
+    /// Then ask the page itself (`PROBE`, answered as `UserEvent::Probed`, or not at
+    /// all: then `unload_idle` ends the check after `PROBE_WAIT`).
+    /// The answer comes back from the engine's own script call on the tab's top
+    /// document, not through the page message handler, so frames of other sites inside
+    /// the page cannot answer for it (the `same_origin` concern does not arise).
+    fn probe(&mut self, id: u32, why: Why) {
+        let proxy = self.proxy.clone();
+        let Some(tab) = self.tab_mut(id) else { return };
+        let Some(w) = &tab.webview else { return };
+        tab.checking = Some((Instant::now(), why));
+        let _ = w.evaluate_script_with_callback(PROBE, move |out| {
+            let _ = proxy.send_event(UserEvent::Probed(id, out));
+        });
+    }
+
+    /// The page answered (`found`), or did not in time (`None`): unload or keep.
+    fn probed(&mut self, id: u32, found: Option<(bool, i32, i32)>, why: Why) {
+        let after = self.unload_after();
+        let Some(tab) = self.tab(id) else { return };
+        let idle = after.is_some_and(|a| tab.seen.elapsed() >= a);
+        // A page that never finished loading has nothing to lose.
+        let edited = found.map_or(tab.settled, |f| f.0);
+        if keeps(why, false, edited, idle) {
+            self.keep(id);
+        } else {
+            self.unload(id, found.map(|f| (f.1, f.2)));
+        }
+    }
+
+    /// In use: keep it loaded, and look again after another full wait.
+    fn keep(&mut self, id: u32) {
+        #[cfg(debug_assertions)]
+        eprintln!("wisp: tab {id} kept loaded (in use)");
+        if let Some(tab) = self.tab_mut(id) {
+            tab.checking = None;
+            tab.seen = Instant::now();
+        }
+    }
+
+    /// Drop the tab's page, keeping its address, title and place. Never the tab on
+    /// screen, nor one whose download is running.
+    fn unload(&mut self, id: u32, scroll: Option<(i32, i32)>) {
+        let blocked = self.active == Some(id)
+            || self.on_screen.contains(&id)
+            || self.downloads.borrow().running_in(id);
+        let Some(tab) = self.tab_mut(id) else { return };
+        tab.checking = None;
+        if blocked || tab.webview.is_none() {
+            return;
+        }
+        tab.url = live_url(tab);
+        tab.webview = None;
+        tab.settled = false;
+        tab.media = media::Slot::default(); // its page is gone, and the player with it
+        #[cfg(debug_assertions)]
+        eprintln!("wisp: tab {id} unloaded at {}", tab.url);
+        tab.loading = false;
+        tab.wake = Some(Wake {
+            url: tab.url.clone(),
+            scroll,
+            since: None,
+        });
+        if self.find_last.as_ref().is_some_and(|f| f.0 == id) {
+            self.find_last = None;
+        }
+        self.sync();
+    }
+
+    /// An unloaded tab has loaded again: put it back where it was scrolled to.
+    fn woke(&mut self, id: u32, wake: Wake) {
+        #[cfg(debug_assertions)]
+        if let Some(since) = wake.since {
+            eprintln!("wisp: tab {id} back in {} ms", since.elapsed().as_millis());
+        }
+        let Some(w) = self
+            .tab(id)
+            .filter(|t| t.url == wake.url)
+            .and_then(|t| t.webview.as_ref())
+        else {
+            return;
+        };
+        if let Some((x, y)) = wake.scroll.filter(|&s| s != (0, 0)) {
+            let _ = w.evaluate_script(&format!("scrollTo({x}, {y})"));
+        }
+    }
+
     fn move_tab(&mut self, id: u32, to: u32) {
         let known = self.cfg.workspaces.iter().any(|w| w.id == to);
         let Some(pos) = self.tabs.iter().position(|t| t.id == id) else {
@@ -824,6 +1408,7 @@ impl App {
         if !known || from == to {
             return;
         }
+        let tile = self.leave_split(id);
         self.tabs[pos].workspace = to;
         self.last_active.insert(to, id);
         if self.active == Some(id) {
@@ -831,7 +1416,10 @@ impl App {
             if let Some(w) = &self.tabs[pos].webview {
                 let _ = w.set_visible(false);
             }
-            self.show_neighbor(from, pos);
+            match tile {
+                Some(next) => self.select(next),
+                None => self.show_neighbor(from, pos),
+            }
         } else {
             self.sync();
         }
@@ -877,30 +1465,38 @@ impl App {
     fn ensure_floater(&mut self) {
         if self.floater.is_none() {
             match build_ui(&self.window, &self.proxy, &self.cfg, true) {
-                Ok(f) => self.floater = Some(f),
+                Ok(f) => {
+                    self.floater = Some(f);
+                    self.overlay.ready = false; // until its page says `overlay_ready`
+                }
                 Err(e) => eprintln!("wisp: could not create floating bar: {e}"),
             }
         }
     }
 
-    /// macOS: put the window buttons where the interface asked, for the bar as it is now.
+    /// Put the window buttons where the interface asked, for the bar as it is now.
     fn place_lights(&mut self) {
         let at = match self.lights_peek {
             Some(l) if self.peek => l,
             _ => self.lights,
         };
-        if at == self.lights_at {
-            return;
-        }
-        self.lights_at = at;
         #[cfg(target_os = "macos")]
-        {
+        if at != self.lights_at {
+            self.lights_at = at;
             use tao::platform::macos::WindowExtMacOS;
             // The library takes "extra title bar height", from which the buttons
             // end up 2px above the value given (measured on macOS 26).
             // ponytail: may sit 1-2px off on older systems; set frames directly if so.
-            let at = LogicalPosition::new(at[0], at[1] + 2.0);
+            let at = LogicalPosition::new(at[0], at[1] + at[3] / 2.0 + 2.0);
             self.window.set_traffic_light_inset(at);
+        }
+        // Windows: the interface draws them; the system is shown where maximize is. Always
+        // placed, not only on a change: it goes in physical pixels (the scale may have
+        // changed under the same logical box) and back on top of a floater just raised.
+        #[cfg(windows)]
+        if let Some(snap) = &self.snap {
+            let w = at[2] / 3.0;
+            snap.place([at[0] + w, at[1], w, at[3]], self.window.scale_factor());
         }
     }
 
@@ -910,29 +1506,38 @@ impl App {
         if self.peek == on {
             return;
         }
+        if on {
+            self.close_menu(); // the floater is needed for the bar
+        }
         self.peek = on;
-        self.place_lights();
         if on {
             self.ensure_floater();
             if let Some(f) = &self.floater {
                 let _ = f.set_bounds(self.inset_rect(self.float_insets));
                 let _ = f.set_visible(true);
-                if let Some(glass) = &self.glass {
-                    let [l, t, r, b] = self.panel_insets;
-                    let s = self.size();
-                    let frame = [l, t, s.width - l - r, s.height - t - b];
-                    glass.show(&self.window, frame, self.panel_radius);
-                }
+                self.show_glass();
                 native::raise(f, &self.window);
             }
         }
+        self.place_lights(); // after the raise: on Windows it must stay above the floater
         self.sync(); // the floater slides in, or slides out and reports `FloaterDone`
+    }
+
+    /// The frosted pane under the revealed bar, where there is one and glass is wanted.
+    /// Raise the floating bar right after, so the pane ends up beneath it.
+    fn show_glass(&self) {
+        if let Some(glass) = self.glass.as_ref().filter(|_| !self.solid) {
+            let [l, t, r, b] = self.panel_insets;
+            let s = self.size();
+            let frame = [l, t, s.width - l - r, s.height - t - b];
+            glass.show(&self.window, frame, self.panel_radius);
+        }
     }
 
     /// While the bar is collapsed: reveal it when the cursor reaches its window edge,
     /// hide it again once the cursor has been away for a moment.
     fn poll_cursor(&mut self) {
-        if !self.cfg.layout.collapsed || self.settings_open || self.hold_peek {
+        if !self.cfg.layout.collapsed || self.hold_peek {
             return;
         }
         let (Ok(cursor), Ok(origin)) =
@@ -960,6 +1565,22 @@ impl App {
             _ => (0.0..=s.height).contains(&y),
         };
         let near = self.cfg.layout.hover_zone as f64;
+        // low-power: check again as soon as the cursor could reach the edge, and no sooner.
+        let off = match side {
+            Side::Top => (-x).max(x - s.width),
+            _ => (-y).max(y - s.height),
+        };
+        let to_edge = match side {
+            Side::Top => y,
+            Side::Left => x,
+            Side::Right => s.width - x,
+        };
+        let far = (to_edge.max(off) - near).max(0.0);
+        self.poll_every = if self.peek {
+            POLL
+        } else {
+            Duration::from_secs_f64(far / CURSOR_SPEED).clamp(POLL, POLL_FAR)
+        };
         let zone = if inside {
             zone(side, x, y, s.width, bar, near)
         } else {
@@ -977,23 +1598,51 @@ impl App {
     }
 
     fn focus_url(&mut self) {
-        if self.settings_open {
-            self.set_settings_open(false);
-        }
         // The interface focuses its address bar, or answers `PeekFocus` if it is hidden.
         let _ = self.chrome.focus();
         let _ = self.chrome.evaluate_script("wisp.focusUrl()");
     }
 
-    fn set_settings_open(&mut self, open: bool) {
-        self.settings_open = open;
-        self.layout_pages();
-        let _ = match self.active_webview() {
-            Some(w) if !open => w.focus(),
-            _ => self.chrome.focus(),
-        };
-        self.sync();
+    // ---- SETTINGS TAB: Settings opens as a tab of its own kind ----
+
+    fn settings_open(&self) -> bool {
+        self.active_tab().is_some_and(|t| t.kind == Kind::Settings)
     }
+
+    /// Show the Settings tab: the one there is (brought to this workspace), or a new one.
+    fn open_settings(&mut self) {
+        if !self.settings_open() {
+            self.settings_from = self.active;
+        }
+        let (ws, private) = (self.workspace, self.private_window);
+        let id = settings_tab(&mut self.tabs, ws, private, &mut self.next_id);
+        self.select(id);
+    }
+
+    /// Done: close the Settings tab and go back to the tab it was opened from.
+    fn close_settings(&mut self) {
+        let Some(id) = self
+            .tabs
+            .iter()
+            .find(|t| t.kind == Kind::Settings)
+            .map(|t| t.id)
+        else {
+            return;
+        };
+        let ws = self.workspace;
+        let back = self.settings_from.take().filter(|&b| {
+            b != id && self.tab(b).is_some_and(|t| t.workspace == ws) && self.active == Some(id)
+        });
+        match back {
+            Some(b) => {
+                self.remove_tab(id);
+                self.select(b);
+            }
+            None => self.close_tab(id),
+        }
+    }
+
+    // ---- END SETTINGS TAB ----
 
     fn action(&mut self, name: &str) {
         match name {
@@ -1015,8 +1664,7 @@ impl App {
                     env!("CARGO_PKG_VERSION"),
                     "/THIRD-PARTY-NOTICES"
                 );
-                self.new_tab(notices, false);
-                return self.set_settings_open(false);
+                return self.new_tab(notices, false);
             }
             "next_tab" | "prev_tab" => {
                 let step = if name == "next_tab" { 1 } else { -1 };
@@ -1040,15 +1688,19 @@ impl App {
             }
             "focus_url" => return self.focus_url(),
             "find" => {
-                if self.page_visible() && self.active_webview().is_some() {
+                // With Settings open, Mod+F goes to its own search box.
+                if self.settings_open() || (self.page_visible() && self.active_webview().is_some())
+                {
                     let _ = self.chrome.focus();
                     let _ = self.chrome.evaluate_script("wisp.find()");
                 }
                 return;
             }
-            "settings" => return self.set_settings_open(!self.settings_open),
+            "settings" if self.settings_open() => return self.close_settings(),
+            "settings" => return self.open_settings(),
             "close_tab" => return self.close_active(),
             "reopen_tab" => return self.reopen_tab(),
+            "split_view" => return self.toggle_split(),
             _ => {}
         }
         let home = self.cfg.behavior.homepage.clone();
@@ -1071,10 +1723,14 @@ impl App {
             }
             _ => Ok(()),
         };
+        if name.starts_with("zoom") {
+            self.sync(); // the app menu shows the zoom level
+        }
     }
 
     /// The bar was collapsed, pinned open, or moved: drop any reveal in progress.
     fn bar_mode_changed(&mut self) {
+        self.close_menu();
         self.peek = false;
         self.place_lights();
         self.away_since = None;
@@ -1167,6 +1823,7 @@ impl App {
             self.save_session();
         }
         self.apply_theme();
+        self.refresh_power();
         if old.layout.collapsed != self.cfg.layout.collapsed
             || old.layout.mode != self.cfg.layout.mode
         {
@@ -1174,6 +1831,27 @@ impl App {
         } else {
             self.sync();
         }
+    }
+
+    /// low-power: decide the mode again (settings, power source or focus changed).
+    /// Returns whether anything changed; the caller syncs.
+    fn refresh_power(&mut self) -> bool {
+        let p = native::power();
+        let cores = std::thread::available_parallelism().map_or(4, |n| n.get());
+        let low = low_power(&self.cfg.behavior.low_power, p, cores);
+        let solid = low || p.reduce_transparency;
+        if (low, solid) == (self.low, self.solid) {
+            return false;
+        }
+        (self.low, self.solid) = (low, solid);
+        if let Some(glass) = self.glass.as_ref().filter(|_| solid) {
+            glass.hide();
+        } else if let Some(f) = self.floater.as_ref().filter(|_| self.peek) {
+            // Glass is back while the bar is out (plugged in, say): put the pane under it.
+            self.show_glass();
+            native::raise(f, &self.window);
+        }
+        true
     }
 
     fn start(&mut self) {
@@ -1195,6 +1873,7 @@ impl App {
         let start_ws = Some(session.workspace)
             .filter(|&w| known(w))
             .unwrap_or(first_ws);
+        let (first_id, saved) = (self.next_id, session.tabs.len() as u32);
         for saved in session.tabs {
             let workspace = Some(saved.workspace)
                 .filter(|&w| known(w))
@@ -1206,6 +1885,7 @@ impl App {
             }
             self.tabs.push(Tab {
                 id,
+                kind: Kind::Web,
                 workspace,
                 private: false,
                 pinned: saved.pinned,
@@ -1213,10 +1893,17 @@ impl App {
                 title: saved.title,
                 url: saved.url,
                 loading: false,
+                seen: Instant::now(),
+                checking: None,
+                settled: false,
+                wake: None,
                 zoom: self.cfg.behavior.default_zoom,
+                media: Default::default(),
             });
         }
         group_pinned(&mut self.tabs);
+        self.groups = split::load(session.splits, |i| (i < saved).then_some(first_id + i));
+        self.tidy_groups();
         if self.tabs.is_empty() {
             let home = self.cfg.behavior.homepage.clone();
             self.new_tab(&home, false);
@@ -1238,12 +1925,13 @@ impl App {
         if self.private_window || !self.started {
             return;
         }
-        let tabs = self
-            .tabs
+        let kept: Vec<&Tab> = self.tabs.iter().filter(|t| saved(t)).collect();
+        let index_of = |id| kept.iter().position(|t| t.id == id).map(|i| i as u32);
+        let splits = split::save(&self.groups, index_of);
+        let tabs = kept
             .iter()
-            .filter(|t| !t.private && t.url.starts_with("http"))
             .map(|t| SavedTab {
-                url: t.url.clone(),
+                url: live_url(t),
                 title: t.title.clone(),
                 workspace: t.workspace,
                 pinned: t.pinned,
@@ -1253,6 +1941,7 @@ impl App {
         config::save_session(&Session {
             workspace: self.workspace,
             tabs,
+            splits,
         });
     }
 
@@ -1264,6 +1953,17 @@ impl App {
                     let _ = self.window.drag_window();
                 }
                 Msg::Maximize => self.window.set_maximized(!self.window.is_maximized()),
+                Msg::Minimize => self.window.set_minimized(true),
+                Msg::Close => self.quit = true,
+                Msg::Resize { edge } => {
+                    use tao::window::ResizeDirection as D;
+                    let dir = match edge.as_str() {
+                        "ne" => D::NorthEast,
+                        "nw" => D::NorthWest,
+                        _ => D::North,
+                    };
+                    let _ = self.window.drag_resize_window(dir);
+                }
                 Msg::Key { combo } => {
                     if let Some(action) = self.cfg.action_for(&combo).map(str::to_string) {
                         self.action(&action);
@@ -1272,6 +1972,15 @@ impl App {
                 Msg::Action { name } => self.action(&name),
                 Msg::Navigate { url } => {
                     let url = config::resolve_input(&url, &self.cfg.behavior.search_url);
+                    let (zoom, private) = (self.cfg.behavior.default_zoom, self.private_window);
+                    if let Some(tab) = self.active.and_then(|id| self.tab_mut(id))
+                        && tab.kind == Kind::Settings
+                    {
+                        settings_to_web(tab, url, zoom, private);
+                        let id = tab.id;
+                        self.settings_from = None;
+                        return self.select(id);
+                    }
                     if let Some(w) = self.active_webview() {
                         let _ = w.load_url(&url);
                         let _ = w.focus();
@@ -1285,6 +1994,13 @@ impl App {
                 Msg::PinTab { id, pinned } => self.set_pinned(id, pinned),
                 Msg::DuplicateTab { id } => self.duplicate_tab(id),
                 Msg::CloseOtherTabs { id } => self.close_other_tabs(id),
+                // Not a private tab: its sign-ins would go with its page.
+                Msg::UnloadTab { id } => {
+                    if self.tab(id).is_some_and(|t| !t.private) {
+                        self.probe(id, Why::Asked);
+                    }
+                }
+                Msg::UnloadOtherTabs { id } => self.unload_other_tabs(id),
                 Msg::PageRect {
                     page,
                     float,
@@ -1294,15 +2010,19 @@ impl App {
                     lights,
                     lights_peek,
                     animate,
+                    gap,
                 } => {
                     let sane = |v: &[f64]| v.iter().all(|n| n.is_finite() && *n >= 0.0);
                     if !sane(&page) || !sane(&float) || !sane(&[radius]) {
                         return;
                     }
                     if animate && self.insets.is_some_and(|old| old != page) {
-                        self.glide = Some((self.page_insets(), Instant::now()));
+                        self.start_glide();
                     } else if !animate {
                         self.glide = None;
+                    }
+                    if sane(&[gap]) {
+                        self.gap = gap;
                     }
                     if sane(&lights) {
                         self.lights = lights;
@@ -1339,7 +2059,8 @@ impl App {
                     }
                 }
                 Msg::FloaterDone => {
-                    if let Some(f) = self.floater.as_ref().filter(|_| !self.peek) {
+                    let idle = !self.peek && !self.overlay.open;
+                    if let Some(f) = self.floater.as_ref().filter(|_| idle) {
                         let _ = f.set_visible(false);
                         if let Some(glass) = &self.glass {
                             glass.hide();
@@ -1350,17 +2071,61 @@ impl App {
                 Msg::Find { query, back } => self.find(query, back),
                 Msg::FindClose => self.find_close(),
                 Msg::Download { id, op } => self.download_op(id, &op),
+                Msg::SplitWith { id, target, edge } => self.split_with(id, target, edge),
+                Msg::SplitPreview { id, target, edge } => {
+                    self.split_preview(id, target.zip(edge));
+                }
+                Msg::Unsplit { id, all } => self.unsplit(id, all),
+                Msg::SplitSizes {
+                    path,
+                    sizes,
+                    animate,
+                    done,
+                } => {
+                    self.split_sizes(&path, sizes, animate);
+                    if done {
+                        self.sync();
+                        self.save_session();
+                    }
+                }
+                Msg::Media { id, op, at } => self.media_op(id, op, at),
                 Msg::Library(msg) => self.library(msg),
+                Msg::Overlay(msg) => self.overlay_msg(msg),
             },
-            UserEvent::PageKey(id, combo) => {
-                // A page can only have keyboard focus while it is the one on screen, so a
-                // key from a background tab, or while the interface covers the page, is forged.
-                if self.active == Some(id) && self.page_visible() {
-                    self.handle(UserEvent::Ui(Msg::Key { combo }));
+            UserEvent::Page(id, from, msg) => {
+                // Checked against the address the view shows now (it follows redirects
+                // before the tab's own record does). On macOS `from` is the sending frame's
+                // address; WebView2 only hears the top document, so there it always matches.
+                let view = self.tab(id).and_then(|t| t.webview.as_ref());
+                if !view
+                    .and_then(|w| w.url().ok())
+                    .is_some_and(|u| same_origin(&from, &u))
+                {
+                    return;
+                }
+                match *msg {
+                    // A page can only have keyboard focus while it is the one on screen, so a
+                    // key from a background tab, or while the interface covers the page, is forged.
+                    PageMsg::Key { combo } => {
+                        // A tile focused by a click the app did not hear of (inside a
+                        // frame) is taken on if the system confirms it holds the focus.
+                        self.page_focus(id);
+                        if self.active == Some(id) && self.page_visible() {
+                            self.handle(UserEvent::Ui(Msg::Key { combo }));
+                        }
+                    }
+                    PageMsg::Focus => self.page_focus(id),
+                    PageMsg::Media(report) => {
+                        let changed = self.tab_mut(id).is_some_and(|t| t.media.report(report));
+                        if changed {
+                            self.sync();
+                        }
+                    }
                 }
             }
+            // Late events from a web view that was unloaded are dropped.
             UserEvent::Title(id, title) => {
-                if let Some(tab) = self.tab_mut(id) {
+                if let Some(tab) = self.tab_mut(id).filter(|t| t.webview.is_some()) {
                     tab.title = title;
                     self.retitled(id);
                     self.sync();
@@ -1370,13 +2135,22 @@ impl App {
                 if started && self.find_last.as_ref().is_some_and(|f| f.0 == id) {
                     self.find_last = None; // a new page: the next search starts over
                 }
-                if let Some(tab) = self.tab_mut(id) {
+                if let Some(tab) = self.tab_mut(id).filter(|t| t.webview.is_some()) {
+                    if started {
+                        tab.media = media::Slot::default(); // a new page: its media is gone
+                    }
                     tab.loading = started;
                     tab.url = url;
+                    tab.settled |= !started;
+                    let woke = if started { None } else { tab.wake.take() };
                     self.sync();
                     if !started {
                         self.save_session(); // saved as you browse, so a crash loses nothing
-                        self.visited(id);
+                        match woke {
+                            // Coming back to an unloaded tab is not a new visit.
+                            Some(wake) => self.woke(id, wake),
+                            None => self.visited(id),
+                        }
                     }
                 }
             }
@@ -1403,6 +2177,25 @@ impl App {
                     self.new_tab(&url, private);
                 }
             }
+            // Answers to a check that ended already (timed out) are ignored.
+            UserEvent::MediaChecked(id, busy) => {
+                let Some(tab) = self.tab(id) else { return };
+                let Some((_, why)) = tab.checking else { return };
+                // The engine's own check decides; the page saying it plays (the media
+                // player's report) can only add a reason to keep the tab.
+                let busy = busy || tab.media.playing();
+                if keeps(why, busy, false, true) {
+                    self.keep(id);
+                } else {
+                    self.probe(id, why);
+                }
+            }
+            UserEvent::Probed(id, out) => {
+                let Some((_, why)) = self.tab(id).and_then(|t| t.checking) else {
+                    return;
+                };
+                self.probed(id, parse_probe(&out), why);
+            }
             UserEvent::Found(id, found) => self.found(id, found),
             UserEvent::Downloads => self.downloads_changed(),
             UserEvent::Update(found) => {
@@ -1418,6 +2211,19 @@ impl App {
                     Err(e) => self.update_note = format!("Could not check for updates: {e}"),
                 }
                 self.sync();
+            }
+            UserEvent::Power => {
+                if self.refresh_power() {
+                    self.sync();
+                }
+            }
+            #[cfg(windows)]
+            UserEvent::Snap(what) => {
+                if what == "click" {
+                    self.window.set_maximized(!self.window.is_maximized());
+                }
+                let js = format!("window.wisp && wisp.snap('{what}')");
+                self.uis().for_each(|ui| drop(ui.evaluate_script(&js)));
             }
             UserEvent::AdblockReady => {
                 if adblock::REATTACH_AFTER_COMPILE {
@@ -1468,6 +2274,23 @@ fn install_menu() -> muda::Menu {
     menu
 }
 
+/// low-power: whether the mode is on. "auto" turns it on when the system is saving
+/// power, the battery is low, or the computer is weak.
+fn low_power(mode: &str, p: native::Power, cores: usize) -> bool {
+    match mode {
+        "on" => true,
+        "off" => false,
+        _ => p.saver || p.low_battery || weak_hardware(p.memory, cores),
+    }
+}
+
+/// 4 GB of memory or less, or two cores or fewer: where the interface's extras show.
+/// ponytail: a coarse cut. Upgrade path: a GPU check, if integrated graphics on an
+/// otherwise decent machine turn out to struggle with the texture and glass.
+fn weak_hardware(memory: u64, cores: usize) -> bool {
+    (memory > 0 && memory <= 4 << 30) || cores <= 2
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let private_window = std::env::args().any(|a| a == "--private");
     let cfg = Config::load();
@@ -1485,6 +2308,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_title("Wisp")
         .with_inner_size(LogicalSize::new(1280.0, 820.0))
         .with_min_inner_size(LogicalSize::new(560.0, 360.0));
+    // Development: WISP_SIZE=<width>x<height> opens the window at that size.
+    #[cfg(debug_assertions)]
+    let builder = match std::env::var("WISP_SIZE").ok().and_then(|v| {
+        let (w, h) = v.split_once('x')?;
+        Some((w.parse::<f64>().ok()?, h.parse::<f64>().ok()?))
+    }) {
+        Some((w, h)) => builder.with_inner_size(LogicalSize::new(w, h)),
+        None => builder,
+    };
+    // Windows: no title bar of its own. The interface's first row is the title bar and
+    // draws the window buttons; the system keeps the shadow, the side and bottom resize
+    // edges, snapping and rounded corners (see Msg::Minimize and #caption in ui.html).
+    #[cfg(windows)]
+    let builder = {
+        use tao::platform::windows::WindowBuilderExtWindows;
+        builder
+            .with_decorations(false)
+            .with_undecorated_shadow(true)
+    };
     #[cfg(target_os = "macos")]
     let builder = {
         // The interface runs under the title bar; the traffic lights sit on top of it
@@ -1515,15 +2357,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         next_id: 1,
         insets: None,
         glide: None,
+        groups: Vec::new(),
+        preview: None,
+        gap: 8.0,
+        on_screen: Vec::new(),
         float_insets: [0.0; 4],
         page_radius: 0.0,
         panel_insets: [0.0; 4],
         panel_radius: 0.0,
         glass: native::Glass::new(),
-        lights: [0.0; 2],
+        low: false,
+        solid: false,
+        poll_every: POLL,
+        lights: [0.0; 4],
         lights_peek: None,
-        lights_at: [0.0; 2],
-        settings_open: false,
+        #[cfg(target_os = "macos")]
+        lights_at: [0.0; 4],
+        #[cfg(windows)]
+        snap: None,
+        settings_from: None,
+        overlay: Default::default(),
         cover: false,
         peek: false,
         bar_busy: false,
@@ -1535,30 +2388,65 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         store: store::Store::load(config::dir(), private_window),
         started: false,
         quit: false,
+        maximized: false,
         downloads: Default::default(),
         find_last: None,
     };
+    app.refresh_power();
+    let power_proxy = app.proxy.clone();
+    native::on_power_change(move || drop(power_proxy.send_event(UserEvent::Power)));
+    #[cfg(windows)]
+    {
+        let proxy = app.proxy.clone();
+        app.snap = native::SnapButton::new(&app.window, move |what| {
+            let _ = proxy.send_event(UserEvent::Snap(what));
+        });
+    }
     app.apply_theme();
     app.layout();
     app.recompile_adblock(); // tabs open once the block list is ready (AdblockReady)
 
-    #[cfg(all(target_os = "macos", debug_assertions))]
+    #[cfg(debug_assertions)]
     let launched = Instant::now();
     let mut next_update_check = Instant::now() + Duration::from_secs(5);
+    let mut release_overlay_at = None;
     event_loop.run(move |event, _, control_flow| {
         match event {
             Event::UserEvent(e) => app.handle(e),
             Event::WindowEvent {
                 event: WindowEvent::Resized(_),
                 ..
-            } => app.layout(),
+            } => {
+                app.close_menu();
+                app.layout();
+                app.place_lights(); // Windows: in physical pixels, so again after a scale change
+                let max = app.window.is_maximized();
+                if max != app.maximized {
+                    app.maximized = max;
+                    app.sync(); // the restore/maximize button changes
+                }
+            }
+            Event::WindowEvent {
+                event: WindowEvent::ScaleFactorChanged { .. },
+                ..
+            } => app.place_lights(),
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
                 ..
             } => app.quit = true,
+            // low-power: the system's switches send nothing we listen to; re-read them
+            // when the user comes back to the window.
+            Event::WindowEvent {
+                event: WindowEvent::Focused(true),
+                ..
+            } => app.handle(UserEvent::Power),
             Event::MainEventsCleared => {
+                release_overlay_at = app.release_overlay();
                 app.tick();
                 app.poll_cursor();
+                if app.next_unload().is_some_and(|at| Instant::now() >= at) {
+                    app.unload_idle();
+                }
                 if app.started && Instant::now() >= next_update_check {
                     next_update_check = Instant::now() + UPDATE_EVERY;
                     app.check_update(false);
@@ -1566,25 +2454,51 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Development: WISP_PEEK=1 reveals the collapsed bar after 3s and holds it;
                 // WISP_ACT=<action> runs an action after 3s; WISP_JS=<script> runs in the
                 // interface after 4s;
-                // WISP_SHOT=/path.png saves a picture of the window after 6s and quits.
-                #[cfg(all(target_os = "macos", debug_assertions))]
+                // WISP_SHOT=/path.png (macOS) saves a picture of the window after 6s (or
+                // WISP_SHOT_AT=<secs>) and quits; on Windows,
+                // .github/workflows/windows-shots.yml captures the screen instead.
+                #[cfg(debug_assertions)]
                 {
                     let after = |secs| launched.elapsed() > Duration::from_secs(secs);
                     if std::env::var_os("WISP_PEEK").is_some() && after(3) && !app.hold_peek {
                         app.hold_peek = true;
                         app.set_peek(true);
                     }
-                    if let Some(name) = std::env::var("WISP_ACT").ok().filter(|_| after(3)) {
+                    // WISP_ACT may also list actions with when to run them: "next_tab@5,back@9".
+                    if let Ok(acts) = std::env::var("WISP_ACT") {
+                        let mut left = Vec::new();
+                        for act in acts.split(',') {
+                            let (name, at) = act.split_once('@').unwrap_or((act, "3"));
+                            if after(at.parse().unwrap_or(3)) {
+                                app.action(name);
+                            } else {
+                                left.push(act);
+                            }
+                        }
                         // SAFETY: single-threaded here; nothing else reads the environment.
-                        unsafe { std::env::remove_var("WISP_ACT") };
-                        app.action(&name);
+                        unsafe { std::env::set_var("WISP_ACT", left.join(",")) };
+                        if left.is_empty() {
+                            unsafe { std::env::remove_var("WISP_ACT") };
+                        }
                     }
                     if let Some(js) = std::env::var("WISP_JS").ok().filter(|_| after(4)) {
                         // SAFETY: as above.
                         unsafe { std::env::remove_var("WISP_JS") };
                         let _ = app.chrome.evaluate_script(&js);
                     }
-                    if let Some(path) = std::env::var_os("WISP_SHOT").filter(|_| after(6)) {
+                    // WISP_OJS=<script>: the same in the overlay copy, after 5s.
+                    if let Some(js) = std::env::var("WISP_OJS").ok().filter(|_| after(5)) {
+                        // SAFETY: as above.
+                        unsafe { std::env::remove_var("WISP_OJS") };
+                        if let Some(f) = &app.floater {
+                            let _ = f.evaluate_script(&js);
+                        }
+                    }
+                    #[cfg(target_os = "macos")]
+                    if let Some(path) = std::env::var_os("WISP_SHOT").filter(|_| {
+                        let at = std::env::var("WISP_SHOT_AT").ok();
+                        after(at.and_then(|s| s.parse().ok()).unwrap_or(6))
+                    }) {
                         use tao::platform::macos::WindowExtMacOS;
                         let ok = debug_shot::save(app.window.ns_window(), &path.to_string_lossy());
                         eprintln!("wisp: screenshot {}", if ok { "saved" } else { "FAILED" });
@@ -1609,9 +2523,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else if app.glide.is_some() {
             ControlFlow::WaitUntil(Instant::now() + FRAME)
         } else if app.cfg.layout.collapsed || cfg!(debug_assertions) {
-            ControlFlow::WaitUntil(Instant::now() + POLL)
+            ControlFlow::WaitUntil(Instant::now() + app.poll_every)
         } else {
-            ControlFlow::WaitUntil(next_update_check)
+            let mut at = release_overlay_at.map_or(next_update_check, |r| r.min(next_update_check));
+            if let Some(unload) = app.next_unload() {
+                at = at.min(unload);
+            }
+            ControlFlow::WaitUntil(at)
         };
     });
 }
@@ -1619,12 +2537,45 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        App, CLOSED_MAX, Side, Tab, Zone, ease_out, group_pinned, place_tab, remember_closed, zone,
+        App, CLOSED_MAX, Kind, PageMsg, Side, Tab, Why, Zone, ease_out, group_pinned, keeps,
+        low_power, origin, parse_probe, place_tab, remember_closed, same_origin, saved,
+        settings_tab, settings_to_web, unload_due, zone,
     };
+    use crate::native::Power;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn low_power_auto_follows_the_system() {
+        let gb = 1u64 << 30;
+        let fine = Power {
+            memory: 16 * gb,
+            ..Default::default()
+        };
+        assert!(!low_power("auto", fine, 8));
+        assert!(low_power("on", fine, 8));
+        let saver = Power {
+            saver: true,
+            ..fine
+        };
+        let low_battery = Power {
+            low_battery: true,
+            ..fine
+        };
+        assert!(low_power("auto", saver, 8) && low_power("auto", low_battery, 8));
+        assert!(!low_power("off", saver, 8));
+        let small = Power {
+            memory: 4 * gb,
+            ..fine
+        };
+        assert!(low_power("auto", small, 8) && low_power("auto", fine, 2));
+        let unknown = Power { memory: 0, ..fine };
+        assert!(!low_power("auto", unknown, 8));
+    }
 
     fn tab(id: u32, workspace: u32, pinned: bool) -> Tab {
         Tab {
             id,
+            kind: super::Kind::Web,
             workspace,
             private: false,
             pinned,
@@ -1632,7 +2583,12 @@ mod tests {
             title: String::new(),
             url: format!("https://example.com/{id}"),
             loading: false,
+            seen: Instant::now(),
+            checking: None,
+            settled: false,
+            wake: None,
             zoom: 1.0,
+            media: Default::default(),
         }
     }
 
@@ -1733,6 +2689,45 @@ mod tests {
     }
 
     #[test]
+    fn there_is_one_settings_tab_and_it_is_never_kept() {
+        let mut tabs = vec![tab(1, 1, false), tab(2, 2, false)];
+        let mut next = 3;
+        let id = settings_tab(&mut tabs, 1, false, &mut next);
+        assert_eq!((id, next, tabs.len()), (3, 4, 3));
+        assert_eq!(order(&tabs, 1), [1, 3]); // at the end of the workspace it was opened in
+        // Opening Settings again selects the same tab.
+        assert_eq!(settings_tab(&mut tabs, 1, false, &mut next), 3);
+        assert_eq!((next, tabs.len()), (4, 3));
+        // From another workspace, it comes along rather than a second one appearing.
+        assert_eq!(settings_tab(&mut tabs, 2, false, &mut next), 3);
+        assert_eq!((order(&tabs, 1), order(&tabs, 2)), (vec![1], vec![2, 3]));
+        let settings = tabs.iter().find(|t| t.id == 3).unwrap();
+        assert_eq!(settings.kind, Kind::Settings);
+        // Never saved (so not restored after a restart) and never offered to reopen.
+        assert!(!saved(settings) && saved(&tabs[0]));
+        let mut closed = Vec::new();
+        remember_closed(&mut closed, settings, 1);
+        assert!(closed.is_empty());
+    }
+
+    #[test]
+    fn in_a_private_window_settings_and_what_it_becomes_stay_private() {
+        let mut tabs = Vec::new();
+        let id = settings_tab(&mut tabs, 1, true, &mut 1);
+        assert!(tabs[0].private && tabs[0].id == id);
+        // Typing an address on it: a private web tab at the default zoom, never saved.
+        settings_to_web(&mut tabs[0], "https://example.com/".into(), 1.25, true);
+        let t = &tabs[0];
+        assert!(t.kind == Kind::Web && t.private && !saved(t));
+        assert_eq!((t.url.as_str(), t.zoom), ("https://example.com/", 1.25));
+        // Even if the Settings tab had somehow not been marked private.
+        let mut tabs = Vec::new();
+        settings_tab(&mut tabs, 1, false, &mut 1);
+        settings_to_web(&mut tabs[0], "https://example.com/".into(), 1.0, true);
+        assert!(tabs[0].private);
+    }
+
+    #[test]
     fn cycling_wraps_and_survives_a_missing_current() {
         let ids = [10, 20, 30];
         assert_eq!(App::cycle(&ids, Some(10), 1), Some(20));
@@ -1766,5 +2761,137 @@ mod tests {
         assert_eq!(ease_out(1.0), 1.0);
         assert_eq!(ease_out(7.0), 1.0);
         assert!(ease_out(0.25) > 0.6);
+    }
+
+    #[test]
+    fn which_tabs_may_be_unloaded_and_when() {
+        let min = Duration::from_secs(60);
+        let after = Some(30 * min);
+        let mut t = tab(1, 1, false);
+        t.seen = Instant::now() - 10 * min;
+        let due = |t: &Tab, loaded, active, after, pinned_too| {
+            unload_due(t, loaded, active, after, pinned_too)
+        };
+        // A loaded background tab is due 30 minutes after it was last seen.
+        assert_eq!(
+            due(&t, true, Some(2), after, false),
+            Some(t.seen + 30 * min)
+        );
+        assert_eq!(due(&t, true, None, after, false), Some(t.seen + 30 * min));
+        // Never: unloading switched off, the tab on screen, not loaded, being checked.
+        assert_eq!(due(&t, true, Some(2), None, false), None);
+        assert_eq!(due(&t, true, Some(1), after, false), None);
+        assert_eq!(due(&t, false, Some(2), after, false), None);
+        t.checking = Some((Instant::now(), Why::Idle));
+        assert_eq!(due(&t, true, Some(2), after, false), None);
+        t.checking = None;
+        // Private: never on its own (its sign-ins live only in its page).
+        t.private = true;
+        assert_eq!(due(&t, true, Some(2), after, true), None);
+        t.private = false;
+        // Pinned: only when the setting allows it.
+        t.pinned = true;
+        assert_eq!(due(&t, true, Some(2), after, false), None);
+        assert_eq!(due(&t, true, Some(2), after, true), Some(t.seen + 30 * min));
+        // The Settings tab has no page to give back, whatever is claimed about it.
+        t.kind = Kind::Settings;
+        assert_eq!(due(&t, true, Some(2), after, true), None);
+    }
+
+    #[test]
+    fn what_keeps_a_tab_loaded() {
+        // keeps(why, busy, edited, idle)
+        assert!(!keeps(Why::Idle, false, false, true));
+        assert!(keeps(Why::Idle, true, false, true)); // playing, or in a call
+        assert!(keeps(Why::Idle, false, true, true)); // typed text (or no answer)
+        assert!(keeps(Why::Idle, false, false, false)); // looked at while being checked
+        assert!(!keeps(Why::Others, false, false, false)); // no wait for the menu command
+        assert!(keeps(Why::Others, true, false, false));
+        assert!(keeps(Why::Others, false, true, false));
+        assert!(!keeps(Why::Asked, true, true, false)); // the user picked this tab
+    }
+
+    #[test]
+    fn only_a_well_formed_probe_answer_lets_a_tab_go() {
+        // The engine hands over the script's string as JSON.
+        assert_eq!(parse_probe(r#""0,0,2000""#), Some((false, 0, 2000)));
+        assert_eq!(parse_probe(r#""1,-5,12""#), Some((true, -5, 12)));
+        // Anything else keeps the tab: the script's own fallback, a page that broke it,
+        // no answer, junk.
+        for bad in [
+            r#""keep""#,
+            r#""2,0,0""#,
+            r#""0,0""#,
+            r#""0,0,0,0""#,
+            r#""0,NaN,0""#,
+            r#""0,1.5,0""#,
+            r#""true,0,0""#,
+            r#""0,99999999999,0""#,
+            "[false,0,0]",
+            "0",
+            "null",
+            "",
+            "\"0,0,0",
+        ] {
+            assert_eq!(parse_probe(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_page_can_send_only_keys_and_media() {
+        let page = |body| serde_json::from_str::<PageMsg>(body);
+        for forged in [
+            r#"{"cmd":"close_tab","id":1}"#,
+            r#"{"cmd":"navigate","url":"https://example.com"}"#,
+            r#"{"cmd":"select_tab","id":1}"#,
+            r#"{"cmd":"action","name":"private_window"}"#,
+            r#"{"cmd":"media","pos":"x"}"#,
+            "not json",
+        ] {
+            assert!(page(forged).is_err(), "{forged}");
+        }
+        assert!(matches!(
+            page(r#"{"cmd":"key","combo":"Mod+T"}"#),
+            Ok(PageMsg::Key { .. })
+        ));
+        // A click only asks the app to check the focus with the system.
+        assert!(matches!(page(r#"{"cmd":"focus"}"#), Ok(PageMsg::Focus)));
+        // A button press shaped like the interface's is just an empty report from the page.
+        assert!(matches!(
+            page(r#"{"cmd":"media","id":3,"op":"dismiss"}"#),
+            Ok(PageMsg::Media(_))
+        ));
+    }
+
+    #[test]
+    fn only_the_tabs_own_document_may_speak_for_it() {
+        let tab = "https://bank.example/account?x=1#top";
+        assert!(same_origin("https://bank.example/", tab));
+        assert!(same_origin("https://bank.example/other/page", tab));
+        // Frames of other sites, and lookalikes, do not count.
+        for other in [
+            "https://ads.example/frame",
+            "http://bank.example/",
+            "https://bank.example:8443/",
+            "https://bank.example.evil.test/",
+            "https://bank.example@evil.test/",
+            "about:blank",
+            "about:srcdoc",
+            "file:///bank.example/",
+            "data:text/html,hi",
+            "",
+        ] {
+            assert!(!same_origin(other, tab), "{other}");
+        }
+        // Without an origin (a blank tab, a local file) only that same document counts.
+        assert!(same_origin("about:blank", "about:blank"));
+        assert!(same_origin("file:///a.html", "file:///a.html#x"));
+        assert!(!same_origin("file:///b.html", "file:///a.html"));
+        assert!(!same_origin("about:srcdoc", "about:blank"));
+        assert_eq!(
+            origin("https://a.example:1/b?c"),
+            Some("https://a.example:1")
+        );
+        assert_eq!(origin("https://a.example?q"), Some("https://a.example"));
     }
 }

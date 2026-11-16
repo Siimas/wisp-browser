@@ -31,9 +31,11 @@ Private tabs show a fixed icon and make no such request.
 ## Requests that follow from what you do
 
 - **Pages you visit** are loaded by the system web engine, and those sites see
-  what any browser shows them.
+  what any browser shows them. A tab that was unloaded to save memory (Settings >
+  Tabs and browsing > Performance) loads its page again from the site when you
+  come back to it.
 - **Searches**: text typed in the address bar that is not an address is sent to
-  your search engine when you press Enter (DuckDuckGo by default, changeable in
+  your search engine when you press Enter (Google by default, changeable in
   Settings). Nothing is sent while you type: the suggestions under the address
   bar come only from your own open tabs, bookmarks and history
   (`src/store.rs`), never from a search engine.
@@ -41,7 +43,7 @@ Private tabs show a fixed icon and make no such request.
   the site that offers it. Wisp makes no request of its own for it.
 - **Find in page** searches the page on your computer. What you type in the find
   bar is not sent anywhere and is not kept.
-- **Home page**: a new window opens your home page (DuckDuckGo by default).
+- **Home page**: a new window opens your home page (Google by default).
 - **Release notes and licenses**: after an update, and when you press View next
   to Open-source licenses, Wisp opens a page on github.com in a tab.
 
@@ -72,6 +74,11 @@ Private tabs show a fixed icon and make no such request.
 - Files you download, in your Downloads folder. The list of downloads shown in
   the toolbar (file name, the site it came from, and whether it finished) is
   held in memory only and is gone when Wisp quits.
+- Unloaded tabs: before unloading a tab, Wisp asks the page on your computer
+  whether text was typed into it (to keep it loaded if so) and where it is
+  scrolled to. The scroll position is held in memory only, to put the page back
+  there, and is gone when Wisp quits. Nothing about unloading is written to disk
+  apart from its two settings in `config.json`.
 - Private tabs and private windows keep nothing on disk and are left out of the
   saved session and of history. A private window can read your history and
   bookmarks to suggest addresses, but cannot change them, and private tabs are

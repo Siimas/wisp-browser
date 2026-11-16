@@ -118,6 +118,22 @@ mod imp {
         let _ = webview.reparent(window.ns_window().cast());
     }
 
+    /// Does the page view hold the keyboard focus (is it, or something inside it, the
+    /// window's first responder)?
+    pub fn is_focused(webview: &WebView, window: &Window) -> bool {
+        let view = webview.webview();
+        // SAFETY: main-thread messages to the live window and views.
+        unsafe {
+            let responder: *mut AnyObject =
+                msg_send![window.ns_window() as *mut AnyObject, firstResponder];
+            let Some(class) = AnyClass::get(c"NSView").filter(|_| !responder.is_null()) else {
+                return false;
+            };
+            let is_view: bool = msg_send![responder, isKindOfClass: class];
+            is_view && msg_send![responder, isDescendantOf: &*view]
+        }
+    }
+
     /// The system web engine reports no browser name, and sites such as Google then
     /// serve a stripped-down legacy page. It is the same engine as the installed
     /// Safari, so identify as that Safari version.
@@ -175,6 +191,33 @@ mod imp {
 
     /// Nothing to end: WebKit's find leaves the last match selected, as Safari does.
     pub fn find_stop(_webview: &WebView) {}
+
+    /// Is the page making sound, or using the camera or microphone? A muted or silent
+    /// video does not count. An older system that cannot say counts as busy, so
+    /// nothing that might be playing is unloaded.
+    /// (WebKit's public `requestMediaPlaybackState` does not answer this: it reports
+    /// whether the app paused the page's media, and says "playing" for any page with
+    /// a video on it. `_isPlayingAudio` is what Safari's tab speaker icon follows.)
+    pub fn media_busy(webview: &WebView, done: impl Fn(bool)) {
+        let view = webview.webview();
+        // SAFETY: main-thread messages to a live WKWebView, each checked to exist
+        // first (the capture states since macOS 12).
+        let busy = unsafe {
+            let has = |sel| -> bool { msg_send![&*view, respondsToSelector: sel] };
+            if !has(sel!(_isPlayingAudio)) || !has(sel!(cameraCaptureState)) {
+                return done(true);
+            }
+            let audio: bool = msg_send![&*view, _isPlayingAudio];
+            // WKMediaCaptureState: 0 none, 1 active, 2 muted (still in the call).
+            let camera: isize = msg_send![&*view, cameraCaptureState];
+            let microphone: isize = msg_send![&*view, microphoneCaptureState];
+            audio || camera != 0 || microphone != 0
+        };
+        done(busy)
+    }
+
+    /// WebKit lowers a hidden page's priority by itself.
+    pub fn set_background(_webview: &WebView, _background: bool) {}
 
     thread_local! {
         /// The page view whose right-click menu was opened last.
@@ -315,6 +358,89 @@ mod imp {
             _ => false,
         }
     }
+
+    // ---- low power: what the system says, read when asked (each read is cheap) ----
+
+    #[link(name = "IOKit", kind = "framework")]
+    unsafe extern "C" {
+        fn IOPSGetBatteryWarningLevel() -> i32;
+        fn IOPSNotificationCreateRunLoopSource(
+            callback: extern "C" fn(*mut std::ffi::c_void),
+            context: *mut std::ffi::c_void,
+        ) -> *mut std::ffi::c_void;
+    }
+    #[link(name = "CoreFoundation", kind = "framework")]
+    unsafe extern "C" {
+        static kCFRunLoopCommonModes: *const std::ffi::c_void;
+        fn CFRunLoopGetMain() -> *mut std::ffi::c_void;
+        fn CFRunLoopAddSource(
+            rl: *mut std::ffi::c_void,
+            source: *mut std::ffi::c_void,
+            mode: *const std::ffi::c_void,
+        );
+    }
+    unsafe extern "C" {
+        fn sysctlbyname(
+            name: *const std::ffi::c_char,
+            old: *mut std::ffi::c_void,
+            len: *mut usize,
+            new: *const std::ffi::c_void,
+            newlen: usize,
+        ) -> i32;
+    }
+
+    pub fn power() -> Power {
+        // SAFETY: plain reads of system state, on the main thread for the AppKit ones;
+        // isLowPowerModeEnabled exists since macOS 12, checked before it is sent.
+        unsafe {
+            let info: *mut AnyObject =
+                msg_send![AnyClass::get(c"NSProcessInfo").unwrap(), processInfo];
+            let saver = msg_send![info, respondsToSelector: sel!(isLowPowerModeEnabled)]
+                && msg_send![info, isLowPowerModeEnabled];
+            let ws: *mut AnyObject =
+                msg_send![AnyClass::get(c"NSWorkspace").unwrap(), sharedWorkspace];
+            let reduce_transparency = msg_send![ws, accessibilityDisplayShouldReduceTransparency];
+            // Early (2) or final (3) warning: on battery and below about 20%.
+            let low_battery = IOPSGetBatteryWarningLevel() >= 2;
+            let (mut memory, mut len) = (0u64, size_of::<u64>());
+            sysctlbyname(
+                c"hw.memsize".as_ptr(),
+                (&raw mut memory).cast(),
+                &mut len,
+                std::ptr::null(),
+                0,
+            );
+            Power {
+                saver,
+                low_battery,
+                memory,
+                reduce_transparency,
+            }
+        }
+    }
+
+    thread_local! {
+        static ON_POWER: std::cell::RefCell<Option<Box<dyn Fn()>>> = const { std::cell::RefCell::new(None) };
+    }
+
+    extern "C" fn power_changed(_: *mut std::ffi::c_void) {
+        ON_POWER.with_borrow(|f| f.as_ref().map(|f| f()));
+    }
+
+    /// Call `f` when the power source or battery level changes (the system tells us; no
+    /// polling). The system's low-power and accessibility switches send nothing here:
+    /// they are read again when the window regains focus.
+    pub fn on_power_change(f: impl Fn() + 'static) {
+        ON_POWER.set(Some(Box::new(f)));
+        // SAFETY: a run-loop source on the main run loop, which this (main) thread runs;
+        // it lives for the rest of the process.
+        unsafe {
+            let source = IOPSNotificationCreateRunLoopSource(power_changed, std::ptr::null_mut());
+            if !source.is_null() {
+                CFRunLoopAddSource(CFRunLoopGetMain(), source, kCFRunLoopCommonModes);
+            }
+        }
+    }
 }
 
 #[cfg(windows)]
@@ -327,17 +453,164 @@ mod imp {
         Microsoft::Web::WebView2::Win32::{
             COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_COMMAND,
             COREWEBVIEW2_CONTEXT_MENU_TARGET_KIND_IMAGE,
-            COREWEBVIEW2_CONTEXT_MENU_TARGET_KIND_PAGE, ICoreWebView2_11, ICoreWebView2_28,
-            ICoreWebView2Environment9, ICoreWebView2Environment15,
+            COREWEBVIEW2_CONTEXT_MENU_TARGET_KIND_PAGE, ICoreWebView2_8, ICoreWebView2_11,
+            ICoreWebView2_28, ICoreWebView2Environment9, ICoreWebView2Environment15,
         },
         take_pwstr,
     };
     use windows::Win32::System::Com::IStream;
     use windows::Win32::UI::WindowsAndMessaging::{
-        HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos,
+        GUITHREADINFO, GetGUIThreadInfo, HWND_TOP, IsChild, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+        SetWindowPos,
     };
     use windows_core::{BOOL, HSTRING, Interface, PWSTR};
     use wry::WebViewExtWindows;
+
+    // ---- the maximize button, as the system sees it ----
+
+    use std::cell::{Cell, RefCell};
+    use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
+    use windows::Win32::Graphics::Gdi::ScreenToClient;
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        TME_LEAVE, TME_NONCLIENT, TRACKMOUSEEVENT, TrackMouseEvent,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DefWindowProcW, GetParent, HTMAXBUTTON, HTTOP, IsZoomed, PostMessageW,
+        RegisterClassW, WINDOW_EX_STYLE, WM_NCHITTEST, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP,
+        WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WNDCLASSW, WS_CHILD, WS_CLIPSIBLINGS, WS_VISIBLE,
+    };
+
+    type SnapSend = Option<Box<dyn Fn(&'static str)>>;
+    thread_local! {
+        static SNAP_SEND: RefCell<SnapSend> = const { RefCell::new(None) };
+        static SNAP_HOVER: Cell<bool> = const { Cell::new(false) };
+        static SNAP_PRESSED: Cell<bool> = const { Cell::new(false) };
+        /// It lies along the window's top edge (not on a floating bar further down).
+        static SNAP_AT_TOP: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// Windows 11 offers its snap layouts while the pointer rests on a window's maximize
+    /// button, which it finds by asking the window what lies under the pointer. The
+    /// interface draws that button inside a web view the system cannot ask, so this
+    /// small window, drawing nothing, lies over it and answers "the maximize button".
+    /// What happens on it (hover, press, leave, click) goes to `on`, for the interface
+    /// to show and the app to act on.
+    pub struct SnapButton(HWND);
+
+    impl SnapButton {
+        pub fn new(window: &Window, on: impl Fn(&'static str) + 'static) -> Option<Self> {
+            use tao::platform::windows::WindowExtWindows;
+            SNAP_SEND.set(Some(Box::new(on)));
+            let class = windows_core::w!("WispSnapButton");
+            // SAFETY: registering a class and creating a child of our own live window.
+            unsafe {
+                let instance = GetModuleHandleW(None).ok()?.into();
+                RegisterClassW(&WNDCLASSW {
+                    lpfnWndProc: Some(snap_proc),
+                    hInstance: instance,
+                    lpszClassName: class,
+                    ..Default::default()
+                });
+                let style = WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS;
+                let parent = HWND(window.hwnd() as _);
+                CreateWindowExW(
+                    WINDOW_EX_STYLE(0),
+                    class,
+                    None,
+                    style,
+                    0,
+                    0,
+                    0,
+                    0,
+                    Some(parent),
+                    None,
+                    Some(instance),
+                    None,
+                )
+                .ok()
+                .map(Self)
+            }
+        }
+
+        /// Lie over `rect` (left, top, width, height in logical pixels), above the web views.
+        pub fn place(&self, [l, t, w, h]: [f64; 4], scale: f64) {
+            let p = |v: f64| (v * scale).round() as i32;
+            let (x, y) = (p(l), p(t));
+            SNAP_AT_TOP.set(y == 0);
+            // SAFETY: plain Win32 call on our own live window.
+            let _ = unsafe {
+                SetWindowPos(
+                    self.0,
+                    Some(HWND_TOP),
+                    x,
+                    y,
+                    p(l + w) - x,
+                    p(t + h) - y,
+                    SWP_NOACTIVATE,
+                )
+            };
+        }
+    }
+
+    unsafe extern "system" fn snap_proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
+        let send = |what| SNAP_SEND.with_borrow(|f| f.as_ref().map(|f| f(what)));
+        // SAFETY (whole body): Win32 calls on this window and its parent, from its own thread.
+        unsafe {
+            match msg {
+                WM_NCHITTEST => {
+                    // Its top few pixels are still the window's top edge, as everywhere else
+                    // along the top (see #rim in ui.html), unless maximized or it is not
+                    // at the top (on a revealed top bar).
+                    let mut pt = POINT {
+                        x: (l.0 & 0xffff) as i16 as i32,
+                        y: ((l.0 >> 16) & 0xffff) as i16 as i32,
+                    };
+                    let _ = ScreenToClient(hwnd, &mut pt);
+                    let parent = GetParent(hwnd).unwrap_or_default();
+                    let rim = (5 * windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd)) as i32 / 96;
+                    let top = SNAP_AT_TOP.get() && pt.y < rim && !IsZoomed(parent).as_bool();
+                    LRESULT((if top { HTTOP } else { HTMAXBUTTON }) as isize)
+                }
+                WM_NCLBUTTONDOWN if w.0 == HTTOP as usize => {
+                    let parent = GetParent(hwnd).unwrap_or_default();
+                    let _ = PostMessageW(Some(parent), msg, w, l); // resize the window, not this
+                    LRESULT(0)
+                }
+                WM_NCMOUSEMOVE => {
+                    let mut track = TRACKMOUSEEVENT {
+                        cbSize: size_of::<TRACKMOUSEEVENT>() as u32,
+                        dwFlags: TME_LEAVE | TME_NONCLIENT,
+                        hwndTrack: hwnd,
+                        dwHoverTime: 0,
+                    };
+                    let _ = TrackMouseEvent(&mut track);
+                    if w.0 == HTMAXBUTTON as usize && !SNAP_HOVER.replace(true) {
+                        send("hover");
+                    } else if w.0 != HTMAXBUTTON as usize && SNAP_HOVER.replace(false) {
+                        send("leave");
+                    }
+                    LRESULT(0)
+                }
+                WM_NCMOUSELEAVE => {
+                    SNAP_HOVER.set(false);
+                    SNAP_PRESSED.set(false);
+                    send("leave");
+                    LRESULT(0)
+                }
+                WM_NCLBUTTONDOWN => {
+                    SNAP_PRESSED.set(true);
+                    send("press");
+                    LRESULT(0)
+                }
+                WM_NCLBUTTONUP if SNAP_PRESSED.replace(false) => {
+                    send("click");
+                    LRESULT(0)
+                }
+                _ => DefWindowProcW(hwnd, msg, w, l),
+            }
+        }
+    }
 
     // ponytail: square page corners on Windows. Upgrade path: SetWindowRgn with a
     // rounded region, re-applied on every resize.
@@ -347,6 +620,21 @@ mod imp {
         let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
         // SAFETY: plain Win32 call on the webview's own live window.
         let _ = unsafe { SetWindowPos(webview.hwnd(), Some(HWND_TOP), 0, 0, 0, 0, flags) };
+    }
+
+    /// Does the page hold the keyboard focus? The focused window of the foreground
+    /// thread (WebView2 draws pages in windows of its own process) lies inside its view.
+    pub fn is_focused(webview: &WebView, _window: &Window) -> bool {
+        let mut info = GUITHREADINFO {
+            cbSize: size_of::<GUITHREADINFO>() as u32,
+            ..Default::default()
+        };
+        let host = webview.hwnd();
+        // SAFETY: plain Win32 calls with a properly sized struct.
+        unsafe {
+            GetGUIThreadInfo(0, &mut info).is_ok()
+                && (info.hwndFocus == host || IsChild(host, info.hwndFocus).as_bool())
+        }
     }
 
     /// WebView2 already identifies as a full Chromium browser.
@@ -412,6 +700,28 @@ mod imp {
         }
     }
 
+    /// Is the page making sound? WebView2 does not say whether the camera or
+    /// microphone is in use, so a call where everyone is silent counts as idle.
+    /// Untested: written without a Windows machine at hand.
+    pub fn media_busy(webview: &WebView, done: impl Fn(bool)) {
+        let mut playing = BOOL(1);
+        // SAFETY: COM call on the live webview, on its own thread.
+        let asked = unsafe {
+            webview
+                .webview()
+                .cast::<ICoreWebView2_8>()
+                .and_then(|w| w.IsDocumentPlayingAudio(&mut playing))
+        };
+        done(asked.is_err() || playing.as_bool()); // unknown counts as playing
+    }
+
+    /// A hidden page asks WebView2 to keep less in memory (it may page some out); a
+    /// cheap first step before unloading. Untested, like `media_busy`.
+    pub fn set_background(webview: &WebView, background: bool) {
+        use wry::MemoryUsageLevel::{Low, Normal};
+        let _ = webview.set_memory_usage_level(if background { Low } else { Normal });
+    }
+
     /// Add link and image entries to the top of WebView2's right-click menu. A chosen
     /// entry calls `pick(address, private)`: the address comes from WebView2 itself
     /// (what was under the cursor), and the call from the user's click on a native
@@ -475,6 +785,34 @@ mod imp {
     pub fn take_private(_webview: &WebView) -> bool {
         false
     }
+
+    pub fn power() -> Power {
+        use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
+        use windows::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+        let mut st = SYSTEM_POWER_STATUS::default();
+        let mut mem = MEMORYSTATUSEX {
+            dwLength: size_of::<MEMORYSTATUSEX>() as u32,
+            ..Default::default()
+        };
+        // SAFETY: plain Win32 reads into structs we own.
+        let (have_st, have_mem) = unsafe {
+            (
+                GetSystemPowerStatus(&mut st).is_ok(),
+                GlobalMemoryStatusEx(&mut mem).is_ok(),
+            )
+        };
+        Power {
+            saver: have_st && st.SystemStatusFlag == 1,
+            // On battery (0) at 20% or less (255 = unknown).
+            low_battery: have_st && st.ACLineStatus == 0 && st.BatteryLifePercent <= 20,
+            memory: if have_mem { mem.ullTotalPhys } else { 0 },
+            reduce_transparency: false, // no glass on Windows to reduce
+        }
+    }
+
+    // ponytail: Windows re-reads on focus only. Upgrade path: WM_POWERBROADCAST via a
+    // window subclass, if a plugged-in laptop should switch while Wisp is in front.
+    pub fn on_power_change(_f: impl Fn() + 'static) {}
 }
 
 #[cfg(not(any(target_os = "macos", windows)))]
@@ -482,6 +820,9 @@ mod imp {
     use super::*;
     pub fn round_corners(_webview: &WebView, _radius: f64) {}
     pub fn raise(_webview: &WebView, _window: &Window) {}
+    pub fn is_focused(_webview: &WebView, _window: &Window) -> bool {
+        false
+    }
     pub fn user_agent() -> Option<String> {
         None
     }
@@ -494,16 +835,37 @@ mod imp {
     ) {
     }
     pub fn find_stop(_webview: &WebView) {}
+    pub fn media_busy(_webview: &WebView, done: impl Fn(bool)) {
+        done(true)
+    }
+    pub fn set_background(_webview: &WebView, _background: bool) {}
     pub fn page_menu(_webview: &WebView, _pick: impl Fn(String, bool)) {}
     pub fn take_private(_webview: &WebView) -> bool {
         false
     }
+    pub fn power() -> Power {
+        Power::default()
+    }
+    pub fn on_power_change(_f: impl Fn() + 'static) {}
 }
 
 /// What a search of the page came to. `count` only where the platform counts matches.
 pub struct Found {
     pub found: bool,
     pub count: Option<u32>,
+}
+
+/// What the system says about power and display preferences, for low-power mode.
+#[derive(Default, Clone, Copy, PartialEq, Debug)]
+pub struct Power {
+    /// The system's own low-power mode (macOS) or battery saver (Windows) is on.
+    pub saver: bool,
+    /// On battery and running low (about 20% or less).
+    pub low_battery: bool,
+    /// Physical memory in bytes, 0 if unknown.
+    pub memory: u64,
+    /// The system asks for less transparency (macOS accessibility).
+    pub reduce_transparency: bool,
 }
 
 /// No frosted glass off macOS yet: the floating bar stays opaque there.
@@ -522,4 +884,9 @@ impl Glass {
 
 #[cfg(target_os = "macos")]
 pub use imp::Glass;
-pub use imp::{find, find_stop, page_menu, raise, round_corners, take_private, user_agent};
+#[cfg(windows)]
+pub use imp::SnapButton;
+pub use imp::{
+    find, find_stop, is_focused, media_busy, on_power_change, page_menu, power, raise,
+    round_corners, set_background, take_private, user_agent,
+};
