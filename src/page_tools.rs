@@ -60,17 +60,23 @@ fn unique_path(dir: &Path, name: &str, taken: impl Fn(&Path) -> bool) -> PathBuf
 
 impl Downloads {
     /// A download of `url` is starting. `suggested` is where the web engine would put
-    /// it (a file name inside the user's Downloads folder); the answer is where it
-    /// goes: the same folder, under a name no file or running download has.
+    /// it; only its last part, the file name, is believed (the server has a say in it).
     fn start(&mut self, url: &str, suggested: &Path) -> PathBuf {
         let home = std::env::home_dir().unwrap_or_default();
+        // The folder is ours to choose. On Windows the Downloads folder can be moved,
+        // and WebView2 itself (not the page) says where it is; elsewhere it is fixed.
         let dir = match suggested.parent() {
-            Some(dir) if dir.is_absolute() => dir.to_path_buf(),
+            Some(dir) if cfg!(windows) && dir.is_absolute() => dir.to_path_buf(),
             _ => home.join("Downloads"),
         };
-        let _ = std::fs::create_dir_all(&dir);
         let name = suggested.file_name().and_then(|n| n.to_str());
-        let path = unique_path(&dir, name.unwrap_or("download"), |p| {
+        self.start_in(&dir, url, name.unwrap_or("download"))
+    }
+
+    /// The download goes into `dir`, under a name no file or running download has.
+    fn start_in(&mut self, dir: &Path, url: &str, name: &str) -> PathBuf {
+        let _ = std::fs::create_dir_all(dir);
+        let path = unique_path(dir, name, |p| {
             p.exists() || self.items.iter().any(|d| d.path == p)
         });
         self.next_id += 1;
@@ -265,8 +271,8 @@ mod tests {
         let url = "https://files.example.com/report.pdf";
         // Two downloads of the same file while one copy is on disk: neither has
         // written anything yet, and still each gets its own name.
-        let first = list.start(url, &dir.join("report.pdf"));
-        let second = list.start(url, &dir.join("report.pdf"));
+        let first = list.start_in(&dir, url, "report.pdf");
+        let second = list.start_in(&dir, url, "../report.pdf");
         assert_eq!(first, dir.join("report (1).pdf"));
         assert_eq!(second, dir.join("report (2).pdf"));
         assert_eq!(

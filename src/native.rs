@@ -348,7 +348,8 @@ mod imp {
     // ---- page tools: find in page, and the page's right-click menu ----
 
     /// Find `query` with WebView2's own find (it highlights every match and counts
-    /// them), without its dialog. An older WebView2 without it searches by script.
+    /// them), without its dialog. An older WebView2 without it finds nothing: searching
+    /// by page script instead would let the page see what is being searched for.
     pub fn find(
         webview: &WebView,
         query: &str,
@@ -386,9 +387,7 @@ mod imp {
                 find.Start(&options, &started)
             }
         };
-        if native().is_err() {
-            find_by_script(webview, query, back);
-        }
+        let _ = native();
     }
 
     pub fn find_stop(webview: &WebView) {
@@ -477,8 +476,13 @@ mod imp {
     pub fn user_agent() -> Option<String> {
         None
     }
-    pub fn find(webview: &WebView, query: &str, back: bool, _fresh: bool, _done: impl Fn(Found)) {
-        find_by_script(webview, query, back);
+    pub fn find(
+        _webview: &WebView,
+        _query: &str,
+        _back: bool,
+        _fresh: bool,
+        _done: impl Fn(Found),
+    ) {
     }
     pub fn find_stop(_webview: &WebView) {}
     pub fn page_menu(_webview: &WebView, _pick: impl Fn(String, bool)) {}
@@ -491,14 +495,6 @@ mod imp {
 pub struct Found {
     pub found: bool,
     pub count: Option<u32>,
-}
-
-/// Find in page without a platform API: the page's own `window.find`, run by the app.
-/// It selects the match and scrolls to it, and reports nothing back.
-#[cfg(not(target_os = "macos"))]
-fn find_by_script(webview: &WebView, query: &str, back: bool) {
-    let query = serde_json::to_string(query).unwrap_or_default();
-    let _ = webview.evaluate_script(&format!("window.find({query}, false, {back}, true)"));
 }
 
 /// No frosted glass off macOS yet: the floating bar stays opaque there.
