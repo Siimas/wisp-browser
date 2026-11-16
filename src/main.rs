@@ -78,6 +78,11 @@ enum Msg {
         float: [f64; 4],
         /// Corner radius of the page card.
         radius: f64,
+        /// The floating bar's visible panel inside `float` (same form), and its corner radius.
+        #[serde(default)]
+        panel: [f64; 4],
+        #[serde(default)]
+        panel_radius: f64,
         /// macOS: where the window buttons go: x of the first one, and the vertical
         /// center of the row they share with the bar.
         #[serde(default)]
@@ -190,6 +195,11 @@ struct App {
     /// Area the floating bar takes, same form as `insets`.
     float_insets: [f64; 4],
     page_radius: f64,
+    /// The floating bar's visible panel (same form as `insets`) and its corner radius.
+    panel_insets: [f64; 4],
+    panel_radius: f64,
+    /// Frosted glass shown behind the floating bar, where the platform has it.
+    glass: Option<native::Glass>,
     /// macOS: inset of the window buttons, as last applied.
     lights: [f64; 2],
     settings_open: bool,
@@ -374,6 +384,7 @@ impl App {
             "peek": self.peek,
             "private": self.private_window,
             "mac": cfg!(target_os = "macos"),
+            "glass": self.glass.is_some(),
         });
         let js = format!("window.wisp && wisp.state({state})");
         for ui in self.uis() {
@@ -452,6 +463,9 @@ impl App {
                 }
                 // New views stack on top; a floating bar must stay above them.
                 if let Some(f) = self.floater.as_ref().filter(|_| self.peek) {
+                    if let Some(glass) = &self.glass {
+                        glass.restack(&self.window);
+                    }
                     native::raise(f, &self.window);
                 }
                 Some(webview)
@@ -613,6 +627,12 @@ impl App {
             if let Some(f) = &self.floater {
                 let _ = f.set_bounds(self.inset_rect(self.float_insets));
                 let _ = f.set_visible(true);
+                if let Some(glass) = &self.glass {
+                    let [l, t, r, b] = self.panel_insets;
+                    let s = self.size();
+                    let frame = [l, t, s.width - l - r, s.height - t - b];
+                    glass.show(&self.window, frame, self.panel_radius);
+                }
                 native::raise(f, &self.window);
             }
         }
@@ -746,6 +766,9 @@ impl App {
         self.away_since = None;
         if let Some(f) = &self.floater {
             let _ = f.set_visible(false);
+        }
+        if let Some(glass) = &self.glass {
+            glass.hide();
         }
         if self.cfg.layout.collapsed {
             self.ensure_floater();
@@ -894,6 +917,8 @@ impl App {
                     page,
                     float,
                     radius,
+                    panel,
+                    panel_radius,
                     lights,
                     animate,
                 } => {
@@ -920,6 +945,9 @@ impl App {
                     }
                     self.insets = Some(page);
                     self.float_insets = float;
+                    if sane(&panel) && sane(&[panel_radius]) {
+                        (self.panel_insets, self.panel_radius) = (panel, panel_radius);
+                    }
                     if self.page_radius != radius {
                         self.page_radius = radius;
                         let pages = self.tabs.iter().filter_map(|t| t.webview.as_ref());
@@ -947,6 +975,9 @@ impl App {
                 Msg::FloaterDone => {
                     if let Some(f) = self.floater.as_ref().filter(|_| !self.peek) {
                         let _ = f.set_visible(false);
+                        if let Some(glass) = &self.glass {
+                            glass.hide();
+                        }
                     }
                 }
                 Msg::SaveSettings { config } => self.apply_config(*config),
@@ -1075,6 +1106,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         glide: None,
         float_insets: [0.0; 4],
         page_radius: 0.0,
+        panel_insets: [0.0; 4],
+        panel_radius: 0.0,
+        glass: native::Glass::new(),
         lights: [0.0; 2],
         settings_open: false,
         cover: false,

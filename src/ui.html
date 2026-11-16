@@ -255,6 +255,12 @@ i.dot { display: block; width: 8px; height: 8px; border-radius: 50%; background:
 :root[data-floater][data-side=top][data-peek] #app { animation-name: float-in-top; }
 :root[data-floater][data-out] #app { animation: float-out var(--d-1) var(--ease-in) forwards; }
 :root[data-floater][data-side=top][data-out] #app { animation-name: float-out-top; }
+/* Glass: where the platform can blur what is behind (see native::Glass), the floating
+   bar is see-through. Only floating things are glass; docked bars stay solid. */
+:root[data-floater] #app { border-radius: calc(var(--r-lg) + 4px); }
+:root[data-floater][data-glass] #app { background: color-mix(in srgb, var(--bg) 40%, transparent); box-shadow: var(--shadow-pop), inset 0 1px 0 #ffffff1a; }
+:root[data-floater][data-glass][data-side=right] #app { --from: 14px; }
+:root[data-floater][data-glass][data-side=left] #app { --from: -14px; }
 @keyframes float-in { from { opacity: 0; transform: translateX(var(--from)) scale(.985); } }
 @keyframes float-out { from { opacity: 1; } to { opacity: 0; transform: translateX(calc(var(--from) * .6)); } }
 @keyframes float-in-top { from { opacity: 0; transform: translateY(-28px) scale(.985); } }
@@ -308,6 +314,36 @@ input[type=color] { width: 40px; height: var(--ctl); padding: 0; border: 1px sol
 .wsrow input[type=text] { flex: 1; width: auto; min-width: 0; }
 .wsrow .btn.icon { flex: none; width: 40px; padding: 0; display: grid; place-items: center; }
 
+/* ================= THEME EDITOR =================
+   Drag the dots: direction from the center picks the hue, distance the vividness. */
+.ted { align-self: center; width: 320px; max-width: 100%; padding: var(--sp-2); border-radius: var(--r-lg); background: var(--field); box-shadow: 0 0 0 1px var(--line); }
+.ted-canvas { position: relative; height: 280px; border-radius: var(--r-md); touch-action: none;
+  background: radial-gradient(color-mix(in srgb, var(--fg) 16%, transparent) 1px, transparent 1.4px) 0 0 / 9px 9px, color-mix(in srgb, var(--bg) 60%, transparent); }
+.ted-bar { position: absolute; left: 0; right: 0; display: flex; justify-content: center; gap: var(--sp-4); }
+#ted-modes { top: var(--sp-3); } #ted-tools { bottom: var(--sp-3); }
+.ted-bar .ib.on { background: var(--surface); color: var(--fg); }
+.ted-dot { position: absolute; width: 22px; height: 22px; margin: -11px; border-radius: 50%; background: var(--c); border: 3px solid #fff; cursor: grab;
+  box-shadow: 0 2px 8px #0006; transition: width var(--d-2) var(--ease-out), height var(--d-2) var(--ease-out), margin var(--d-2) var(--ease-out), box-shadow var(--d-1); }
+.ted-dot.main { width: 36px; height: 36px; margin: -18px; border-width: 4px; }
+.ted-dot.sel { box-shadow: 0 2px 8px #0006, 0 0 0 3px color-mix(in srgb, var(--accent) 60%, transparent); }
+.ted-dot:active { cursor: grabbing; transform: scale(1.08); }
+.ted-swatches { display: flex; align-items: center; gap: var(--sp-1); padding: var(--sp-3) 0 var(--sp-1); }
+#ted-colors { flex: 1; display: flex; justify-content: center; gap: var(--sp-1); }
+#ted-colors button { width: 22px; height: 22px; border-radius: 50%; background: var(--c); box-shadow: inset 0 0 0 1px #0000001f; }
+#ted-colors button:hover { transform: scale(1.15); }
+.ted-knobs { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-1) var(--sp-2) var(--sp-2); }
+/* the strength slider: a wave you slide a pill along */
+input.wave { -webkit-appearance: none; appearance: none; flex: 1; width: auto !important; height: 40px; background: none; margin: 0; cursor: pointer; }
+input.wave::-webkit-slider-runnable-track { height: 40px; background: var(--wave) center / 100% 22px no-repeat; }
+input.wave::-webkit-slider-thumb { -webkit-appearance: none; width: 10px; height: 36px; margin-top: 2px; border-radius: 5px; background: var(--fg); box-shadow: 0 1px 4px #0006; transition: transform var(--d-1); }
+input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
+/* the texture dial: a knob ringed with dots that light up as it turns */
+.dial { position: relative; width: 56px; height: 56px; flex: none; border-radius: 50%; cursor: grab; touch-action: none; }
+.dial::before { content: ""; position: absolute; inset: 11px; border-radius: 50%; background: var(--surface); box-shadow: var(--shadow-1), inset 0 1px 0 #ffffff14; }
+.dial i { position: absolute; left: 50%; top: 50%; width: 3px; height: 9px; margin: -22px 0 0 -1.5px; border-radius: 2px; background: var(--fg); transform-origin: 1.5px 22px; transform: rotate(var(--turn, -135deg)); }
+.dial b { position: absolute; left: 50%; top: 50%; width: 3px; height: 3px; margin: -1.5px; border-radius: 50%; background: var(--mute); opacity: .35; transition: opacity var(--d-1); }
+.dial b.lit { opacity: 1; background: var(--fg); }
+
 /* ================= CUSTOMIZE MODE ================= */
 :root[data-customizing] [data-area] { outline: 1.5px dashed color-mix(in srgb, var(--accent) 70%, transparent); outline-offset: -2px; border-radius: var(--r-md); min-height: calc(var(--ctl) + var(--sp-2)); min-width: 64px; padding: var(--sp-1); display: flex; }
 :root[data-customizing] [data-item] { cursor: grab; }
@@ -323,7 +359,9 @@ input[type=color] { width: 40px; height: var(--ctl); padding: 0; border: 1px sol
 .drop { flex: none; width: 3px; align-self: stretch; min-height: var(--ctl); border-radius: 2px; background: var(--accent); }
 
 /* ================= POPOVER (menus, workspace editor) ================= */
-.pop { position: fixed; z-index: 20; width: 232px; padding: var(--sp-2); border-radius: var(--r-lg); background: color-mix(in srgb, var(--fg) 5%, var(--bg)); box-shadow: var(--shadow-pop); animation: pop-in var(--d-2) var(--ease-out); transform-origin: var(--ox, 50%) var(--oy, 0); }
+/* Menus are glass everywhere: they blur the interface beneath them. */
+.pop { position: fixed; z-index: 20; width: 232px; padding: var(--sp-2); border-radius: var(--r-lg); background: color-mix(in srgb, var(--bg) 64%, transparent);
+  -webkit-backdrop-filter: blur(28px) saturate(1.8); backdrop-filter: blur(28px) saturate(1.8); box-shadow: var(--shadow-pop); animation: pop-in var(--d-2) var(--ease-out); transform-origin: var(--ox, 50%) var(--oy, 0); }
 .pop[hidden] { display: none; }
 @keyframes pop-in { from { opacity: 0; transform: scale(.94); } }
 .mi > svg, .mi > i.dot { margin-right: 2px; }
@@ -392,16 +430,27 @@ input[type=color] { width: 40px; height: var(--ctl); padding: 0; border: 1px sol
 
       <h2>Theme</h2>
       <div class="card">
+        <div class="row col">
+          <div class="ted" id="ted">
+            <div class="ted-canvas" id="ted-canvas">
+              <div class="ted-bar" id="ted-modes"></div>
+              <div class="ted-bar" id="ted-tools"></div>
+            </div>
+            <div class="ted-swatches"><button class="ib" id="ted-prev" title="Previous colors" aria-label="Previous colors"></button>
+              <div id="ted-colors"></div>
+              <button class="ib" id="ted-next" title="More colors" aria-label="More colors"></button></div>
+            <div class="ted-knobs">
+              <input type="range" class="wave" min="0" max="100" data-k="appearance.background_opacity" title="Color strength" aria-label="Color strength">
+              <div class="dial" id="ted-dial" role="slider" tabindex="0" aria-label="Texture strength" title="Texture strength" aria-valuemin="0" aria-valuemax="100"><i></i></div>
+            </div>
+          </div>
+        </div>
         <div class="row col"><span>Presets</span><div class="chips" id="presets"></div></div>
-        <div class="row"><span>Background colors<small>Up to three; two or more make a gradient. With none, the bar takes a tint of the workspace color.</small></span>
-          <div class="chips" id="bg-colors"></div></div>
-        <label class="row">Gradient angle <input type="range" min="0" max="359" data-k="appearance.gradient_angle"></label>
         <label class="row">Texture
           <select data-k="appearance.texture">
             <option value="none">None</option><option value="grain">Grain</option><option value="dots">Dots</option>
             <option value="lines">Lines</option><option value="grid">Grid</option>
           </select></label>
-        <label class="row">Texture strength <input type="range" min="0" max="100" data-k="appearance.texture_strength"></label>
         <label class="row">Accent color <input type="color" data-k="appearance.accent"></label>
         <label class="row"><span>Light or dark<small>Used for pages, and for the bar when no background color is set</small></span>
           <select data-k="appearance.theme">
@@ -481,6 +530,11 @@ const ICON = {
   private: 'M2 9.500h12M4.200 9.500l1-4.500h5.600l1 4.500M3.200 12a1.800 1.800 0 0 0 3.600 0M9.200 12a1.800 1.800 0 0 0 3.600 0M6.800 12h2.400',
   window: 'M2.500 5.500h8v8h-8zM5.500 5.500v-3h8v8h-3',
   sidebar: 'M2.500 3.500h11v9h-11z',
+  minus: 'M3 8h10',
+  sparkle: 'M7.500 2.500l1.300 3.700 3.700 1.300-3.700 1.300-1.300 3.700-1.300-3.700L2.500 7.500l3.700-1.300zM12.500 2v2.500M11.250 3.250h2.500',
+  sun: 'M8 5.500a2.500 2.500 0 1 0 0 5 2.500 2.500 0 0 0 0-5M8 1.800V3M8 13v1.200M1.800 8H3M13 8h1.200M3.600 3.600l.900.900M11.500 11.500l.900.900M3.600 12.400l.900-.900M11.500 4.500l.900-.900',
+  moon: 'M13 9.500A5.500 5.500 0 0 1 6.500 3 5.500 5.500 0 1 0 13 9.500z',
+  harmony: 'M4 3.200a1.400 1.400 0 1 0 .010 0M12 3.200a1.400 1.400 0 1 0 .010 0M8 10.200a1.400 1.400 0 1 0 .010 0M5.400 4.600h5.200M4.800 5.800l2.500 4.600M11.200 5.800l-2.500 4.600',
   // workspace icons
   briefcase: 'M2.500 5.500h11v7.500h-11zM6 5.500v-2h4v2M2.500 9h11',
   cart: 'M2 3h2l1.500 7h7l1.500-5H5M6.500 13.200v.100M11.500 13.200v.100',
@@ -524,11 +578,17 @@ const PRESETS = [
   { name: 'Rose', background: ['#ffe3ec', '#ffc2d4'], accent: '#c2255c', texture: 'none', texture_strength: 30 },
   { name: 'Mono', background: ['#18181b'], accent: '#a1a1aa', texture: 'grid', texture_strength: 25 },
 ];
+// The strength slider's track: a sine wave, drawn in the given color.
+const WAVE = color => `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 22' preserveAspectRatio='none'><path d='M2 11 ${Array.from({ length: 12 }, (_, i) => `Q${2 + i * 16.3 + 4.100} ${i % 2 ? 21 : 1} ${2 + (i + 1) * 16.3} 11`).join(' ')}' fill='none' stroke='${color}' stroke-width='3' stroke-linecap='round' vector-effect='non-scaling-stroke'/></svg>`)}")`;
 const PRIVATE_PAINT = ['#2a1b47', '#120e1f'];
 const WS_COLORS = ['#6c8cff', '#f2994a', '#27ae60', '#eb5757', '#9b51e0', '#2d9cdb', '#e0b400', '#8d8d99'];
 const WS_ICONS = ['', 'home', 'briefcase', 'cart', 'game', 'music', 'book', 'plane', 'bulb', 'flask', 'brush', 'chat',
   'play', 'coin', 'leaf', 'star', 'code', 'heart', 'folder', 'globe', 'coffee'];
-const paintOf = (colors, angle) => colors.length > 1 ? `linear-gradient(${angle}deg, ${colors.join(', ')})` : colors[0];
+// Colors are laid over the theme background at `strength` percent.
+const paintOf = (colors, angle, strength = 100) => {
+  const mixed = colors.map(c => strength >= 100 ? c : `color-mix(in srgb, ${c} ${strength}%, var(--bg))`);
+  return mixed.length > 1 ? `linear-gradient(${angle}deg, ${mixed.join(', ')})` : mixed[0];
+};
 // Perceived brightness 0..1, to pick light or dark text over a custom background.
 const brightness = hex => { const n = parseInt(hex.slice(1), 16); return (.299 * (n >> 16) + .587 * (n >> 8 & 255) + .114 * (n & 255)) / 255; };
 const currentWs = () => cfg.workspaces.find(w => w.id === S.workspace) || cfg.workspaces[0];
@@ -538,15 +598,19 @@ const wsMark = w => { const m = WS_ICONS.includes(w.icon) && w.icon ? svg(w.icon
 function applyLook() {
   const a = cfg.appearance, l = cfg.layout;
   const colors = S.private ? PRIVATE_PAINT : a.background;
-  root.dataset.theme = colors.length
-    ? (colors.reduce((sum, c) => sum + brightness(c), 0) / colors.length > .55 ? 'light' : 'dark')
-    : a.theme === 'system' ? (dark.matches ? 'dark' : 'light') : a.theme;
+  // Light or dark text: the user's choice, unless the painted colors end up too bright
+  // or too dark for it to be readable.
+  const wanted = a.theme === 'system' ? (dark.matches ? 'dark' : 'light') : a.theme;
+  const strength = S.private ? 1 : a.background_opacity / 100, base = wanted === 'dark' ? .09 : .93;
+  const lum = colors.length ? colors.reduce((sum, c) => sum + base + (brightness(c) - base) * strength, 0) / colors.length : base;
+  root.dataset.theme = lum > .62 ? 'light' : lum < .42 ? 'dark' : wanted;
   const [tex, scale, blend] = TEXTURES[a.texture] || TEXTURES.none;
   const css = { '--accent': a.accent, '--ws': S.private ? a.accent : currentWs().color,
     '--radius': a.radius + 'px', '--font': a.font_size + 'px', '--side-w': l.sidebar_width + 'px',
     '--tex': tex, '--tex-op': scale * a.texture_strength / 100, '--tex-blend': blend };
   for (const k in css) root.style.setProperty(k, css[k]);
-  if (colors.length) root.style.setProperty('--paint', paintOf(colors, a.gradient_angle)); else root.style.removeProperty('--paint');
+  if (colors.length) root.style.setProperty('--paint', paintOf(colors, a.gradient_angle, S.private ? 100 : a.background_opacity)); else root.style.removeProperty('--paint');
+  root.style.setProperty('--wave', WAVE(getComputedStyle(root).getPropertyValue('--mute').trim()));
   $('#user-css').textContent = a.custom_css;
 }
 
@@ -843,6 +907,95 @@ addEventListener('pointerup', e => {
   save();
 });
 
+// ---------- theme editor: dots on a canvas ----------
+// A dot's direction from the center is its hue, its distance its saturation; each
+// color keeps its own lightness. Two or more dots make a gradient that runs from
+// the first dot towards the last.
+const SWATCHES = [
+  ['#f2e9e4', '#f4a6c6', '#a78bbb', '#f25c6e', '#ff8c5a', '#f6d04d', '#3ddc97', '#5bb8e8', '#6b70a8'],
+  ['#1f1b2e', '#3a1f3d', '#5a1e2c', '#7a3b1d', '#3b3a1a', '#12402f', '#103a4a', '#1b2a57', '#2a2a33'],
+  ['#ff5f6d', '#ffc371', '#f9f871', '#00c9a7', '#00b4d8', '#4361ee', '#7209b7', '#f72585', '#b5179e'],
+];
+const HARMONIES = [null, [30, -30], [180, 150], [120, -120]]; // free, neighbors, opposite, triad
+let tedPage = 0, tedSel = 0, tedHarmony = 0;
+function toHsl(hex) {
+  const n = parseInt(hex.slice(1), 16), r = (n >> 16) / 255, g = (n >> 8 & 255) / 255, b = (n & 255) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min, l = (max + min) / 2;
+  const h = !d ? 0 : max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [(h * 60 + 360) % 360, d ? d / (1 - Math.abs(2 * l - 1)) : 0, l];
+}
+function toHex(h, s, l) {
+  const f = k => { const x = (k + h / 30) % 12; return l - s * Math.min(l, 1 - l) * Math.max(-1, Math.min(x - 3, 9 - x, 1)); };
+  return '#' + [f(0), f(8), f(4)].map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join('');
+}
+function tedGeometry() { const r = $('#ted-canvas').getBoundingClientRect(); return { r, cx: r.width / 2, cy: r.height / 2, reach: Math.min(r.width, r.height) / 2 - 26 }; }
+function tedCommit(persist) {
+  const a = cfg.appearance, g = tedGeometry(), at = c => { const [h, s] = toHsl(c), t = h * Math.PI / 180; return [g.cx + Math.cos(t) * s * g.reach, g.cy + Math.sin(t) * s * g.reach]; };
+  if (a.background.length > 1) { // the gradient runs from the first dot towards the last
+    const [x1, y1] = at(a.background[0]), [x2, y2] = at(a.background.at(-1));
+    if (Math.hypot(x2 - x1, y2 - y1) > 4) a.gradient_angle = Math.round((Math.atan2(x2 - x1, y1 - y2) * 180 / Math.PI + 360) % 360);
+  }
+  applyLook();
+  if (persist) save();
+}
+function tedFollow() { // other dots keep their place on the wheel relative to the main one
+  const a = cfg.appearance, rule = HARMONIES[tedHarmony];
+  if (!rule || a.background.length < 2) return;
+  const [h, s] = toHsl(a.background[0]);
+  for (let i = 1; i < a.background.length; i++) a.background[i] = toHex((h + rule[i - 1] + 360) % 360, s, toHsl(a.background[i])[2]);
+}
+function renderTed() {
+  const a = cfg.appearance, canvas = $('#ted-canvas'), g = tedGeometry();
+  tedSel = Math.min(tedSel, Math.max(0, a.background.length - 1));
+  canvas.querySelectorAll('.ted-dot').forEach(d => d.remove());
+  a.background.forEach((c, i) => {
+    const [h, s] = toHsl(c), t = h * Math.PI / 180;
+    const dot = el('button', { className: 'ted-dot' + (i ? '' : ' main') + (i === tedSel ? ' sel' : ''), ariaLabel: 'Color ' + (i + 1) + ', drag to change' });
+    dot.style.cssText = `--c:${c};left:${g.cx + Math.cos(t) * s * g.reach}px;top:${g.cy + Math.sin(t) * s * g.reach}px`;
+    dot.onpointerdown = e => {
+      e.preventDefault(); dot.setPointerCapture(e.pointerId); tedSel = i;
+      const move = ev => {
+        const dx = ev.clientX - g.r.left - g.cx, dy = ev.clientY - g.r.top - g.cy, dist = Math.min(1, Math.hypot(dx, dy) / g.reach);
+        const light = Math.max(.22, Math.min(.78, toHsl(a.background[i])[2]));
+        a.background[i] = toHex((Math.atan2(dy, dx) * 180 / Math.PI + 360) % 360, Math.max(.05, dist), light);
+        if (i === 0) tedFollow();
+        tedCommit(false); renderTed();
+      };
+      const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); tedCommit(true); renderTed(); };
+      addEventListener('pointermove', move); addEventListener('pointerup', up);
+    };
+    canvas.append(dot);
+  });
+  const modes = [['system', 'sparkle', 'Match system'], ['light', 'sun', 'Light'], ['dark', 'moon', 'Dark']];
+  $('#ted-modes').replaceChildren(...modes.map(([v, icon, label]) => el('button', { className: 'ib' + (a.theme === v ? ' on' : ''), title: label, ariaLabel: label,
+    onclick: () => { a.theme = v; applyLook(); save(); } }, svg(icon))));
+  const add = () => { if (a.background.length < 3) { const [h, s, l] = toHsl(a.background.at(-1) || a.accent); a.background.push(toHex((h + 40) % 360, Math.max(.4, s), l)); tedSel = a.background.length - 1; tedFollow(); tedCommit(true); } };
+  const drop = () => { a.background.pop(); tedCommit(true); };
+  const harmony = () => { tedHarmony = (tedHarmony + 1) % HARMONIES.length; tedFollow(); tedCommit(true); };
+  $('#ted-tools').replaceChildren(
+    el('button', { className: 'ib', title: 'Add a color', ariaLabel: 'Add a color', disabled: a.background.length >= 3, onclick: add }, svg('plus')),
+    el('button', { className: 'ib', title: 'Remove a color', ariaLabel: 'Remove a color', disabled: !a.background.length, onclick: drop }, svg('minus')),
+    el('button', { className: 'ib' + (tedHarmony ? ' on' : ''), title: ['Colors move freely', 'Colors stay neighbors', 'Colors stay opposite', 'Colors stay a triad'][tedHarmony], ariaLabel: 'Color harmony', onclick: harmony }, svg('harmony')));
+  $('#ted-prev').replaceChildren(svg('back')); $('#ted-next').replaceChildren(svg('forward'));
+  $('#ted-colors').replaceChildren(...SWATCHES[tedPage].map(c => {
+    const b = el('button', { ariaLabel: 'Use ' + c, title: c, onclick: () => { if (a.background.length) a.background[tedSel] = c; else a.background.push(c); if (tedSel === 0) tedFollow(); tedCommit(true); } });
+    b.style.setProperty('--c', c);
+    return b;
+  }));
+  const dial = $('#ted-dial'), v = a.texture === 'none' ? 0 : a.texture_strength;
+  dial.style.setProperty('--turn', (-135 + v * 2.7) + 'deg');
+  dial.setAttribute('aria-valuenow', v);
+  if (!dial.querySelector('b')) for (let i = 0; i <= 10; i++) { const t = (-225 + i * 27) * Math.PI / 180, b = el('b'); b.style.transform = `translate(${Math.cos(t) * 26}px, ${Math.sin(t) * 26}px)`; dial.append(b); }
+  dial.querySelectorAll('b').forEach((b, i) => b.classList.toggle('lit', v > 0 && i * 10 <= v));
+}
+function setTexture(v, persist) {
+  const a = cfg.appearance;
+  a.texture_strength = Math.round(Math.max(0, Math.min(100, v)));
+  if (!a.texture_strength) a.texture = 'none'; else if (a.texture === 'none') a.texture = 'grain';
+  applyLook(); renderTed();
+  if (persist) save();
+}
+
 // ---------- settings sheet ----------
 function renderSettings() {
   for (const f of document.querySelectorAll('[data-k]')) {
@@ -855,21 +1008,12 @@ function renderSettings() {
   const a = cfg.appearance;
   $('#presets').replaceChildren(...PRESETS.map(p => {
     const b = el('button', { className: 'preset', title: p.name, ariaLabel: p.name + ' theme' });
-    b.style.background = p.background.length ? paintOf(p.background, a.gradient_angle) : 'linear-gradient(135deg, #ececf0 50%, #1b1b1f 50%)';
-    b.onclick = () => { Object.assign(a, { background: [...p.background], accent: p.accent, texture: p.texture, texture_strength: p.texture_strength }); applyLook(); save(); };
+    b.style.background = p.background.length ? paintOf(p.background, 160) : 'linear-gradient(135deg, #efeef2 50%, #17161b 50%)';
+    b.onclick = () => { Object.assign(a, { background: [...p.background], background_opacity: 100, gradient_angle: 160, accent: p.accent, texture: p.texture, texture_strength: p.texture_strength }); applyLook(); save(); };
     return b;
   }));
 
-  if (!$('#bg-colors').contains(document.activeElement)) {
-    $('#bg-colors').replaceChildren(...a.background.map((c, i) => {
-      const input = el('input', { type: 'color', value: c, ariaLabel: 'Background color ' + (i + 1) });
-      input.oninput = () => { a.background[i] = input.value; applyLook(); };
-      input.onchange = save;
-      const remove = el('button', { textContent: '×', title: 'Remove color', ariaLabel: 'Remove color', onclick: () => { a.background.splice(i, 1); applyLook(); save(); } });
-      return el('span', { className: 'swatch' }, input, remove);
-    }), ...(a.background.length < 3 ? [el('button', { className: 'btn', textContent: 'Add color',
-      onclick: () => { a.background.push(a.background.at(-1) || a.accent); applyLook(); save(); } })] : []));
-  }
+  renderTed();
 
   if (!$('#ws-list').contains(document.activeElement)) {
     $('#ws-list').replaceChildren(...cfg.workspaces.map((w, i) => {
@@ -927,7 +1071,9 @@ function reportPage(animate = false) {
   const top = Math.max(0, px('--hotbar-h') - pad - 2); // tucks just under the hotbar
   const float = side === 'right' ? [innerWidth - bar, top, 0, 0] : side === 'left' ? [0, top, innerWidth - bar, 0]
     : [0, 0, 0, innerHeight - (px('--tabs-h') + px('--hotbar-h') + pad + px('--float-shadow'))];
-  const m = { cmd: 'page_rect', page: [r.left, r.top, innerWidth - r.right, innerHeight - r.bottom],
+  const sh = px('--float-shadow'), panel = side === 'right' ? [float[0] + sh, float[1] + pad, pad, pad]
+    : side === 'left' ? [pad, float[1] + pad, float[2] + sh, pad] : [pad, pad, pad, float[3] + sh];
+  const m = { cmd: 'page_rect', panel: panel.map(v => Math.max(0, v)), panel_radius: px('--radius') * 1.5 + 4, page: [r.left, r.top, innerWidth - r.right, innerHeight - r.bottom],
     lights: [13, (side === 'top' ? (root.hasAttribute('data-hidden') ? 28 : px('--tabs-h')) : Math.max(38, px('--hotbar-h'))) / 2],
     float: float.map(v => Math.max(0, v)), radius: parseFloat(getComputedStyle($('#page')).borderTopLeftRadius) || 0, animate };
   const key = JSON.stringify({ ...m, animate: 0 });
@@ -941,7 +1087,7 @@ function render() {
   applyLook();
   // The main copy hides a collapsed bar outright; the floating copy is that bar.
   const hidden = !FLOATER && l.collapsed && !customizing;
-  for (const [name, on] of Object.entries({ floater: FLOATER, settings: S.settings, private: S.private, customizing, hidden })) flag(name, on);
+  for (const [name, on] of Object.entries({ floater: FLOATER, glass: S.glass, settings: S.settings, private: S.private, customizing, hidden })) flag(name, on);
   // macOS window buttons: who makes room for them
   root.dataset.lights = !S.mac ? 'none' : side === 'top' ? (hidden ? 'strip' : 'tabs') : FLOATER ? 'none' : 'hotbar';
 
@@ -969,6 +1115,16 @@ $('#reset-keys').onclick = () => { cfg.hotkeys = {}; save(); };
 $('#ws-new').onclick = () => { const id = Math.max(0, ...cfg.workspaces.map(w => w.id)) + 1; cfg.workspaces.push({ id, name: 'Workspace ' + id, color: WS_COLORS[cfg.workspaces.length % WS_COLORS.length], icon: '' }); save(); };
 $('#modes').onclick = e => { const b = e.target.closest('[data-mode]'); if (b) { cfg.layout.mode = b.dataset.mode; save(); } };
 $('#open-customize').onclick = () => setCustomizing(true);
+$('#ted-prev').onclick = () => { tedPage = (tedPage + SWATCHES.length - 1) % SWATCHES.length; renderTed(); };
+$('#ted-next').onclick = () => { tedPage = (tedPage + 1) % SWATCHES.length; renderTed(); };
+$('#ted-dial').onpointerdown = e => { // turn by dragging up/down or sideways
+  e.preventDefault();
+  const start = cfg.appearance.texture === 'none' ? 0 : cfg.appearance.texture_strength, x0 = e.clientX, y0 = e.clientY;
+  const move = ev => setTexture(start + (ev.clientX - x0) - (ev.clientY - y0), false);
+  const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); save(); };
+  addEventListener('pointermove', move); addEventListener('pointerup', up);
+};
+$('#ted-dial').onkeydown = e => { const step = { ArrowUp: 10, ArrowRight: 10, ArrowDown: -10, ArrowLeft: -10 }[e.key]; if (step) { e.preventDefault(); setTexture((cfg.appearance.texture === 'none' ? 0 : cfg.appearance.texture_strength) + step, true); } };
 $('#cz-done').onclick = () => setCustomizing(false);
 $('#cz-reset').onclick = () => { cfg.layout.areas = structuredClone(DEFAULT_AREAS); areasKey = ''; renderAreas(); renderDynamic(); save(); };
 

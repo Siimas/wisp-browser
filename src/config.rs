@@ -106,6 +106,8 @@ pub struct Appearance {
     /// 0-3 colors painted behind the bar; empty = plain theme background.
     pub background: Vec<String>,
     pub gradient_angle: u16,
+    /// How strongly the colors cover the theme background, 0-100.
+    pub background_opacity: u8,
     /// One of `TEXTURES`.
     pub texture: String,
     pub texture_strength: u8, // 0-100
@@ -162,6 +164,7 @@ impl Default for Appearance {
             font_size: 13,
             background: Vec::new(),
             gradient_angle: 160,
+            background_opacity: 100,
             texture: "none".into(),
             texture_strength: 30,
             custom_css: String::new(),
@@ -249,6 +252,7 @@ impl Config {
         a.radius = a.radius.min(20);
         a.gradient_angle %= 360;
         a.texture_strength = a.texture_strength.min(100);
+        a.background_opacity = a.background_opacity.min(100);
         if !TEXTURES.contains(&a.texture.as_str()) {
             a.texture = "none".into();
         }

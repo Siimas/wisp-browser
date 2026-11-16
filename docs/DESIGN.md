@@ -45,6 +45,20 @@ shouts; emphasis comes from spacing and from one accent color.
 - Filled buttons are `--fg` on `--bg`, never white on `--accent`, so they stay
   readable whatever accent the user picks.
 
+### Glass
+
+Floating things are glass; docked things are solid. That is the whole rule.
+
+- **Glass**: the revealed (floating) bar and every menu or popover. Their
+  background is the theme color at 40–64% opacity over a blur of what lies
+  behind, with a hairline ring and a one-pixel top highlight.
+- **Solid**: the docked sidebar, the hotbar, the page card, sheets and cards.
+
+Menus blur with CSS `backdrop-filter` (they sit over the interface itself). The
+floating bar sits over the page, which is a separate native view, so on macOS a
+native frosted pane (`native::Glass`) is placed directly beneath it. Windows has
+no such pane yet and keeps the floating bar opaque.
+
 ### Icons
 
 Line icons only: 16 px grid, 1.5 px stroke, round caps and joins, `currentColor`.
@@ -62,6 +76,23 @@ Workspace icons are picked from the same set and take the workspace's color.
 - **Close buttons appear on hover only.**
 - **macOS window buttons** are moved to sit on the center line of the first
   row of controls, at `--gap` + 5 px from the left edge.
+
+### The theme editor
+
+Settings > Theme is a small instrument rather than a form, modelled on a color
+wheel laid flat:
+
+- **Canvas**: each color is a dot. Its direction from the center is the hue,
+  its distance the vividness. The first dot is larger; two or more dots make a
+  gradient that runs from the first towards the last. Buttons on the canvas:
+  match system / light / dark above; add a color, remove one, and a harmony
+  toggle (free, neighbors, opposite, triad) below.
+- **Swatch row**: three pages of ready colors applied to the selected dot.
+- **Wave slider**: how strongly the colors cover the theme background.
+- **Dial**: texture strength; turning it up from zero switches grain on.
+
+Text flips between light and dark automatically if the painted result would
+make the chosen one unreadable.
 
 ## Motion
 
