@@ -315,6 +315,89 @@ mod imp {
             _ => false,
         }
     }
+
+    // ---- low power: what the system says, read when asked (each read is cheap) ----
+
+    #[link(name = "IOKit", kind = "framework")]
+    unsafe extern "C" {
+        fn IOPSGetBatteryWarningLevel() -> i32;
+        fn IOPSNotificationCreateRunLoopSource(
+            callback: extern "C" fn(*mut std::ffi::c_void),
+            context: *mut std::ffi::c_void,
+        ) -> *mut std::ffi::c_void;
+    }
+    #[link(name = "CoreFoundation", kind = "framework")]
+    unsafe extern "C" {
+        static kCFRunLoopCommonModes: *const std::ffi::c_void;
+        fn CFRunLoopGetMain() -> *mut std::ffi::c_void;
+        fn CFRunLoopAddSource(
+            rl: *mut std::ffi::c_void,
+            source: *mut std::ffi::c_void,
+            mode: *const std::ffi::c_void,
+        );
+    }
+    unsafe extern "C" {
+        fn sysctlbyname(
+            name: *const std::ffi::c_char,
+            old: *mut std::ffi::c_void,
+            len: *mut usize,
+            new: *const std::ffi::c_void,
+            newlen: usize,
+        ) -> i32;
+    }
+
+    pub fn power() -> Power {
+        // SAFETY: plain reads of system state, on the main thread for the AppKit ones;
+        // isLowPowerModeEnabled exists since macOS 12, checked before it is sent.
+        unsafe {
+            let info: *mut AnyObject =
+                msg_send![AnyClass::get(c"NSProcessInfo").unwrap(), processInfo];
+            let saver = msg_send![info, respondsToSelector: sel!(isLowPowerModeEnabled)]
+                && msg_send![info, isLowPowerModeEnabled];
+            let ws: *mut AnyObject =
+                msg_send![AnyClass::get(c"NSWorkspace").unwrap(), sharedWorkspace];
+            let reduce_transparency = msg_send![ws, accessibilityDisplayShouldReduceTransparency];
+            // Early (2) or final (3) warning: on battery and below about 20%.
+            let low_battery = IOPSGetBatteryWarningLevel() >= 2;
+            let (mut memory, mut len) = (0u64, size_of::<u64>());
+            sysctlbyname(
+                c"hw.memsize".as_ptr(),
+                (&raw mut memory).cast(),
+                &mut len,
+                std::ptr::null(),
+                0,
+            );
+            Power {
+                saver,
+                low_battery,
+                memory,
+                reduce_transparency,
+            }
+        }
+    }
+
+    thread_local! {
+        static ON_POWER: std::cell::RefCell<Option<Box<dyn Fn()>>> = const { std::cell::RefCell::new(None) };
+    }
+
+    extern "C" fn power_changed(_: *mut std::ffi::c_void) {
+        ON_POWER.with_borrow(|f| f.as_ref().map(|f| f()));
+    }
+
+    /// Call `f` when the power source or battery level changes (the system tells us; no
+    /// polling). The system's low-power and accessibility switches send nothing here:
+    /// they are read again when the window regains focus.
+    pub fn on_power_change(f: impl Fn() + 'static) {
+        ON_POWER.set(Some(Box::new(f)));
+        // SAFETY: a run-loop source on the main run loop, which this (main) thread runs;
+        // it lives for the rest of the process.
+        unsafe {
+            let source = IOPSNotificationCreateRunLoopSource(power_changed, std::ptr::null_mut());
+            if !source.is_null() {
+                CFRunLoopAddSource(CFRunLoopGetMain(), source, kCFRunLoopCommonModes);
+            }
+        }
+    }
 }
 
 #[cfg(windows)]
@@ -475,6 +558,34 @@ mod imp {
     pub fn take_private(_webview: &WebView) -> bool {
         false
     }
+
+    pub fn power() -> Power {
+        use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
+        use windows::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+        let mut st = SYSTEM_POWER_STATUS::default();
+        let mut mem = MEMORYSTATUSEX {
+            dwLength: size_of::<MEMORYSTATUSEX>() as u32,
+            ..Default::default()
+        };
+        // SAFETY: plain Win32 reads into structs we own.
+        let (have_st, have_mem) = unsafe {
+            (
+                GetSystemPowerStatus(&mut st).is_ok(),
+                GlobalMemoryStatusEx(&mut mem).is_ok(),
+            )
+        };
+        Power {
+            saver: have_st && st.SystemStatusFlag == 1,
+            // On battery (0) at 20% or less (255 = unknown).
+            low_battery: have_st && st.ACLineStatus == 0 && st.BatteryLifePercent <= 20,
+            memory: if have_mem { mem.ullTotalPhys } else { 0 },
+            reduce_transparency: false, // no glass on Windows to reduce
+        }
+    }
+
+    // ponytail: Windows re-reads on focus only. Upgrade path: WM_POWERBROADCAST via a
+    // window subclass, if a plugged-in laptop should switch while Wisp is in front.
+    pub fn on_power_change(_f: impl Fn() + 'static) {}
 }
 
 #[cfg(not(any(target_os = "macos", windows)))]
@@ -498,12 +609,29 @@ mod imp {
     pub fn take_private(_webview: &WebView) -> bool {
         false
     }
+    pub fn power() -> Power {
+        Power::default()
+    }
+    pub fn on_power_change(_f: impl Fn() + 'static) {}
 }
 
 /// What a search of the page came to. `count` only where the platform counts matches.
 pub struct Found {
     pub found: bool,
     pub count: Option<u32>,
+}
+
+/// What the system says about power and display preferences, for low-power mode.
+#[derive(Default, Clone, Copy, PartialEq, Debug)]
+pub struct Power {
+    /// The system's own low-power mode (macOS) or battery saver (Windows) is on.
+    pub saver: bool,
+    /// On battery and running low (about 20% or less).
+    pub low_battery: bool,
+    /// Physical memory in bytes, 0 if unknown.
+    pub memory: u64,
+    /// The system asks for less transparency (macOS accessibility).
+    pub reduce_transparency: bool,
 }
 
 /// No frosted glass off macOS yet: the floating bar stays opaque there.
@@ -522,4 +650,7 @@ impl Glass {
 
 #[cfg(target_os = "macos")]
 pub use imp::Glass;
-pub use imp::{find, find_stop, page_menu, raise, round_corners, take_private, user_agent};
+pub use imp::{
+    find, find_stop, on_power_change, page_menu, power, raise, round_corners, take_private,
+    user_agent,
+};

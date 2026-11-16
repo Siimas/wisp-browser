@@ -6,6 +6,20 @@ All notable changes to Wisp are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Low-power mode (Settings > Behavior): solid surfaces instead of glass and no
+  animation. Automatic, the default, turns it on in the system's power saving
+  mode, on a low battery, or on a computer with 4 GB of memory or less. The
+  system's "Reduce transparency" setting now turns glass off too.
+
+### Changed
+
+- The interface uses about 50 MB less memory: the background texture is drawn
+  without a separate window-sized layer, and looks the same.
+- With the bar collapsed, the cursor is checked less often while it is far from
+  the bar's edge.
+
 ## [0.2.0] - 2026-11-16
 
 ### Added

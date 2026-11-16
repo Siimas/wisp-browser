@@ -83,6 +83,30 @@ floating bar sits over the page, which is a separate native view, so on macOS a
 native frosted pane (`native::Glass`) is placed directly beneath it. Windows has
 no such pane yet and keeps the floating bar opaque.
 
+### Low-power mode
+
+Settings > Behavior > Low-power mode: Automatic (the default), On, Off. It keeps
+the layout, colors, texture and shadows, and drops what costs work while you use
+the browser:
+
+- **No glass.** The floating bar is the paint, solid, with no native frosted pane
+  under it; menus and suggestions are `--bg`, solid, with no `backdrop-filter`
+  (`[data-solid]`). The system's "Reduce transparency" setting does the same on
+  its own, whatever the mode.
+- **No motion.** `[data-low]` sets `--d-1` … `--d-3` to 1 ms, the same path as
+  reduced motion, and the page card jumps to a new size instead of gliding.
+
+Automatic turns it on while the system is saving power (macOS Low Power Mode,
+Windows battery saver), on battery at about 20% or less, or on a computer with
+4 GB of memory or less or two cores or fewer. It is decided again when the power
+source or battery level changes (macOS tells the app) and when the window is
+focused (for the switches that send nothing).
+
+What was measured and left on, because at rest it costs nothing: the gradient
+paint, the shadows, and the texture. The texture used to cost about 50 MB (a
+window-sized `position: fixed` layer under a blend mode); it is now
+`position: absolute`, which draws the same pixels without the extra layer.
+
 ### Icons
 
 Line icons only: 16 px grid, 1.5 px stroke, round caps and joins, `currentColor`.
@@ -249,13 +273,15 @@ Rules:
 6. **Pressing answers at once.** Buttons press to 96% within 40 ms and tabs to
    98.5% on mouse-down; the response starts on the press, not the release.
 7. **Reduced motion is honored.** With the system setting on, all three
-   durations become 1 ms.
+   durations become 1 ms, and the page card jumps to its new size instead of
+   gliding (the interface only asks for a glide while `--d-3` is longer than
+   20 ms, so a custom `--d-3: 0ms` does the same).
 
 ### Where motion is used
 
 | Interaction | Animation |
 | --- | --- |
-| Collapsed bar revealed (cursor within the user's reveal distance of its window edge, 32 px by default, or past the edge; checked 40 times a second) | The bar floats in over the page as a panel: slides 18 px from its edge, scales from 99%, fades in. `--d-3` `--ease-out` |
+| Collapsed bar revealed (cursor within the user's reveal distance of its window edge, 32 px by default, or past the edge; checked 40 times a second near the edge, less often the further away the cursor is) | The bar floats in over the page as a panel: slides 18 px from its edge, scales from 99%, fades in. `--d-3` `--ease-out` |
 | Revealed bar let go (cursor away for 180 ms) | Slides back 11 px and fades. `--d-1` `--ease-in` |
 | Bar collapsed or pinned open, layout changed | The page card **glides** to its new size over `--d-3` with the same soft landing (driven natively, `PAGE_GLIDE` in `main.rs`) while the bar slides in over `--d-3` |
 | New tab / closed tab | Grows from / folds to zero height with a fade. `--d-2` in, `--d-1` out |
