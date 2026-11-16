@@ -6,8 +6,17 @@ All notable changes to Wisp are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The settings button in the toolbar opens an app menu: new tabs and windows,
+  History, Bookmarks, Downloads, Find in page, zoom, and quick switches for ad
+  blocking, light or dark, and collapsing the bar, each with its hotkey.
+- Menus now float over the page on glass instead of hiding it while open.
+
 ### Changed
 
+- Settings opens as a tab of its own, which you can leave and come back to.
+  It is not restored after a restart.
 - Google is the default search engine and home page for new profiles. Existing
   profiles keep what they have; change it in Settings > Behavior.
 - Double-clicking the empty space around the tabs opens a new tab at the end of
