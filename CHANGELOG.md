@@ -19,6 +19,15 @@ All notable changes to Wisp are recorded here. The format follows
 - The shield button turns blocking off, or back on, for the site in the
   current tab, and shows whether blocking is on there. Sites turned off are
   listed in Settings > Ad blocking.
+- The settings button in the toolbar opens an app menu: new tabs and windows,
+  History, Bookmarks, Downloads, Find in page, zoom, and quick switches for ad
+  blocking, light or dark, and collapsing the bar, each with its hotkey.
+- Menus now float over the page on glass instead of hiding it while open.
+- Low-power mode (Settings > Behavior): solid surfaces instead of glass and no
+  animation. Automatic, the default, turns it on in the system's power saving
+  mode, on a low battery, or on a computer with 4 GB of memory or less or two
+  cores or fewer. The system's "Reduce transparency" setting now turns glass
+  off too.
 - A media player at the bottom of the sidebar while another tab plays audio or
   video: title and artist, previous, play/pause, next, mute, and a progress line
   you can drag to seek. Click the title to go to the tab; close it to hide it
@@ -32,6 +41,12 @@ All notable changes to Wisp are recorded here. The format follows
   web engine, instead of at every launch.
 - Wisp now downloads its ad-blocking lists itself; see PRIVACY.md for the
   hosts and how often.
+- Settings opens as a tab of its own, which you can leave and come back to.
+  It is not restored after a restart.
+- The interface uses about 50 MB less memory: the background texture is drawn
+  without a separate window-sized layer, and looks the same.
+- With the bar collapsed, the cursor is checked less often while it is far from
+  the bar's edge.
 - Google is the default search engine and home page for new profiles. Existing
   profiles keep what they have; change it in Settings > Behavior.
 - Double-clicking the empty space around the tabs opens a new tab at the end of

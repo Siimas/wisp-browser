@@ -116,7 +116,7 @@ step:
 Installed copies update themselves: a new version downloads in
 the background and is in place the next time you open Wisp. Every update file
 is signed, and Wisp refuses one whose signature does not match. You can turn
-this off in Settings > About.
+this off in Settings > About and updates.
 
 <details>
 <summary><b>Keyboard shortcuts</b></summary>
@@ -124,7 +124,7 @@ this off in Settings > About.
 <br>
 
 `Mod` is `Cmd` on macOS and `Ctrl` on Windows. All of them can be changed in
-Settings > Hotkeys.
+Settings > Shortcuts.
 
 | Action | Keys |
 | --- | --- |
@@ -209,4 +209,4 @@ cargo run --release
 
 [MIT](LICENSE). Wisp is built from open-source Rust crates; their licenses are
 in [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES), also reachable from Settings >
-About.
+About and updates.

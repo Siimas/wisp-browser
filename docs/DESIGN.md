@@ -6,7 +6,7 @@ built from those tokens. The rule that keeps it a system:
 
 > **Components never use a raw color, size, or duration. They use a token.**
 
-Users can override any token in Settings > Theme > Custom CSS, for example
+Users can override any token in Settings > Appearance > Custom CSS, for example
 `:root { --d-3: 450ms; --gap: 10px; }`.
 
 ## The look in one paragraph
@@ -83,6 +83,38 @@ floating bar sits over the page, which is a separate native view, so on macOS a
 native frosted pane (`native::Glass`) is placed directly beneath it. Windows has
 no such pane yet and keeps the floating bar opaque.
 
+A menu that would spill over the page is drawn the same way: by the overlay, the
+raised copy of the interface (see `src/overlay.rs`), on the native pane, with
+the floating bar's glass. The overlay is placed over the menu and its shadow
+only, so the rest of the page stays live, and clicking anywhere else closes the
+menu. Menus are described as data for this (`openMenu` in `ui.html`): rows of
+icon, label and the user's hotkey (or a switch), hairlines, small headings, and
+rows of small buttons (zoom, light and dark).
+
+### Low-power mode
+
+Settings > Behavior > Low-power mode: Automatic (the default), On, Off. It keeps
+the layout, colors, texture and shadows, and drops what costs work while you use
+the browser:
+
+- **No glass.** The floating bar is the paint, solid, with no native frosted pane
+  under it; menus and suggestions are `--bg`, solid, with no `backdrop-filter`
+  (`[data-solid]`). The system's "Reduce transparency" setting does the same on
+  its own, whatever the mode.
+- **No motion.** `[data-low]` sets `--d-1` … `--d-3` to 1 ms, the same path as
+  reduced motion, and the page card jumps to a new size instead of gliding.
+
+Automatic turns it on while the system is saving power (macOS Low Power Mode,
+Windows battery saver), on battery at about 20% or less, or on a computer with
+4 GB of memory or less or two cores or fewer. It is decided again when the power
+source or battery level changes (macOS tells the app) and when the window is
+focused (for the switches that send nothing).
+
+What was measured and left on, because at rest it costs nothing: the gradient
+paint, the shadows, and the texture. The texture used to cost about 50 MB (a
+window-sized `position: fixed` layer under a blend mode); it is now
+`position: absolute`, which draws the same pixels without the extra layer.
+
 ### Icons
 
 Line icons only: 16 px grid, 1.5 px stroke, round caps and joins, `currentColor`.
@@ -112,7 +144,7 @@ Workspace icons are picked from the same set and take the workspace's color.
 
 ### The theme editor
 
-Settings > Theme is a small instrument rather than a form, modelled on a color
+Settings > Appearance > Theme is a small instrument rather than a form, modelled on a color
 wheel laid flat:
 
 - **Canvas**: each color is a dot. Its direction from the center is the hue,
@@ -131,7 +163,8 @@ wheel laid flat:
 
 ### Texture
 
-Textures are one fixed layer (`body::before`) over the paint: painted once,
+Textures are one layer (`body::before`, `position: absolute`, not `fixed`:
+fixed under a blend mode cost about 50 MB) over the paint: painted once,
 never animated, no layout. Grain is the default and the one presets use.
 
 **Grain** is a 128 × 128 tile generated at start-up (`grain()` in `ui.html`):
@@ -254,13 +287,15 @@ Rules:
 6. **Pressing answers at once.** Buttons press to 96% within 40 ms and tabs to
    98.5% on mouse-down; the response starts on the press, not the release.
 7. **Reduced motion is honored.** With the system setting on, all three
-   durations become 1 ms.
+   durations become 1 ms, and the page card jumps to its new size instead of
+   gliding (the interface only asks for a glide while `--d-3` is longer than
+   20 ms, so a custom `--d-3: 0ms` does the same).
 
 ### Where motion is used
 
 | Interaction | Animation |
 | --- | --- |
-| Collapsed bar revealed (cursor within the user's reveal distance of its window edge, 32 px by default, or past the edge; checked 40 times a second) | The bar floats in over the page as a panel: slides 18 px from its edge, scales from 99%, fades in. `--d-3` `--ease-out` |
+| Collapsed bar revealed (cursor within the user's reveal distance of its window edge, 32 px by default, or past the edge; checked 40 times a second near the edge, less often the further away the cursor is) | The bar floats in over the page as a panel: slides 18 px from its edge, scales from 99%, fades in. `--d-3` `--ease-out` |
 | Revealed bar let go (cursor away for 180 ms) | Slides back 11 px and fades. `--d-1` `--ease-in` |
 | Bar collapsed or pinned open, layout changed | The page card **glides** to its new size over `--d-3` with the same soft landing (driven natively, `PAGE_GLIDE` in `main.rs`) while the bar slides in over `--d-3` |
 | New tab / closed tab | Grows from / folds to zero height with a fade. `--d-2` in, `--d-1` out |
@@ -269,6 +304,7 @@ Rules:
 | Switching workspace | Tab list slides 16 px from that workspace's side, `--d-3`; the window tint changes with it |
 | Menu or workspace editor | Scales from 96% at its anchor, `--d-2` |
 | Settings / Customize / History / Bookmarks sheet | Rises 6 px and fades in, `--d-3` |
+| Settings section chosen | The new section rises 6 px and fades in, `--d-2`; the old one is gone at once |
 | Suggestions under the address bar | Scales from 96% at the bar, `--d-2`; the chosen row is raised (`--surface`, `--shadow-1`) |
 | Find bar opened (Mod+F) or closed | A row appears between the hotbar and the page: it drops 8 px and fades in over `--d-2` while the page card glides down to make room |
 | Address bar focus | Lifts to `--surface`, accent ring grows, `--d-2` |
@@ -317,11 +353,71 @@ Items (address bar, buttons, workspace switcher, spacers) live in three areas
 the user can rearrange in Customize mode: `hotbar`, `before_tabs`,
 `after_tabs`. The tab list itself is fixed between the last two.
 
+## Settings
+
+Settings is one sheet, modelled on a preferences window: a menu of sections down
+the side (a line icon and a name each, the current one raised like an active
+tab) and the chosen section beside it, under a "Find in Settings" box. Only one
+section shows at a time. When the page card is narrower than 720 px (a
+container query on the sheet, so it follows the card, not the window) the menu
+becomes a row of icon tabs above the content, and the section is headed by
+its name.
+
+Sections are grouped by what a person looks for, not by how the config is
+stored: Appearance (layout, theme), Workspaces, Tabs and browsing, Search,
+Privacy and security, Shortcuts, About and updates. The section in use is
+remembered while Wisp runs; `openSettings(name)` opens Settings at one.
+
+**Search** filters, across all sections, to the rows whose text or
+`data-keys` contain every word typed, shown under their section names. A
+section's or group's own name matching shows all of it. Escape empties the
+box, then closes Settings. Typing a letter anywhere outside a field starts a
+search, and Mod+F focuses the box.
+
+**Simple and Advanced.** A switch beside the search box (remembered in the
+config, `behavior.advanced_settings`; Simple by default). Simple is about
+choices, not parameters: the things a person picks from, drawn as tiles.
+Advanced shows everything, raw fields included. Both edit the same config. A
+row, group or section with class `adv` shows only in Advanced; a search in
+Simple still finds those and names them under the results, with a button to
+show them.
+
+**Tiles** are the one component for a pick-one choice: the layout, light or
+dark, text size, search engine, what opens at start and in a new tab, and the
+Simple/Advanced switch itself (`.seg`, the same component drawn as a segmented
+control). Each is a radio group: a small picture (a layout drawing, a line
+icon, or a plain lettermark for a search engine, never a copied logo) over its
+name, the chosen one outlined in `--accent`. Arrow keys move, Space or Enter
+chooses. A value set in Advanced that matches no tile shows as a checked
+"Custom" tile, which opens the advanced field rather than overwriting it.
+Choices live in `TILES` in `ui.html`.
+
+**Keyboard**: the menu is one tab stop; the arrow keys (either direction, so
+the same in the row of tabs), Home and End move through it.
+
+**Adding a setting**: drop a row into the card of the group it belongs to, in
+`src/ui.html` under the `SETTINGS` comment:
+
+```html
+<label class="row" data-keys="words people search for"><span>Label<small>What it does</small></span>
+  <input type="checkbox" data-k="section.key"></label>
+```
+
+Add `adv` to its class if only Advanced should show it. For a pick-one setting,
+add a tile row (`<div class="tiles" data-tiles="section.key" aria-label="…">`)
+and its choices in `TILES`, and keep the raw field as an `adv` row.
+`data-k` binds it to the config; the search reads the row's text and
+`data-keys` (add the words the label alone would miss: "dark mode",
+"ad blocker", "version"). A new group is a `.grp` (an `h2` and a card) inside a
+section; a new section is a `.sec` with `data-sec`, `data-name` and
+`data-icon`, and the menu is built from the sections.
+
 ## Direct manipulation before settings
 
 If something can be adjusted by touching the thing itself, intuitively and with
 no effort, it does not get a setting. The sidebar's width is set by dragging
-its inner edge (double-click resets it); tabs are reordered by dragging them;
+its inner edge (double-click resets it); the bar is collapsed with its own
+button, its hotkey or its right-click menu; tabs are reordered by dragging them;
 toolbar items are placed by dragging in Customize; a workspace is edited from
 its own icon. Settings are for choices that have no natural place to grab:
 defaults, privacy, power.
