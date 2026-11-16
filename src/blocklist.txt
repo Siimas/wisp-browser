@@ -1,5 +1,5 @@
 # Built-in ad and tracker hosts. One host per line; subdomains are blocked too.
-# Add your own in Settings > Ad blocking.
+# Add your own in Settings > Privacy and security.
 doubleclick.net
 googlesyndication.com
 googleadservices.com

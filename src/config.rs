@@ -143,6 +143,8 @@ pub struct Behavior {
     pub auto_update: bool,
     /// Record visited pages. Off: nothing new is recorded (what is there stays until cleared).
     pub keep_history: bool,
+    /// Settings shows every setting; off, only the simple ones.
+    pub advanced_settings: bool,
     /// Low-power mode: one of `LOW_POWER` ("auto" decides from the system, see main.rs).
     pub low_power: String,
 }
@@ -205,6 +207,7 @@ impl Default for Behavior {
             default_zoom: 1.0,
             auto_update: true,
             keep_history: true,
+            advanced_settings: false,
             low_power: "auto".into(),
         }
     }
@@ -288,6 +291,9 @@ impl Config {
         a.gradient_angle %= 360;
         a.texture_strength = a.texture_strength.min(100);
         a.background_opacity = a.background_opacity.min(100);
+        if !["system", "light", "dark"].contains(&a.theme.as_str()) {
+            a.theme = "system".into();
+        }
         if !TEXTURES.contains(&a.texture.as_str()) {
             a.texture = "none".into();
         }
@@ -484,6 +490,7 @@ mod tests {
         c.hotkeys.insert("new_tab".into(), "Mod+N".into());
         c.behavior.default_zoom = 99.0;
         c.layout.mode = "diagonal".into();
+        c.appearance.theme = "sepia".into();
         c.appearance.background = vec!["#112233".into(), "red;}*{display:none".into()];
         let ws = |id, name: &str| Workspace {
             id,
@@ -498,6 +505,7 @@ mod tests {
         assert_eq!(c.action_for("Mod+W"), Some("close_tab"));
         assert_eq!(c.behavior.default_zoom, 4.0);
         assert_eq!(c.layout.mode, "sidebar-right");
+        assert_eq!(c.appearance.theme, "system");
         assert_eq!(c.appearance.background, ["#112233"]);
         let names: Vec<_> = c.workspaces.iter().map(|w| w.name.as_str()).collect();
         assert_eq!(names, ["Work", "Workspace 3"]);
