@@ -203,7 +203,9 @@ i.dot { display: block; width: 8px; height: 8px; border-radius: 50%; background:
 :root:not([data-side=top]) .tab { flex: none; height: var(--row); }
 :root:not([data-side=top]) #new { height: var(--row); padding: 0 var(--sp-2); }
 :root:not([data-side=top]) .area .url { flex: 1 1 100%; }
-:root:not([data-side=top]) .area .wsbar { flex: 1 1 100%; justify-content: space-between; }
+/* the switcher: "new workspace" at the edge, the workspaces themselves centered */
+:root:not([data-side=top]) .area > .wsbar { flex: 1 1 100%; display: grid; grid-template-columns: 1fr auto 1fr; }
+:root:not([data-side=top]) .area > .wsbar > .chip { justify-self: start; }
 :root:not([data-side=top]) .tab.enter { animation: tab-in var(--d-2) var(--ease-out); }
 :root:not([data-side=top]) .tab.leave { animation: tab-out var(--d-1) var(--ease-in) forwards; pointer-events: none; }
 @keyframes tab-in { from { height: 0; margin-bottom: -2px; opacity: 0; transform: scale(.96); } }
