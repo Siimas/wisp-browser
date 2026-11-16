@@ -18,6 +18,9 @@ engine.
   mouse comes near that window edge
 - **Workspaces**: named groups of tabs with their own icon and color; the
   window takes a tint of the active one, and tabs can be moved between them
+- **Tab basics**: drag tabs to reorder them, pin the ones you keep (compact
+  icon tiles above the list), duplicate a tab, close the others, and reopen
+  the tab you just closed
 - **Private tabs and private windows**: nothing from them is kept on disk or
   saved in the session
 - **Theme editor**: presets, up to three background colors as a gradient,
@@ -58,6 +61,30 @@ Settings > About.
 Every update file is signed, and Wisp refuses any file whose signature does not
 match the key it was built with. Copies you build yourself do not update.
 
+## Uninstall
+
+**macOS**: quit Wisp and drag `Wisp.app` from Applications to the Trash. That
+removes the app and leaves your data. To remove the data as well:
+
+```bash
+rm -rf ~/Library/"Application Support"/Wisp ~/Library/WebKit/io.github.siimas.wisp ~/Library/Caches/io.github.siimas.wisp ~/Library/HTTPStorages/io.github.siimas.wisp*
+```
+
+**Windows**: open Settings > Apps > Installed apps, find Wisp and choose
+**Uninstall** (or run `uninstall.exe` in the install folder). This removes the
+program, its Start menu and desktop shortcuts and its entry in the list. Tick
+**Delete the application data** in the uninstaller to remove your data too, or
+delete the folders below by hand.
+
+What lives where:
+
+| | macOS | Windows |
+| --- | --- | --- |
+| Settings and saved session | `~/Library/Application Support/Wisp/` | `%APPDATA%\Wisp\` |
+| Cookies, cache, site storage | `~/Library/WebKit/io.github.siimas.wisp/`, `~/Library/Caches/io.github.siimas.wisp/`, `~/Library/HTTPStorages/io.github.siimas.wisp*` | `wisp.exe.WebView2\` in the install folder (`%LOCALAPPDATA%\Wisp\` unless you chose another) |
+
+Wisp keeps nothing anywhere else. See [PRIVACY.md](PRIVACY.md).
+
 ## Default hotkeys
 
 `Mod` is `Cmd` on macOS and `Ctrl` on Windows.
@@ -65,6 +92,7 @@ match the key it was built with. Copies you build yourself do not update.
 | Action | Keys |
 | --- | --- |
 | New tab / close tab | `Mod+T` / `Mod+W` |
+| Reopen closed tab | `Mod+Shift+T` |
 | New private tab / private window | `Mod+Shift+P` / `Mod+Shift+N` |
 | Next / previous tab | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
 | Next / previous workspace | `Mod+Alt+Right` / `Mod+Alt+Left` |
@@ -102,10 +130,13 @@ cargo packager --release --formats dmg   # or: --formats nsis on Windows
 
 ## Contributing
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to build, check and submit a
+change, and [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
 `main` is protected: open a pull request, and CI (`cargo fmt --check`,
 `cargo clippy`, `cargo test` on macOS and Windows) must pass before merging.
 
-To cut a release, bump `version` in `Cargo.toml`, merge, then push a matching
+To cut a release, move the Unreleased entries in `CHANGELOG.md` under the new
+version, bump `version` in `Cargo.toml`, merge, then push a matching
 tag (`git tag v0.2.0 && git push origin v0.2.0`). The Release workflow builds
 the installers and publishes them.
 
@@ -141,6 +172,14 @@ as before and offer no automatic update.
   Dock or taskbar icon.
 - No bookmarks, history view, or find-in-page yet.
 
+## Privacy
+
+No telemetry, no accounts, no Wisp server. The app itself only contacts GitHub
+to check for updates and the sites in your tabs for their icons. The full
+statement is in [PRIVACY.md](PRIVACY.md).
+
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). Wisp is built from open-source Rust crates; their licenses are
+in [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES), also reachable from Settings >
+About.

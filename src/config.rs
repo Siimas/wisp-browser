@@ -220,6 +220,7 @@ pub fn default_hotkeys() -> BTreeMap<String, String> {
         ("new_private_tab", "Mod+Shift+P".to_string()),
         ("private_window", "Mod+Shift+N".to_string()),
         ("close_tab", "Mod+W".to_string()),
+        ("reopen_tab", "Mod+Shift+T".to_string()),
         ("next_tab", format!("{ctrl}+Tab")),
         ("prev_tab", format!("{ctrl}+Shift+Tab")),
         ("next_workspace", "Mod+Alt+ArrowRight".to_string()),
@@ -369,6 +370,7 @@ pub struct SavedTab {
     pub url: String,
     pub title: String,
     pub workspace: u32,
+    pub pinned: bool,
     pub active: bool,
 }
 

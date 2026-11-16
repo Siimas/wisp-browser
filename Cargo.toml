@@ -5,6 +5,10 @@ edition = "2024"
 description = "A fast, lightweight, customizable web browser"
 license = "MIT"
 repository = "https://github.com/Siimas/wisp-browser"
+homepage = "https://github.com/Siimas/wisp-browser"
+readme = "README.md"
+keywords = ["browser", "webview", "wry", "adblock", "desktop"]
+categories = ["web-programming", "gui"]
 authors = ["Siimas"]
 
 [dependencies]
@@ -44,3 +48,18 @@ product-name = "Wisp"
 identifier = "io.github.siimas.wisp"
 category = "Productivity"
 icons = ["assets/icon.icns", "assets/icon.ico", "assets/icon.png"]
+# Shown by the installers and by the system: "Publisher" under Windows' Installed
+# apps (without this it would be taken from the identifier and read "github"),
+# the copyright line in the macOS Get Info window.
+publisher = "Siimas"
+copyright = "Copyright (c) 2026 Siimas"
+homepage = "https://github.com/Siimas/wisp-browser"
+description = "A fast, lightweight, customizable web browser"
+# The Windows installer shows this text on its license page.
+license-file = "LICENSE"
+
+[package.metadata.packager.nsis]
+# The Windows uninstaller offers a checkbox, off by default, to also delete these:
+# settings and session, and the web engine's data (cookies, cache, site storage),
+# which WebView2 keeps in a folder beside the program.
+appdata-paths = ['$APPDATA\$PRODUCTNAME', '$INSTDIR\wisp.exe.WebView2']
