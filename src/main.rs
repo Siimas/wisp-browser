@@ -384,7 +384,7 @@ fn build_ui(
                 .any(|p| url.starts_with(p))
         })
         .build_as_child(window)?;
-    adblock::attach(&webview, ""); // it loads site icons; hold it to the same block list
+    adblock::attach_new(&webview, ""); // it loads site icons; hold it to the same block list
     Ok(webview)
 }
 
@@ -594,7 +594,7 @@ impl App {
         let (builder, p5) = (self.with_downloads(builder), self.proxy.clone());
         match builder.build_as_child(&self.window) {
             Ok(webview) => {
-                adblock::attach(&webview, url);
+                adblock::attach_new(&webview, url);
                 native::page_menu(&webview, move |url, private| {
                     let _ = p5.send_event(UserEvent::MenuTab(id, url, private));
                 });

@@ -6,6 +6,27 @@ All notable changes to Wisp are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Ad blocking with real filter lists: EasyList and EasyPrivacy by default, and
+  the EasyList Cookie List, Fanboy's Annoyance List and Peter Lowe's List to
+  choose from in Settings > Ad blocking. Lists are downloaded from their
+  publishers, refreshed every four days in the background (or with Update
+  now), and checked before use: a download that is not a filter list, is too
+  large, or is much shorter than the copy in use is refused and the old copy
+  kept. With no network on the first run, the built-in host list is used.
+- Empty ad slots are hidden (element-hiding rules), on macOS.
+- The shield button turns blocking off, or back on, for the site in the
+  current tab, and shows whether blocking is on there. Sites turned off are
+  listed in Settings > Ad blocking.
+
+### Changed
+
+- On macOS, block rules are compiled once per list version and stored by the
+  web engine, instead of at every launch.
+- Wisp now downloads its ad-blocking lists itself; see PRIVACY.md for the
+  hosts and how often.
+
 ## [0.2.0] - 2026-11-16
 
 ### Added

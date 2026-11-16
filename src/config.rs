@@ -272,6 +272,15 @@ impl Config {
             self.hotkeys.entry(action).or_insert(combo);
         }
         self.behavior.default_zoom = clamp_zoom(self.behavior.default_zoom);
+        // adblock: sites switched off are host names with a dot (never "com" alone).
+        let host = |h: &String| {
+            h.contains('.')
+                && !h.starts_with('.')
+                && h.bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"-.".contains(&b))
+        };
+        self.adblock.off_sites.retain(host);
+        self.adblock.off_sites.dedup();
 
         let l = &mut self.layout;
         if !MODES.contains(&l.mode.as_str()) {

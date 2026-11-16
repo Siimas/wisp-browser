@@ -1308,19 +1308,23 @@ const siteOf = url => { try { const u = new URL(url); return /^https?:$/.test(u.
 const offFor = site => cfg.adblock.off_sites.find(s => site === s || site.endsWith('.' + s));
 let shieldShown = '';
 function renderShield(b, cur) {
-  const site = cur ? siteOf(cur.url) : '', off = !!site && !!offFor(site), on = cfg.adblock.enabled && !off;
-  const key = [on, off, site].join('|');
+  // Private tabs keep nothing on disk, so the per-site switch (saved in settings) is not offered there.
+  const site = cur && !cur.private && !S.private ? siteOf(cur.url) : '', off = !!site && !!offFor(site), on = cfg.adblock.enabled && !off;
+  const key = [on, off, site, S.private || cur && cur.private].join('|');
   if (key === shieldShown) return;
   shieldShown = key;
   b.classList.toggle('on', on);
   b.replaceChildren(svg(on ? 'shield' : 'shield-off'));
+  const priv = S.private || cur && cur.private;
   b.title = !cfg.adblock.enabled ? 'Ad blocking is off. Click to turn it on'
+    : priv ? 'Ad blocking is on. Sites can be switched off from a normal tab'
     : off ? `Blocking is off for ${site}. Click to turn it back on`
     : site ? `Blocking ads and trackers on ${site}. Click to turn off blocking for this site` : 'Ad blocking is on';
   b.ariaLabel = b.title;
 }
 function shieldClick() {
-  const cur = S.tabs.find(t => t.id === S.active), site = cur ? siteOf(cur.url) : '';
+  const cur = S.tabs.find(t => t.id === S.active), site = cur && !cur.private && !S.private ? siteOf(cur.url) : '';
+  if (cfg.adblock.enabled && (S.private || cur && cur.private)) return;
   if (!cfg.adblock.enabled || !site) cfg.adblock.enabled = !cfg.adblock.enabled;
   else if (offFor(site)) cfg.adblock.off_sites = cfg.adblock.off_sites.filter(s => s !== offFor(site));
   else cfg.adblock.off_sites.push(site);

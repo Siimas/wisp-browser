@@ -313,7 +313,8 @@ fn pure_host(n: &Net) -> Option<&str> {
 fn url_filter(n: &Net) -> String {
     let mut s = String::with_capacity(n.body.len() + 24);
     if n.host {
-        s.push_str("^[^:]+://+([^/]+\\.)?");
+        // The host, or a part of it after a dot or a user name (`user@host`).
+        s.push_str("^[^:]+://+([^/]*[.@])?");
     } else if n.start {
         s.push('^');
     }
@@ -851,7 +852,7 @@ mod tests {
             rules.last().unwrap()["action"]["type"],
             "ignore-previous-rules"
         );
-        assert!(filters.contains(&"^[^:]+://+([^/]+\\.)?ads\\.example\\.com[/:]"));
+        assert!(filters.contains(&"^[^:]+://+([^/]*[.@])?ads\\.example\\.com[/:]"));
         assert!(filters.contains(&"/banner/.*/img([^a-zA-Z0-9_.%-].*)?$"));
         assert!(filters.contains(&"^https://x\\.com/a\\.js$"));
         let find = |f: &str| {
@@ -870,7 +871,7 @@ mod tests {
         let path = &find("^https://x\\.com/a\\.js$")["trigger"]["resource-type"];
         assert!(!path.as_array().unwrap().contains(&json!("document")));
         assert_eq!(
-            find("^[^:]+://+([^/]+\\.)?ads\\.example\\.com[/:]")["trigger"].get("resource-type"),
+            find("^[^:]+://+([^/]*[.@])?ads\\.example\\.com[/:]")["trigger"].get("resource-type"),
             None
         );
         // Site exception, and a generic hide rule excepted on one site.

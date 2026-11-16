@@ -272,6 +272,13 @@ thread_local! {
     static ATTACHED: RefCell<HashMap<usize, (u64, bool)>> = RefCell::new(HashMap::new());
 }
 
+/// For a web view just made: forget whatever an earlier view at the same address had.
+pub fn attach_new(webview: &wry::WebView, url: &str) {
+    let key = platform::key(webview);
+    ATTACHED.with_borrow_mut(|m| m.remove(&key));
+    attach(webview, url);
+}
+
 /// Give this web view the current rules, on or off for the site at `url` (the UI
 /// views pass ""). Call when a view is made, when its page changes, and on
 /// `notify`. Returns true when blocking was switched for a page already loading,
@@ -381,14 +388,16 @@ fn update(all: bool) {
 /// look like a good list is refused and the copy we have stays in use.
 fn fetch(list: &List) -> Result<bool, String> {
     // No cookies, no referrer, no identifier: the publisher sees an address asking
-    // for a public file. Redirects to plain HTTP are refused.
-    let client = reqwest::blocking::Client::builder()
-        .https_only(true)
+    // for a public file. Written like the updater's requests, so no new code is built in.
+    let response = reqwest::blocking::Client::new()
+        .get(list.url)
+        .header(reqwest::header::USER_AGENT, "Wisp")
         .timeout(Duration::from_secs(60))
-        .user_agent("Wisp")
-        .build()
+        .send()
         .map_err(|e| e.to_string())?;
-    let response = client.get(list.url).send().map_err(|e| e.to_string())?;
+    if response.url().scheme() != "https" {
+        return Err("the list was redirected to an unencrypted address".into());
+    }
     if !response.status().is_success() {
         return Err(format!("the server answered {}", response.status()));
     }
