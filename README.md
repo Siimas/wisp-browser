@@ -58,10 +58,7 @@ The theme editor is a color wheel laid flat. Place up to three colors for a
 gradient, add a texture, pick an accent, or start from a preset. Light and dark
 are both there, and everything applies as you change it.
 
-<p>
-  <img src="docs/images/theme-editor.webp" alt="The theme editor with the Dusk preset: three color dots on a canvas, a row of swatches, presets and texture settings" width="49%">
-  <img src="docs/images/top-sand.webp" alt="Wisp in light mode with the Sand preset and tabs across the top" width="49%">
-</p>
+![Left: the theme editor with the Dusk preset, three color dots on a canvas above presets and texture settings. Right: Wisp in light mode with the Sand preset and tabs across the top](docs/images/theme-pair.webp)
 
 ## Your toolbar
 
@@ -83,10 +80,7 @@ Every keyboard shortcut can be changed too.
   only from your own tabs, bookmarks and history. Nothing is sent while you
   type.
 
-<p>
-  <img src="docs/images/private.webp" alt="A private window, marked in the sidebar and painted in deep violet" width="49%">
-  <img src="docs/images/history.webp" alt="The History sheet: visited pages listed by day, with search and Clear browsing data" width="49%">
-</p>
+![Left: a private window, marked in the sidebar and painted deep violet. Right: the History sheet, pages listed by day with search and Clear browsing data](docs/images/privacy-pair.webp)
 
 Every request Wisp makes, and every file it keeps, is listed in
 [PRIVACY.md](PRIVACY.md).
