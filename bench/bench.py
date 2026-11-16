@@ -11,6 +11,7 @@
     --browsers wisp,zen,chrome   which to run (default: all three)
     --foreground                 let the browser window come to the front
     --out FILE                   data file to merge into (default docs/performance-data.json)
+    --wisp-app PATH              measure this Wisp.app instead of target/release/Wisp.app
 
 Every browser runs as a separate instance on a throwaway profile under --tmp and is
 stopped by process id. Nothing here touches a real profile or a browser already open.
@@ -184,11 +185,11 @@ class Server(http.server.ThreadingHTTPServer):
             return self.events[token]
 
 
-SIMPLE = """<!doctype html><meta charset=utf-8><title>Simple page</title>
+SIMPLE = """<!doctype html><meta charset=utf-8><title>Benchmark running, please leave open</title>
 <style>body{font:16px/1.5 system-ui;max-width:40em;margin:3em auto}</style>
-<h1>Simple page</h1>%s
+<h1>Benchmark running, please leave this window open</h1>%s
 <script>addEventListener('load',()=>fetch('/done?t=%s'))</script>"""
-OPENER = """<!doctype html><title>opener</title><script>
+OPENER = """<!doctype html><title>Benchmark running, please leave open</title><script>
 const sites=%s;let n=0;const timer=setInterval(()=>{
   if(n<sites.length-1)return void window.open(sites[n++]);
   clearInterval(timer);fetch('/done?t=%s').finally(()=>location.href=sites[n]);
@@ -284,10 +285,17 @@ def launch(name, profile, urls, foreground=False):
     raise RuntimeError(f"{name} did not start")
 
 
+def alive(main):
+    return any(pid == main for pid, _, _ in ps("comm"))
+
+
 def quit(main):
     """Stop the instance we started, by process id only."""
     pids = tree(main)
-    os.kill(main, signal.SIGTERM)
+    try:
+        os.kill(main, signal.SIGTERM)
+    except ProcessLookupError:  # it already went (someone closed the window): nothing to stop
+        return
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline and any(pid == main for pid, _, _ in ps("comm")):
         time.sleep(0.25)
@@ -315,7 +323,7 @@ def bundle_size(app):
 
 def cmd_size(args, server):
     out = {"wisp_binary_mb": round(BROWSERS["wisp"].stat().st_size / 2**20, 2)}
-    apps = {"wisp": REPO / "target/release/Wisp.app", "safari": "/Applications/Safari.app",
+    apps = {"wisp": BROWSERS["wisp"].parents[2], "safari": "/Applications/Safari.app",
             "zen": "/Applications/Zen.app", "chrome": "/Applications/Google Chrome.app"}  # fmt: skip
     for name, app in apps.items():
         out[name] = {"bundle_mb": bundle_size(app)}
@@ -351,17 +359,23 @@ def cmd_onetab(args, server):
     for name in args.browsers:
         runs, profile = [], args.tmp / f"{name}-one"
         shutil.rmtree(profile, ignore_errors=True)
-        for run in range(-1, args.runs):
-            token = f"{name}-one-{run}"
+        run = -1
+        while run < args.runs:
+            token = f"{name}-one-{run}-{time.monotonic_ns()}"
             t0 = time.monotonic()
             main = launch(name, profile, [server.url(f"/simple?t={token}")], args.foreground)
             server.wait(token, 120)
             time.sleep(max(0, (20 if run < 0 else SETTLE_10) - (time.monotonic() - t0)))
             if run >= 0:
-                runs.append({**memory(main), **idle(main)})
+                result = {**memory(main), **idle(main)}
+                if not alive(main):  # closed during the measurement: the numbers are partial
+                    print(f"{name} one tab run {run}: instance ended early, repeating the run", flush=True)
+                    continue
+                runs.append(result)
                 print(f"{name} one tab run {run}: {runs[-1]['footprint_mb']} MB footprint, {runs[-1]['rss_mb']} MB rss, "
                       f"{runs[-1]['cpu_percent_of_one_core']}% cpu", flush=True)  # fmt: skip
             quit(main)
+            run += 1
         out[name] = summarize(runs)
     return out
 
@@ -386,20 +400,30 @@ def cmd_tentabs(args, server):
         modes += [("wisp_all_loaded", "wisp"), ("wisp_restored_not_shown", "wisp")]
     for run in range(args.runs):
         for label, name in modes:  # interleaved, so drift in the sites hits everyone alike
-            profile, token = args.tmp / f"{label}-ten-{run}", f"{label}-ten-{run}"
-            shutil.rmtree(profile, ignore_errors=True)
-            urls = [server.url(f"/opener?t={token}")] if label == "wisp_all_loaded" else SITES
-            t0 = time.monotonic()
-            main = launch(name, profile, urls, args.foreground)
-            if label == "wisp_all_loaded":
-                server.wait(token, 120)
-            time.sleep(max(0, SETTLE_10 - (time.monotonic() - t0)))
-            result = memory(main)
-            result.update(idle(main))
-            print(f"{label} ten tabs run {run}: {result['footprint_mb']} MB footprint, {result['rss_mb']} MB rss, "
-                  f"{result['processes']} processes, {result['cpu_percent_of_one_core']}% cpu", flush=True)  # fmt: skip
-            out.setdefault(label, []).append(result)
-            quit(main)
+            while True:  # repeated if the instance ends before the measurement does
+                profile, token = args.tmp / f"{label}-ten-{run}", f"{label}-ten-{run}-{time.monotonic_ns()}"
+                shutil.rmtree(profile, ignore_errors=True)
+                urls = [server.url(f"/opener?t={token}")] if label == "wisp_all_loaded" else SITES
+                t0 = time.monotonic()
+                main = launch(name, profile, urls, args.foreground)
+                if label == "wisp_all_loaded":
+                    try:
+                        server.wait(token, 120)
+                    except TimeoutError:  # the window went away before the opener finished
+                        print(f"{label} ten tabs run {run}: opener never finished, repeating the run", flush=True)
+                        quit(main)
+                        continue
+                time.sleep(max(0, SETTLE_10 - (time.monotonic() - t0)))
+                result = memory(main)
+                result.update(idle(main))
+                if not alive(main):  # closed during the measurement: the numbers are partial
+                    print(f"{label} ten tabs run {run}: instance ended early, repeating the run", flush=True)
+                    continue
+                print(f"{label} ten tabs run {run}: {result['footprint_mb']} MB footprint, {result['rss_mb']} MB rss, "
+                      f"{result['processes']} processes, {result['cpu_percent_of_one_core']}% cpu", flush=True)  # fmt: skip
+                out.setdefault(label, []).append(result)
+                quit(main)
+                break
     return {label: summarize(runs) for label, runs in out.items()}
 
 
@@ -446,7 +470,10 @@ def main():
     ap.add_argument("--src", help="Speedometer checkout (speedometer only)")
     ap.add_argument("--tmp", type=pathlib.Path, default=pathlib.Path("/tmp/wisp-bench"))
     ap.add_argument("--out", type=pathlib.Path, default=REPO / "docs/performance-data.json")
+    ap.add_argument("--wisp-app", type=pathlib.Path)
     args = ap.parse_args()
+    if args.wisp_app:
+        BROWSERS["wisp"] = args.wisp_app.resolve() / "Contents/MacOS/wisp"
     args.runs = args.runs or (5 if args.what == "coldstart" else 3)
     if args.what == "speedometer" and not args.src:
         ap.error("speedometer needs --src")
