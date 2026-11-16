@@ -55,6 +55,13 @@ enum Msg {
     Ready,
     Drag,
     Maximize,
+    // Windows: the interface draws the window buttons and the top resize edge.
+    Minimize,
+    Close,
+    /// Resize from the top edge ("n") or a top corner ("ne", "nw").
+    Resize {
+        edge: String,
+    },
     Key {
         combo: String,
     },
@@ -339,6 +346,8 @@ struct App {
     store: store::Store,
     started: bool,
     quit: bool,
+    /// As last told to the interface (Windows draws its own restore/maximize button).
+    maximized: bool,
     /// Page tools: this session's downloads, and the last search (tab, query).
     downloads: page_tools::SharedDownloads,
     find_last: Option<(u32, String)>,
@@ -511,6 +520,8 @@ impl App {
             "private": self.private_window,
             "bookmarked": self.active_tab().is_some_and(|t| self.store.is_bookmarked(&t.url)),
             "mac": cfg!(target_os = "macos"),
+            "win": cfg!(windows),
+            "maximized": self.maximized,
             "glass": self.glass.is_some(),
             "version": env!("CARGO_PKG_VERSION"),
             "downloads": self.downloads.borrow().json(),
@@ -1264,6 +1275,17 @@ impl App {
                     let _ = self.window.drag_window();
                 }
                 Msg::Maximize => self.window.set_maximized(!self.window.is_maximized()),
+                Msg::Minimize => self.window.set_minimized(true),
+                Msg::Close => self.quit = true,
+                Msg::Resize { edge } => {
+                    use tao::window::ResizeDirection as D;
+                    let dir = match edge.as_str() {
+                        "ne" => D::NorthEast,
+                        "nw" => D::NorthWest,
+                        _ => D::North,
+                    };
+                    let _ = self.window.drag_resize_window(dir);
+                }
                 Msg::Key { combo } => {
                     if let Some(action) = self.cfg.action_for(&combo).map(str::to_string) {
                         self.action(&action);
@@ -1485,6 +1507,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_title("Wisp")
         .with_inner_size(LogicalSize::new(1280.0, 820.0))
         .with_min_inner_size(LogicalSize::new(560.0, 360.0));
+    // Windows: no title bar of its own. The interface's first row is the title bar and
+    // draws the window buttons; the system keeps the shadow, the side and bottom resize
+    // edges, snapping and rounded corners (see Msg::Minimize and #caption in ui.html).
+    #[cfg(windows)]
+    let builder = {
+        use tao::platform::windows::WindowBuilderExtWindows;
+        builder
+            .with_decorations(false)
+            .with_undecorated_shadow(true)
+    };
     #[cfg(target_os = "macos")]
     let builder = {
         // The interface runs under the title bar; the traffic lights sit on top of it
@@ -1535,6 +1567,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         store: store::Store::load(config::dir(), private_window),
         started: false,
         quit: false,
+        maximized: false,
         downloads: Default::default(),
         find_last: None,
     };
@@ -1551,7 +1584,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Event::WindowEvent {
                 event: WindowEvent::Resized(_),
                 ..
-            } => app.layout(),
+            } => {
+                app.layout();
+                let max = app.window.is_maximized();
+                if max != app.maximized {
+                    app.maximized = max;
+                    app.sync(); // the restore/maximize button changes
+                }
+            }
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
                 ..
