@@ -13,6 +13,7 @@ mod adblock;
 mod config;
 #[cfg(all(target_os = "macos", debug_assertions))]
 mod debug_shot;
+mod filters; // adblock: filter lists
 mod media;
 mod native;
 mod overlay;
@@ -160,6 +161,8 @@ enum Msg {
     SaveSettings {
         config: Box<Config>,
     },
+    /// adblock: Settings > Ad blocking > Update now.
+    AdblockUpdate,
     // Page tools (see page_tools.rs).
     /// Search the page: a new query, or the next/previous match of the same one.
     Find {
@@ -684,7 +687,7 @@ fn build_ui(
                 .any(|p| url.starts_with(p))
         })
         .build_as_child(window)?;
-    adblock::attach(&webview); // it loads site icons; hold it to the same block list
+    adblock::attach_new(&webview, ""); // it loads site icons; hold it to the same block list
     Ok(webview)
 }
 
@@ -870,6 +873,7 @@ impl App {
             "solid": self.solid,
             "version": env!("CARGO_PKG_VERSION"),
             "downloads": self.downloads.borrow().json(),
+            "adblock": adblock::status(),
             "media": self.media_tab().map(|t| t.media.json(t.id, &t.title, &t.url, t.private)),
             "update": {
                 "supported": update::supported(),
@@ -957,7 +961,7 @@ impl App {
         let (builder, p5) = (self.with_downloads(builder, id), self.proxy.clone());
         match builder.build_as_child(&self.window) {
             Ok(webview) => {
-                adblock::attach(&webview);
+                adblock::attach_new(&webview, url);
                 native::page_menu(&webview, move |url, private| {
                     let _ = p5.send_event(UserEvent::MenuTab(id, url, private));
                 });
@@ -1789,7 +1793,7 @@ impl App {
 
     fn recompile_adblock(&self) {
         let proxy = self.proxy.clone();
-        adblock::compile(adblock::configure(&self.cfg.adblock), move || {
+        adblock::configure(&self.cfg.adblock, move || {
             let _ = proxy.send_event(UserEvent::AdblockReady);
         });
     }
@@ -2068,6 +2072,7 @@ impl App {
                     }
                 }
                 Msg::SaveSettings { config } => self.apply_config(*config),
+                Msg::AdblockUpdate => adblock::update_now(),
                 Msg::Find { query, back } => self.find(query, back),
                 Msg::FindClose => self.find_close(),
                 Msg::Download { id, op } => self.download_op(id, &op),
@@ -2134,6 +2139,13 @@ impl App {
             UserEvent::Load(id, started, url) => {
                 if started && self.find_last.as_ref().is_some_and(|f| f.0 == id) {
                     self.find_last = None; // a new page: the next search starts over
+                }
+                // adblock: the rules were already set for this site before it loaded; this
+                // only catches a page that arrived some other way. Never reloads.
+                if let Some(w) = self.tab(id).and_then(|t| t.webview.as_ref())
+                    && started
+                {
+                    adblock::attach(w, &url);
                 }
                 if let Some(tab) = self.tab_mut(id).filter(|t| t.webview.is_some()) {
                     if started {
@@ -2226,12 +2238,25 @@ impl App {
                 self.uis().for_each(|ui| drop(ui.evaluate_script(&js)));
             }
             UserEvent::AdblockReady => {
-                if adblock::REATTACH_AFTER_COMPILE {
-                    let pages = self.tabs.iter().filter_map(|t| t.webview.as_ref());
-                    pages.chain(self.uis()).for_each(adblock::attach);
+                // adblock: new rules, a list fetched, or a site switched on or off.
+                // Only the tab in view is loaded again when its site was just switched (by
+                // the user, from the shield), and as a fresh GET of its address, so a form
+                // is never sent twice. Other tabs take the change on their next page.
+                for tab in &self.tabs {
+                    if let Some(w) = &tab.webview
+                        && adblock::attach(w, &tab.url)
+                        && Some(tab.id) == self.active
+                    {
+                        let _ = w.load_url(&tab.url);
+                    }
+                }
+                for w in self.uis() {
+                    adblock::attach(w, "");
                 }
                 if !self.started {
                     self.start();
+                } else {
+                    self.sync();
                 }
             }
         }

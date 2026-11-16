@@ -914,6 +914,9 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
       <div class="grp"><h2>Ad blocking</h2>
       <div class="card">
         <label class="row" data-keys="ad blocker adblock tracking trackers content blocker"><span>Block ads and trackers<small>Pages load faster, and companies cannot follow you from site to site</small></span> <input type="checkbox" data-k="adblock.enabled"></label>
+        <!-- adblock: list, update and switched-off-site rows are added here by renderAdblock() -->
+        <div class="row adv" id="ab-update-row" data-keys="filter lists easylist easyprivacy update download"><span>Filter lists<small id="ab-note"></small></span>
+          <button class="btn" id="ab-update">Update now</button></div>
         <label class="row col adv" data-keys="block list blocklist domains sites"><span>Extra hosts to block<small>One per line, e.g. ads.example.com. Subdomains are included.</small></span>
           <textarea data-k="adblock.extra_hosts" spellcheck="false"></textarea></label>
       </div>
@@ -1007,6 +1010,7 @@ const ICON = {
   home: 'M2.5 7.5 8 3l5.5 4.5V13H10V9.5H6V13H2.5z',
   plus: 'M8 3v10M3 8h10', close: 'M4 4l8 8M12 4l-8 8', chevron: 'M4 6l4 4 4-4',
   shield: 'M8 2 3 4v4c0 3 2.2 5 5 6 2.8-1 5-3 5-6V4z',
+  'shield-off': 'M8 2 3 4v4c0 3 2.2 5 5 6 2.8-1 5-3 5-6V4zM2.500 2.500l11 11',
   settings: 'M2.5 5h5M11.5 5h2M2.5 11h2M8.500 11h5M9.500 3.500v3M6.500 9.500v3',
   private: 'M2 9.500h12M4.200 9.500l1-4.500h5.600l1 4.500M3.200 12a1.800 1.800 0 0 0 3.600 0M9.200 12a1.800 1.800 0 0 0 3.600 0M6.800 12h2.400',
   window: 'M2.500 5.500h8v8h-8zM5.500 5.500v-3h8v8h-3',
@@ -1171,7 +1175,7 @@ function makeItem(name) {
   } else if (name === 'workspaces') e = el('div', { className: 'wsbar' });
   else {
     e = el('button', { className: 'ib', title: def.label, ariaLabel: def.label }, svg(def.icon));
-    e.onclick = name === 'shield' ? () => { cfg.adblock.enabled = !cfg.adblock.enabled; save(); } : def.run ? () => def.run(e) : () => act(def.act);
+    e.onclick = name === 'shield' ? shieldClick : def.run ? () => def.run(e) : () => act(def.act);
     if (def.run) warm(e);
   }
   e.dataset.item = name;
@@ -1438,7 +1442,7 @@ function renderDynamic() {
     showUrl(url.previousSibling, url.dataset.full);
   }
   $('#progress').classList.toggle('on', !!cur && cur.loading);
-  if (itemEls.shield) { itemEls.shield.classList.toggle('on', cfg.adblock.enabled); itemEls.shield.title = 'Ad blocking is ' + (cfg.adblock.enabled ? 'on' : 'off'); }
+  if (itemEls.shield) renderShield(itemEls.shield, cur);
   if (itemEls.collapse) {
     itemEls.collapse.title = cfg.layout.collapsed ? 'Keep the bar open' : 'Collapse the bar';
     itemEls.collapse.replaceChildren(svg('sidebar', side === 'top' ? 'M2.500 6.500h11' : side === 'left' ? 'M6 3.500v9' : 'M10 3.500v9'));
@@ -1962,6 +1966,77 @@ function setTexture(v, persist) {
 }
 
 // ---------- settings sheet ----------
+// ---------- adblock: the shield (per-site switch) and Settings > Ad blocking ----------
+// A site is its host without "www."; switching it off covers its subdomains too. Local
+// addresses (localhost, IP addresses) have no site to switch.
+const siteOf = url => {
+  try {
+    const u = new URL(url), h = u.hostname.replace(/^www\./, '');
+    return /^https?:$/.test(u.protocol) && h.includes('.') && !/^[\d.]+$|[[:]/.test(h) ? h : '';
+  } catch { return ''; }
+};
+const offFor = site => cfg.adblock.off_sites.find(s => site === s || site.endsWith('.' + s));
+// Private tabs keep nothing on disk, so the per-site switch (saved in settings) is not offered there.
+const shieldSite = cur => cur && !cur.private && !S.private ? siteOf(cur.url) : '';
+let shieldShown = '';
+function renderShield(b, cur) {
+  const site = shieldSite(cur), off = !!site && !!offFor(site), on = cfg.adblock.enabled && !off;
+  const priv = !!(S.private || cur && cur.private), key = [on, off, site, priv, cfg.adblock.enabled].join('|');
+  if (key === shieldShown) return;
+  shieldShown = key;
+  b.classList.toggle('on', on);
+  b.replaceChildren(svg(on ? 'shield' : 'shield-off'));
+  b.title = !cfg.adblock.enabled ? 'Ad blocking is off. Click to turn it on'
+    : off ? `Blocking is off for ${site}. Click to turn it back on`
+    : site ? `Blocking ads and trackers on ${site}. Click to turn off blocking for this site`
+    : priv ? 'Blocking ads and trackers. Sites can be switched off from a normal tab'
+    : 'Blocking ads and trackers';
+  b.ariaLabel = b.title;
+}
+// The shield switches the current site; blocking as a whole is in the app menu and Settings.
+function shieldClick() {
+  const site = shieldSite(S.tabs.find(t => t.id === S.active));
+  if (!cfg.adblock.enabled) cfg.adblock.enabled = true;
+  else if (!site) return;
+  else if (offFor(site)) cfg.adblock.off_sites = cfg.adblock.off_sites.filter(s => s !== offFor(site));
+  else cfg.adblock.off_sites.push(site);
+  save(); // the app switches the page's rules and reloads it
+}
+$('#ab-update').onclick = () => post({ cmd: 'adblock_update' });
+// The list and site rows are rows of the card itself (search and hairlines work on those),
+// made again only when what they show changes.
+let abShown = '';
+function renderAdblock() {
+  const ab = S.adblock, on = cfg.adblock.lists, off = cfg.adblock.off_sites, anchor = $('#ab-update-row');
+  const sig = JSON.stringify([ab.lists.map(l => l.id), on, off, cfg.adblock.enabled]);
+  if (sig !== abShown && !anchor.parentNode.querySelector('.ab-made:focus-within')) {
+    abShown = sig;
+    anchor.parentNode.querySelectorAll('.ab-made').forEach(r => r.remove());
+    anchor.before(...ab.lists.map(l => {
+      const box = el('input', { type: 'checkbox', checked: on.includes(l.id), disabled: !cfg.adblock.enabled,
+        onchange: () => { cfg.adblock.lists = box.checked ? [...on, l.id] : on.filter(x => x !== l.id); save(); } });
+      const row = el('label', { className: 'row adv ab-made' }, el('span', { textContent: l.name }, el('small', { textContent: l.about })), box);
+      row.dataset.keys = 'filter list ' + l.about;
+      return row;
+    }));
+    anchor.after(...off.map((site, i) => {
+      const row = el('div', { className: 'row ab-made' },
+        el('span', { textContent: site }, el('small', { textContent: i ? '' : 'Blocking is off on this site, from the shield button' })),
+        el('button', { className: 'btn', textContent: 'Turn on', onclick: () => { cfg.adblock.off_sites = off.filter(x => x !== site); save(); } }));
+      row.dataset.keys = 'allow allowed exception whitelist site blocking off';
+      return row;
+    }));
+  }
+  const used = ab.lists.filter(l => on.includes(l.id)), times = used.map(l => l.checked).filter(Boolean);
+  const when = times.length ? new Date(Math.min(...times) * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '';
+  $('#ab-note').textContent = ab.busy ? 'Updating…'
+    : ab.problem ? `Could not update: ${ab.problem}. The copies already downloaded stay in use.`
+    : !used.length ? 'No list chosen: the built-in list of ad servers is used.'
+    : times.length < used.length ? 'Not downloaded yet: the built-in list is used until they are.'
+    : `Updated ${when}. Checked every 4 days, in the background.`;
+  $('#ab-update').disabled = ab.busy || !used.length || !cfg.adblock.enabled;
+}
+
 function renderSettings() {
   if (!setOpen) { setOpen = true; if (!$('#set-nav').childElementCount) buildSetNav(); setQ.value = ''; showSec(setSec); }
   for (const f of document.querySelectorAll('[data-k]')) {
@@ -2002,6 +2077,7 @@ function renderSettings() {
     }));
   }
   if (!window.__wispRecording) renderHotkeys();
+  renderAdblock();
   $('#set-clear').hidden = S.private;
   renderTiles(); applyAdvanced();
   filterSettings(); // the lists above were drawn afresh
