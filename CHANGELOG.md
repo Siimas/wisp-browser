@@ -6,6 +6,17 @@ All notable changes to Wisp are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Ad blocking: a page could keep another site's blocking state when a navigation
+  to a site with blocking turned off never showed its page (it failed, was
+  cancelled, or became a download). The switch now happens only once a
+  navigation is allowed, and is undone when the page does not show.
+- Ad blocking: filter-list rules that would block nearly every address
+  (`||*.*^`, `||a*.com^`, `.com^`) or hide whole pages (`body:not(.x)`,
+  `html[lang]`, `:is(html)`, `body > *`) are now refused, as are exceptions for
+  all pings. No rule in today's default lists is affected beyond one each.
+
 ## [0.3.0] - 2026-11-16
 
 On Windows this version does not update itself: Windows Defender quarantined Wisp
