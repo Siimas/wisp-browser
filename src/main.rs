@@ -5,8 +5,8 @@
 //! 1. the interface ("chrome"), filling the whole window: hotbar, sidebar, settings;
 //! 2. one webview per tab. The interface reports the gap it leaves for the page
 //!    (`Msg::PageRect`) and the active tab is placed exactly there, as a rounded card;
-//! 3. the "floater": a second copy of the interface, shown only while a collapsed
-//!    bar is revealed, so that the bar can float over the page.
+//! 3. the "floater": a second copy of the interface raised above the tabs. It shows a
+//!    revealed collapsed bar floating over the page, or a menu (see overlay.rs).
 
 mod adblock;
 mod config;
@@ -14,6 +14,7 @@ mod config;
 mod debug_shot;
 mod media;
 mod native;
+mod overlay;
 mod page_tools;
 mod store;
 mod update;
@@ -170,6 +171,9 @@ enum Msg {
     /// History, bookmarks and suggestions: see `store::Msg`.
     #[serde(untagged)]
     Library(store::Msg),
+    /// Menus floating over the page: see `overlay::Msg`.
+    #[serde(untagged)]
+    Overlay(overlay::Msg),
 }
 
 /// The only messages a page may send (see `build_webview`).
@@ -225,8 +229,19 @@ enum UserEvent {
     Snap(&'static str),
 }
 
+/// What a tab shows. Only the app makes a tab of another kind than `Web`; no address
+/// leads to one, so a page can neither open nor reach it.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Kind {
+    Web,
+    /// The settings sheet of the interface, in the page area. No web view; one at most;
+    /// never saved, so not restored after a restart.
+    Settings,
+}
+
 struct Tab {
     id: u32,
+    kind: Kind,
     workspace: u32,
     private: bool,
     /// Pinned tabs are listed before the others of their workspace.
@@ -281,6 +296,54 @@ fn place_tab(tabs: &mut Vec<Tab>, id: u32, index: usize) {
 /// Pinned tabs before the others, the order otherwise kept; so it holds in every workspace.
 fn group_pinned(tabs: &mut [Tab]) {
     tabs.sort_by_key(|t| !t.pinned);
+}
+
+/// SETTINGS TAB: the one Settings tab, shown in workspace `ws`: created at the end of
+/// it, or moved there from another workspace. Gives its id.
+/// `private`: in a private window it is private like every other tab, so a page it
+/// turns into (see `settings_to_web`) never touches the saved data store.
+fn settings_tab(tabs: &mut Vec<Tab>, ws: u32, private: bool, next_id: &mut u32) -> u32 {
+    match tabs.iter().position(|t| t.kind == Kind::Settings) {
+        Some(pos) if tabs[pos].workspace == ws => tabs[pos].id,
+        found => {
+            let tab = match found {
+                Some(pos) => tabs.remove(pos),
+                None => {
+                    *next_id += 1;
+                    Tab {
+                        id: *next_id - 1,
+                        kind: Kind::Settings,
+                        workspace: ws,
+                        private,
+                        pinned: false,
+                        webview: None,
+                        title: "Settings".into(),
+                        url: String::new(),
+                        loading: false,
+                        zoom: 1.0,
+                        media: Default::default(),
+                    }
+                }
+            };
+            let id = tab.id;
+            tabs.push(Tab {
+                workspace: ws,
+                ..tab
+            });
+            id
+        }
+    }
+}
+
+/// An address typed on the Settings tab: that tab becomes the page, as in other browsers.
+fn settings_to_web(tab: &mut Tab, url: String, zoom: f64, private_window: bool) {
+    (tab.kind, tab.url, tab.title, tab.zoom) = (Kind::Web, url, String::new(), zoom);
+    tab.private |= private_window;
+}
+
+/// Whether a tab goes into the saved session: not a private one, not Settings, not a blank.
+fn saved(t: &Tab) -> bool {
+    t.kind == Kind::Web && !t.private && t.url.starts_with("http")
 }
 
 /// Remember a tab that was just closed from place `index` of its workspace. Private
@@ -385,7 +448,10 @@ struct App {
     /// Windows: lies over the interface's maximize button so the system knows it is there.
     #[cfg(windows)]
     snap: Option<native::SnapButton>,
-    settings_open: bool,
+    /// SETTINGS TAB: the tab to go back to when Settings is closed with Done.
+    settings_from: Option<u32>,
+    /// The floater as a layer for menus (overlay.rs).
+    overlay: overlay::Overlay,
     /// A menu or sheet in the interface is using the page area.
     cover: bool,
     /// The collapsed bar is temporarily shown (floating over the page).
@@ -495,7 +561,7 @@ impl App {
     }
 
     fn page_visible(&self) -> bool {
-        self.insets.is_some() && !self.settings_open && !self.cover
+        self.insets.is_some() && !self.settings_open() && !self.cover
     }
 
     fn layout_pages(&self) {
@@ -512,7 +578,8 @@ impl App {
         let s = self.size();
         let _ = self.chrome.set_bounds(rect(0.0, 0.0, s.width, s.height));
         self.layout_pages();
-        if let Some(f) = &self.floater {
+        // (While it shows a menu, the floater is placed by `show_menu` instead.)
+        if let Some(f) = self.floater.as_ref().filter(|_| !self.overlay.open) {
             let _ = f.set_bounds(self.inset_rect(self.float_insets));
         }
     }
@@ -590,8 +657,9 @@ impl App {
             .filter(|t| t.workspace == self.workspace)
             .map(|t| {
                 json!({"id": t.id, "title": t.title, "url": t.url, "loading": t.loading,
-                       "private": t.private, "pinned": t.pinned,
-                       "playing": t.media.playing(), "muted": t.media.muted()})
+                       "private": t.private, "pinned": t.pinned, "zoom": t.zoom,
+                       "playing": t.media.playing(), "muted": t.media.muted(),
+                       "kind": if t.kind == Kind::Settings { "settings" } else { "web" }})
             })
             .collect();
         let state = json!({
@@ -599,7 +667,8 @@ impl App {
             "active": self.active,
             "workspace": self.workspace,
             "config": self.cfg,
-            "settings": self.settings_open,
+            "settings": self.settings_open(),
+            "settings_tab": self.tabs.iter().any(|t| t.kind == Kind::Settings),
             "peek": self.peek,
             "private": self.private_window,
             "bookmarked": self.active_tab().is_some_and(|t| self.store.is_bookmarked(&t.url)),
@@ -705,8 +774,12 @@ impl App {
                 if zoom != 1.0 {
                     let _ = webview.zoom(zoom);
                 }
-                // New views stack on top; a floating bar must stay above them.
-                if let Some(f) = self.floater.as_ref().filter(|_| self.peek) {
+                // New views stack on top; a floating bar or menu must stay above them.
+                if let Some(f) = self
+                    .floater
+                    .as_ref()
+                    .filter(|_| self.peek || self.overlay.open)
+                {
                     if let Some(glass) = &self.glass {
                         glass.restack(&self.window);
                     }
@@ -727,6 +800,7 @@ impl App {
         self.next_id += 1;
         self.tabs.push(Tab {
             id,
+            kind: Kind::Web,
             workspace: self.workspace,
             private: private || self.private_window,
             pinned: false,
@@ -746,7 +820,7 @@ impl App {
             tab.workspace,
             tab.url.clone(),
             tab.private,
-            tab.webview.is_none(),
+            tab.webview.is_none() && tab.kind == Kind::Web,
         );
         if unloaded {
             let webview = self.build_webview(id, &url, private);
@@ -757,11 +831,11 @@ impl App {
         self.workspace = ws;
         self.active = Some(id);
         self.last_active.insert(ws, id);
-        self.settings_open = false;
         self.layout_pages();
-        if let Some(w) = self.active_webview() {
-            let _ = w.focus();
-        }
+        let _ = match self.active_webview() {
+            Some(w) => w.focus(),
+            None => self.chrome.focus(), // the settings sheet
+        };
         self.sync();
     }
 
@@ -828,7 +902,10 @@ impl App {
 
     fn set_pinned(&mut self, id: u32, pinned: bool) {
         // A private tab is never saved, so pinning it would promise something untrue.
-        let Some(tab) = self.tab_mut(id).filter(|t| !t.private) else {
+        let Some(tab) = self
+            .tab_mut(id)
+            .filter(|t| !t.private && t.kind == Kind::Web)
+        else {
             return;
         };
         tab.pinned = pinned;
@@ -842,12 +919,16 @@ impl App {
             return;
         };
         let src = &self.tabs[pos];
+        if src.kind != Kind::Web {
+            return;
+        }
         let after = self.tabs[..=pos]
             .iter()
             .filter(|t| t.workspace == src.workspace)
             .count();
         let copy = Tab {
             id: 0, // given by `insert_tab`
+            kind: Kind::Web,
             workspace: src.workspace,
             private: src.private,
             pinned: false,
@@ -891,6 +972,7 @@ impl App {
         let known = self.cfg.workspaces.iter().any(|w| w.id == closed.workspace);
         let tab = Tab {
             id: 0, // given by `insert_tab`
+            kind: Kind::Web,
             workspace: if known {
                 closed.workspace
             } else {
@@ -986,7 +1068,10 @@ impl App {
     fn ensure_floater(&mut self) {
         if self.floater.is_none() {
             match build_ui(&self.window, &self.proxy, &self.cfg, true) {
-                Ok(f) => self.floater = Some(f),
+                Ok(f) => {
+                    self.floater = Some(f);
+                    self.overlay.ready = false; // until its page says `overlay_ready`
+                }
                 Err(e) => eprintln!("wisp: could not create floating bar: {e}"),
             }
         }
@@ -1024,6 +1109,9 @@ impl App {
         if self.peek == on {
             return;
         }
+        if on {
+            self.close_menu(); // the floater is needed for the bar
+        }
         self.peek = on;
         if on {
             self.ensure_floater();
@@ -1052,7 +1140,7 @@ impl App {
     /// While the bar is collapsed: reveal it when the cursor reaches its window edge,
     /// hide it again once the cursor has been away for a moment.
     fn poll_cursor(&mut self) {
-        if !self.cfg.layout.collapsed || self.settings_open || self.hold_peek {
+        if !self.cfg.layout.collapsed || self.hold_peek {
             return;
         }
         let (Ok(cursor), Ok(origin)) =
@@ -1113,23 +1201,51 @@ impl App {
     }
 
     fn focus_url(&mut self) {
-        if self.settings_open {
-            self.set_settings_open(false);
-        }
         // The interface focuses its address bar, or answers `PeekFocus` if it is hidden.
         let _ = self.chrome.focus();
         let _ = self.chrome.evaluate_script("wisp.focusUrl()");
     }
 
-    fn set_settings_open(&mut self, open: bool) {
-        self.settings_open = open;
-        self.layout_pages();
-        let _ = match self.active_webview() {
-            Some(w) if !open => w.focus(),
-            _ => self.chrome.focus(),
-        };
-        self.sync();
+    // ---- SETTINGS TAB: Settings opens as a tab of its own kind ----
+
+    fn settings_open(&self) -> bool {
+        self.active_tab().is_some_and(|t| t.kind == Kind::Settings)
     }
+
+    /// Show the Settings tab: the one there is (brought to this workspace), or a new one.
+    fn open_settings(&mut self) {
+        if !self.settings_open() {
+            self.settings_from = self.active;
+        }
+        let (ws, private) = (self.workspace, self.private_window);
+        let id = settings_tab(&mut self.tabs, ws, private, &mut self.next_id);
+        self.select(id);
+    }
+
+    /// Done: close the Settings tab and go back to the tab it was opened from.
+    fn close_settings(&mut self) {
+        let Some(id) = self
+            .tabs
+            .iter()
+            .find(|t| t.kind == Kind::Settings)
+            .map(|t| t.id)
+        else {
+            return;
+        };
+        let ws = self.workspace;
+        let back = self.settings_from.take().filter(|&b| {
+            b != id && self.tab(b).is_some_and(|t| t.workspace == ws) && self.active == Some(id)
+        });
+        match back {
+            Some(b) => {
+                self.remove_tab(id);
+                self.select(b);
+            }
+            None => self.close_tab(id),
+        }
+    }
+
+    // ---- END SETTINGS TAB ----
 
     fn action(&mut self, name: &str) {
         match name {
@@ -1151,8 +1267,7 @@ impl App {
                     env!("CARGO_PKG_VERSION"),
                     "/THIRD-PARTY-NOTICES"
                 );
-                self.new_tab(notices, false);
-                return self.set_settings_open(false);
+                return self.new_tab(notices, false);
             }
             "next_tab" | "prev_tab" => {
                 let step = if name == "next_tab" { 1 } else { -1 };
@@ -1177,13 +1292,15 @@ impl App {
             "focus_url" => return self.focus_url(),
             "find" => {
                 // With Settings open, Mod+F goes to its own search box.
-                if self.settings_open || (self.page_visible() && self.active_webview().is_some()) {
+                if self.settings_open() || (self.page_visible() && self.active_webview().is_some())
+                {
                     let _ = self.chrome.focus();
                     let _ = self.chrome.evaluate_script("wisp.find()");
                 }
                 return;
             }
-            "settings" => return self.set_settings_open(!self.settings_open),
+            "settings" if self.settings_open() => return self.close_settings(),
+            "settings" => return self.open_settings(),
             "close_tab" => return self.close_active(),
             "reopen_tab" => return self.reopen_tab(),
             _ => {}
@@ -1208,10 +1325,14 @@ impl App {
             }
             _ => Ok(()),
         };
+        if name.starts_with("zoom") {
+            self.sync(); // the app menu shows the zoom level
+        }
     }
 
     /// The bar was collapsed, pinned open, or moved: drop any reveal in progress.
     fn bar_mode_changed(&mut self) {
+        self.close_menu();
         self.peek = false;
         self.place_lights();
         self.away_since = None;
@@ -1365,6 +1486,7 @@ impl App {
             }
             self.tabs.push(Tab {
                 id,
+                kind: Kind::Web,
                 workspace,
                 private: false,
                 pinned: saved.pinned,
@@ -1401,7 +1523,7 @@ impl App {
         let tabs = self
             .tabs
             .iter()
-            .filter(|t| !t.private && t.url.starts_with("http"))
+            .filter(|t| saved(t))
             .map(|t| SavedTab {
                 url: t.url.clone(),
                 title: t.title.clone(),
@@ -1443,6 +1565,15 @@ impl App {
                 Msg::Action { name } => self.action(&name),
                 Msg::Navigate { url } => {
                     let url = config::resolve_input(&url, &self.cfg.behavior.search_url);
+                    let (zoom, private) = (self.cfg.behavior.default_zoom, self.private_window);
+                    if let Some(tab) = self.active.and_then(|id| self.tab_mut(id))
+                        && tab.kind == Kind::Settings
+                    {
+                        settings_to_web(tab, url, zoom, private);
+                        let id = tab.id;
+                        self.settings_from = None;
+                        return self.select(id);
+                    }
                     if let Some(w) = self.active_webview() {
                         let _ = w.load_url(&url);
                         let _ = w.focus();
@@ -1510,7 +1641,8 @@ impl App {
                     }
                 }
                 Msg::FloaterDone => {
-                    if let Some(f) = self.floater.as_ref().filter(|_| !self.peek) {
+                    let idle = !self.peek && !self.overlay.open;
+                    if let Some(f) = self.floater.as_ref().filter(|_| idle) {
                         let _ = f.set_visible(false);
                         if let Some(glass) = &self.glass {
                             glass.hide();
@@ -1523,6 +1655,7 @@ impl App {
                 Msg::Download { id, op } => self.download_op(id, &op),
                 Msg::Media { id, op, at } => self.media_op(id, op, at),
                 Msg::Library(msg) => self.library(msg),
+                Msg::Overlay(msg) => self.overlay_msg(msg),
             },
             UserEvent::Page(id, from, msg) => {
                 // Checked against the address the view shows now (it follows redirects
@@ -1773,7 +1906,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         lights_at: [0.0; 4],
         #[cfg(windows)]
         snap: None,
-        settings_open: false,
+        settings_from: None,
+        overlay: Default::default(),
         cover: false,
         peek: false,
         bar_busy: false,
@@ -1806,6 +1940,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(debug_assertions)]
     let launched = Instant::now();
     let mut next_update_check = Instant::now() + Duration::from_secs(5);
+    let mut release_overlay_at = None;
     event_loop.run(move |event, _, control_flow| {
         match event {
             Event::UserEvent(e) => app.handle(e),
@@ -1813,6 +1948,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 event: WindowEvent::Resized(_),
                 ..
             } => {
+                app.close_menu();
                 app.layout();
                 app.place_lights(); // Windows: in physical pixels, so again after a scale change
                 let max = app.window.is_maximized();
@@ -1836,6 +1972,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ..
             } => app.handle(UserEvent::Power),
             Event::MainEventsCleared => {
+                release_overlay_at = app.release_overlay();
                 app.tick();
                 app.poll_cursor();
                 if app.started && Instant::now() >= next_update_check {
@@ -1863,6 +2000,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         // SAFETY: as above.
                         unsafe { std::env::remove_var("WISP_JS") };
                         let _ = app.chrome.evaluate_script(&js);
+                    }
+                    // WISP_OJS=<script>: the same in the overlay copy, after 5s.
+                    if let Some(js) = std::env::var("WISP_OJS").ok().filter(|_| after(5)) {
+                        // SAFETY: as above.
+                        unsafe { std::env::remove_var("WISP_OJS") };
+                        if let Some(f) = &app.floater {
+                            let _ = f.evaluate_script(&js);
+                        }
                     }
                     #[cfg(target_os = "macos")]
                     if let Some(path) = std::env::var_os("WISP_SHOT").filter(|_| after(6)) {
@@ -1892,7 +2037,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else if app.cfg.layout.collapsed || cfg!(debug_assertions) {
             ControlFlow::WaitUntil(Instant::now() + app.poll_every)
         } else {
-            ControlFlow::WaitUntil(next_update_check)
+            let at = release_overlay_at.map_or(next_update_check, |r| r.min(next_update_check));
+            ControlFlow::WaitUntil(at)
         };
     });
 }
@@ -1900,8 +2046,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        App, CLOSED_MAX, PageMsg, Side, Tab, Zone, ease_out, group_pinned, low_power, origin,
-        place_tab, remember_closed, same_origin, zone,
+        App, CLOSED_MAX, Kind, PageMsg, Side, Tab, Zone, ease_out, group_pinned, low_power, origin,
+        place_tab, remember_closed, same_origin, saved, settings_tab, settings_to_web, zone,
     };
     use crate::native::Power;
 
@@ -1936,6 +2082,7 @@ mod tests {
     fn tab(id: u32, workspace: u32, pinned: bool) -> Tab {
         Tab {
             id,
+            kind: super::Kind::Web,
             workspace,
             private: false,
             pinned,
@@ -2042,6 +2189,45 @@ mod tests {
         place_tab(&mut tabs, 9, back.index);
         assert_eq!(order(&tabs, 1), [1, 9, 3]);
         assert_eq!(tabs[1].url, "https://example.com/2");
+    }
+
+    #[test]
+    fn there_is_one_settings_tab_and_it_is_never_kept() {
+        let mut tabs = vec![tab(1, 1, false), tab(2, 2, false)];
+        let mut next = 3;
+        let id = settings_tab(&mut tabs, 1, false, &mut next);
+        assert_eq!((id, next, tabs.len()), (3, 4, 3));
+        assert_eq!(order(&tabs, 1), [1, 3]); // at the end of the workspace it was opened in
+        // Opening Settings again selects the same tab.
+        assert_eq!(settings_tab(&mut tabs, 1, false, &mut next), 3);
+        assert_eq!((next, tabs.len()), (4, 3));
+        // From another workspace, it comes along rather than a second one appearing.
+        assert_eq!(settings_tab(&mut tabs, 2, false, &mut next), 3);
+        assert_eq!((order(&tabs, 1), order(&tabs, 2)), (vec![1], vec![2, 3]));
+        let settings = tabs.iter().find(|t| t.id == 3).unwrap();
+        assert_eq!(settings.kind, Kind::Settings);
+        // Never saved (so not restored after a restart) and never offered to reopen.
+        assert!(!saved(settings) && saved(&tabs[0]));
+        let mut closed = Vec::new();
+        remember_closed(&mut closed, settings, 1);
+        assert!(closed.is_empty());
+    }
+
+    #[test]
+    fn in_a_private_window_settings_and_what_it_becomes_stay_private() {
+        let mut tabs = Vec::new();
+        let id = settings_tab(&mut tabs, 1, true, &mut 1);
+        assert!(tabs[0].private && tabs[0].id == id);
+        // Typing an address on it: a private web tab at the default zoom, never saved.
+        settings_to_web(&mut tabs[0], "https://example.com/".into(), 1.25, true);
+        let t = &tabs[0];
+        assert!(t.kind == Kind::Web && t.private && !saved(t));
+        assert_eq!((t.url.as_str(), t.zoom), ("https://example.com/", 1.25));
+        // Even if the Settings tab had somehow not been marked private.
+        let mut tabs = Vec::new();
+        settings_tab(&mut tabs, 1, false, &mut 1);
+        settings_to_web(&mut tabs[0], "https://example.com/".into(), 1.0, true);
+        assert!(tabs[0].private);
     }
 
     #[test]
