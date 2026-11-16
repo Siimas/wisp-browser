@@ -8,6 +8,8 @@ repository = "https://github.com/Siimas/wisp-browser"
 authors = ["Siimas"]
 
 [dependencies]
+# System TLS (no bundled crypto library): smaller, and nothing to compile in C.
+cargo-packager-updater = { version = "0.2.3", default-features = false, features = ["native-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tao = "0.37.2"
@@ -18,7 +20,7 @@ wry = "0.57.2"
 muda = { version = "0.21.2", default-features = false }
 block2 = "0.6"
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSString", "NSError"] }
+objc2-foundation = { version = "0.3", features = ["NSString", "NSError", "NSURL", "NSGeometry"] }
 objc2-web-kit = { version = "0.3", features = [
     "WKContentRuleList",
     "WKContentRuleListStore",
@@ -29,6 +31,7 @@ objc2-web-kit = { version = "0.3", features = [
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.39"
 windows-core = "0.62"
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
 
 [profile.release]
 lto = true

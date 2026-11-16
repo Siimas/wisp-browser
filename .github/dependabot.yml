@@ -10,6 +10,8 @@ updates:
     # These must match the versions wry itself uses, so skip major/minor bumps
     # (they move when wry moves). Patch releases still come through.
     ignore:
+      - dependency-name: "windows"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "windows-core"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "webview2-com"

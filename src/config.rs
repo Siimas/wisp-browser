@@ -22,6 +22,22 @@ pub const MODES: [&str; 4] = [
     "top-compact",
 ];
 pub const TEXTURES: [&str; 5] = ["none", "grain", "dots", "lines", "grid"];
+/// Everything the user can place in a toolbar area. `spacer` may appear many times.
+pub const ITEMS: [&str; 13] = [
+    "collapse",
+    "back",
+    "forward",
+    "reload",
+    "home",
+    "url",
+    "workspaces",
+    "new_tab",
+    "private_tab",
+    "private_window",
+    "shield",
+    "settings",
+    "spacer",
+];
 
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 #[serde(default)]
@@ -32,7 +48,54 @@ pub struct Layout {
     pub collapsed: bool,
     /// While collapsed, moving the mouse onto the strip shows the bar until it leaves.
     pub hover_expand: bool,
+    /// How close to that edge, in pixels, the mouse must come.
+    pub hover_zone: u16,
     pub sidebar_width: u16,
+    pub areas: Areas,
+}
+
+/// Which items sit where, in order. The tab list itself is fixed between
+/// `before_tabs` and `after_tabs` (above/below it in a sidebar, left/right in a top bar).
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
+#[serde(default)]
+pub struct Areas {
+    pub hotbar: Vec<String>,
+    pub before_tabs: Vec<String>,
+    pub after_tabs: Vec<String>,
+}
+
+impl Default for Areas {
+    fn default() -> Self {
+        let v = |items: &[&str]| items.iter().map(|s| s.to_string()).collect();
+        Self {
+            hotbar: v(&[
+                "back", "forward", "reload", "spacer", "url", "spacer", "shield", "settings",
+                "collapse",
+            ]),
+            before_tabs: v(&[]),
+            after_tabs: v(&["workspaces"]),
+        }
+    }
+}
+
+impl Areas {
+    /// Keep known items only, each at most once (spacers excepted), and make sure
+    /// the settings button exists somewhere so the user cannot lock themselves out.
+    fn sanitize(&mut self) {
+        let mut seen = std::collections::HashSet::new();
+        for area in [
+            &mut self.hotbar,
+            &mut self.before_tabs,
+            &mut self.after_tabs,
+        ] {
+            area.retain(|item| {
+                ITEMS.contains(&item.as_str()) && (item == "spacer" || seen.insert(item.clone()))
+            });
+        }
+        if !seen.contains("settings") {
+            self.after_tabs.push("settings".into());
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
@@ -45,6 +108,8 @@ pub struct Appearance {
     /// 0-3 colors painted behind the bar; empty = plain theme background.
     pub background: Vec<String>,
     pub gradient_angle: u16,
+    /// How strongly the colors cover the theme background, 0-100.
+    pub background_opacity: u8,
     /// One of `TEXTURES`.
     pub texture: String,
     pub texture_strength: u8, // 0-100
@@ -60,6 +125,8 @@ pub struct Behavior {
     pub search_url: String,
     pub restore_session: bool,
     pub default_zoom: f64,
+    /// Download new versions in the background and install them on quit.
+    pub auto_update: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
@@ -75,6 +142,9 @@ pub struct Workspace {
     pub id: u32,
     pub name: String,
     pub color: String,
+    /// Name of a line icon from the interface's set; empty = a dot in the workspace color.
+    #[serde(default)]
+    pub icon: String,
 }
 
 impl Default for Layout {
@@ -83,7 +153,9 @@ impl Default for Layout {
             mode: MODES[0].into(),
             collapsed: false,
             hover_expand: true,
-            sidebar_width: 260,
+            hover_zone: 32,
+            sidebar_width: 220,
+            areas: Areas::default(),
         }
     }
 }
@@ -97,6 +169,7 @@ impl Default for Appearance {
             font_size: 13,
             background: Vec::new(),
             gradient_angle: 160,
+            background_opacity: 100,
             texture: "none".into(),
             texture_strength: 30,
             custom_css: String::new(),
@@ -112,6 +185,7 @@ impl Default for Behavior {
             search_url: "https://duckduckgo.com/?q=%s".into(),
             restore_session: true,
             default_zoom: 1.0,
+            auto_update: true,
         }
     }
 }
@@ -176,13 +250,16 @@ impl Config {
         if !MODES.contains(&l.mode.as_str()) {
             l.mode = MODES[0].into();
         }
-        l.sidebar_width = l.sidebar_width.clamp(180, 420);
+        l.sidebar_width = l.sidebar_width.clamp(150, 420);
+        l.hover_zone = l.hover_zone.clamp(4, 160);
+        l.areas.sanitize();
 
         let a = &mut self.appearance;
         a.font_size = a.font_size.clamp(10, 20);
         a.radius = a.radius.min(20);
         a.gradient_angle %= 360;
         a.texture_strength = a.texture_strength.min(100);
+        a.background_opacity = a.background_opacity.min(100);
         if !TEXTURES.contains(&a.texture.as_str()) {
             a.texture = "none".into();
         }
@@ -202,12 +279,18 @@ impl Config {
             if w.name.trim().is_empty() {
                 w.name = format!("Workspace {}", w.id);
             }
+            // An icon is a short name; anything else (an old emoji, junk) means "none".
+            let named = w.icon.len() <= 16 && w.icon.chars().all(|c| c.is_ascii_lowercase());
+            if !named {
+                w.icon.clear();
+            }
         }
         if self.workspaces.is_empty() {
             self.workspaces.push(Workspace {
                 id: 1,
                 name: "Personal".into(),
                 color: Appearance::default().accent,
+                icon: String::new(),
             });
         }
         self
@@ -277,6 +360,19 @@ pub struct SavedTab {
     pub title: String,
     pub workspace: u32,
     pub active: bool,
+}
+
+/// The version that ran last time, if it differs from this one: the app was updated
+/// since. Records this version for next time. `None` on a first run or no change.
+pub fn updated_from() -> Option<String> {
+    let now = env!("CARGO_PKG_VERSION");
+    let before = fs::read_to_string(dir().join("version")).ok();
+    if before.as_deref().map(str::trim) != Some(now) {
+        write("version", now);
+    }
+    before
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty() && v != now)
 }
 
 pub fn load_session() -> Session {
@@ -359,6 +455,7 @@ mod tests {
             id,
             name: name.into(),
             color: "nope".into(),
+            icon: if id == 2 { "cart" } else { "\u{1F6D2}" }.into(),
         };
         c.workspaces = vec![ws(2, "Work"), ws(2, "Dup"), ws(0, "Zero"), ws(3, " ")];
         let c = c.sanitized();
@@ -371,6 +468,17 @@ mod tests {
         let names: Vec<_> = c.workspaces.iter().map(|w| w.name.as_str()).collect();
         assert_eq!(names, ["Work", "Workspace 3"]);
         assert_eq!(c.workspaces[0].color, "#6c8cff");
+        assert_eq!(c.workspaces[0].icon, "cart");
+        assert_eq!(c.workspaces[1].icon, "");
+
+        let mut c = Config::default();
+        c.layout.areas.hotbar = ["url", "bogus", "spacer", "url", "spacer", "back"]
+            .map(String::from)
+            .to_vec();
+        c.layout.areas.after_tabs = vec!["back".into()];
+        let a = c.sanitized().layout.areas;
+        assert_eq!(a.hotbar, ["url", "spacer", "spacer", "back"]);
+        assert_eq!(a.after_tabs, ["settings"]);
         assert_eq!(Config::default().sanitized().workspaces[0].name, "Personal");
     }
 }

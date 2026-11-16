@@ -1,15 +1,27 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 //! Wisp: a small browser shell around the operating system's own web engine.
-//! One window holds a "chrome" webview (the sidebar or top bar, plus the settings
-//! page) and one webview per tab beside it.
+//!
+//! The window holds three kinds of webview, bottom to top:
+//! 1. the interface ("chrome"), filling the whole window: hotbar, sidebar, settings;
+//! 2. one webview per tab. The interface reports the gap it leaves for the page
+//!    (`Msg::PageRect`) and the active tab is placed exactly there, as a rounded card;
+//! 3. the "floater": a second copy of the interface, shown only while a collapsed
+//!    bar is revealed, so that the bar can float over the page.
 
 mod adblock;
 mod config;
+#[cfg(all(target_os = "macos", debug_assertions))]
+mod debug_shot;
+mod native;
+mod update;
 
 use config::{Config, SavedTab, Session};
 use serde::Deserialize;
 use serde_json::json;
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant},
+};
 use tao::{
     dpi::{LogicalPosition, LogicalSize},
     event::{Event, WindowEvent},
@@ -18,8 +30,21 @@ use tao::{
 };
 use wry::{NewWindowResponse, PageLoadEvent, Rect, WebView, WebViewBuilder};
 
-/// Thickness of the strip left at the window edge while the bar is collapsed.
-const STRIP: f64 = 6.0;
+// Collapsed bar: how the cursor brings it back and lets it go again.
+/// Overshooting the window edge by up to this much still counts as reaching it, so
+/// the bar does not slip away when the window is not at the edge of the screen.
+const OVERSHOOT: f64 = 120.0;
+/// Cursor may stray this far past the bar before it counts as having left.
+const LEAVE_MARGIN: f64 = 36.0;
+/// How long the cursor must stay away before the bar hides again.
+const LEAVE_DELAY: Duration = Duration::from_millis(180);
+/// How often the cursor is checked while the bar is collapsed.
+const POLL: Duration = Duration::from_millis(25);
+/// Look for a new version this often (and once shortly after start).
+const UPDATE_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
+/// The page card gliding to a new size (keep in step with --d-3 in ui.html).
+const PAGE_GLIDE: Duration = Duration::from_millis(220);
+const FRAME: Duration = Duration::from_millis(8);
 
 /// Messages from the UI (and, for `Key` only, from pages).
 #[derive(Deserialize)]
@@ -43,13 +68,48 @@ enum Msg {
     CloseTab {
         id: u32,
     },
+    MoveTab {
+        id: u32,
+        workspace: u32,
+    },
     SelectWorkspace {
         id: u32,
     },
-    /// Mouse entered or left the collapsed bar.
+    /// Where things go, as distances from each window edge (left, top, right, bottom):
+    /// the gap left for the page, and the area a floating bar would take.
+    PageRect {
+        page: [f64; 4],
+        float: [f64; 4],
+        /// Corner radius of the page card.
+        radius: f64,
+        /// The floating bar's visible panel inside `float` (same form), and its corner radius.
+        #[serde(default)]
+        panel: [f64; 4],
+        #[serde(default)]
+        panel_radius: f64,
+        /// macOS: where the window buttons go: x of the first one, and the vertical
+        /// center of the row they share with the bar.
+        #[serde(default)]
+        lights: [f64; 2],
+        /// Glide to the new size (a layout change) instead of jumping.
+        animate: bool,
+    },
+    /// The interface needs the page area for itself (a menu or sheet is open).
+    Cover {
+        on: bool,
+    },
+    /// The user is typing in the bar; do not hide a revealed bar under them.
+    Busy {
+        on: bool,
+    },
+    /// Reveal the collapsed bar.
     Peek {
         on: bool,
     },
+    /// The address bar is not on screen: reveal the bar and focus it there.
+    PeekFocus,
+    /// The floating bar finished sliding away.
+    FloaterDone,
     SaveSettings {
         config: Box<Config>,
     },
@@ -64,6 +124,8 @@ enum UserEvent {
     /// A page in tab `.0` asked for a new window.
     NewTab(u32, String),
     AdblockReady,
+    /// An update check finished: a version ready to install, none, or why it failed.
+    Update(Result<Option<Box<update::Ready>>, String>),
 }
 
 struct Tab {
@@ -78,20 +140,53 @@ struct Tab {
     zoom: f64,
 }
 
-#[derive(PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 enum Side {
     Top,
     Left,
     Right,
 }
 
+/// Where the cursor is relative to a collapsed bar.
+#[derive(PartialEq, Debug)]
+enum Zone {
+    /// At the window edge the bar lives on: reveal it.
+    Edge,
+    /// Over (or just past) the revealed bar: keep it.
+    Bar,
+    Away,
+}
+
+/// `x`,`y` are window coordinates, `w` the window width, `bar` the bar's thickness,
+/// `near` how close to the bar's window edge the cursor must come to reveal it.
+fn zone(side: Side, x: f64, y: f64, w: f64, bar: f64, near: f64) -> Zone {
+    let dist = match side {
+        Side::Top => y,
+        Side::Left => x,
+        Side::Right => w - x,
+    };
+    match dist {
+        d if d < -OVERSHOOT => Zone::Away,
+        d if d <= near => Zone::Edge,
+        d if d <= bar + LEAVE_MARGIN => Zone::Bar,
+        _ => Zone::Away,
+    }
+}
+
+/// Position `t` (0..1) along a glide that starts fast and settles softly.
+fn ease_out(t: f64) -> f64 {
+    1.0 - (1.0 - t.clamp(0.0, 1.0)).powi(5)
+}
+
 struct App {
     // Webviews are declared before the window so they are dropped first.
     tabs: Vec<Tab>,
+    floater: Option<WebView>,
     chrome: WebView,
     window: Window,
     proxy: EventLoopProxy<UserEvent>,
     cfg: Config,
+    user_agent: Option<String>,
     /// Id of the tab on screen.
     active: Option<u32>,
     /// Id of the workspace on screen.
@@ -99,13 +194,37 @@ struct App {
     /// workspace id -> the tab last used there.
     last_active: HashMap<u32, u32>,
     next_id: u32,
+    /// Gap the interface leaves for the page: left, top, right, bottom. `None` until
+    /// the interface has laid itself out once.
+    insets: Option<[f64; 4]>,
+    /// A glide in progress: the gap it started from, and when.
+    glide: Option<([f64; 4], Instant)>,
+    /// Area the floating bar takes, same form as `insets`.
+    float_insets: [f64; 4],
+    page_radius: f64,
+    /// The floating bar's visible panel (same form as `insets`) and its corner radius.
+    panel_insets: [f64; 4],
+    panel_radius: f64,
+    /// Frosted glass shown behind the floating bar, where the platform has it.
+    glass: Option<native::Glass>,
+    /// macOS: inset of the window buttons, as last applied.
+    lights: [f64; 2],
     settings_open: bool,
-    /// The collapsed bar is temporarily shown (mouse over it, or typing an address).
+    /// A menu or sheet in the interface is using the page area.
+    cover: bool,
+    /// The collapsed bar is temporarily shown (floating over the page).
     peek: bool,
+    bar_busy: bool,
+    /// When the cursor left a revealed bar.
+    away_since: Option<Instant>,
+    /// Development only: keep the bar revealed whatever the cursor does.
+    hold_peek: bool,
+    /// A newer version, downloaded and waiting for quit (or "Restart to update").
+    update: Option<update::Ready>,
+    /// What the last update check found, for the settings page.
+    update_note: String,
     /// Started with `--private`: every tab is private and nothing is saved.
     private_window: bool,
-    /// macOS: whether the bar currently extends under the title bar.
-    overlay: Option<bool>,
     started: bool,
     quit: bool,
 }
@@ -120,6 +239,35 @@ fn rect(x: f64, y: f64, w: f64, h: f64) -> Rect {
 fn keys_script(cfg: &Config) -> String {
     let combos: Vec<&String> = cfg.hotkeys.values().collect();
     include_str!("keys.js").replace("__KEYS__", &serde_json::to_string(&combos).unwrap())
+}
+
+/// Build a webview running the interface: the main one, or the floating copy.
+fn build_ui(
+    window: &Window,
+    proxy: &EventLoopProxy<UserEvent>,
+    cfg: &Config,
+    floater: bool,
+) -> wry::Result<WebView> {
+    let proxy = proxy.clone();
+    let webview = WebViewBuilder::new()
+        .with_html(include_str!("ui.html"))
+        .with_initialization_script(format!("window.__wispFloater = {floater};"))
+        .with_initialization_script(keys_script(cfg))
+        .with_transparent(floater)
+        .with_visible(!floater)
+        .with_ipc_handler(move |req| match serde_json::from_str(req.body()) {
+            Ok(msg) => drop(proxy.send_event(UserEvent::Ui(msg))),
+            Err(e) => eprintln!("wisp: bad UI message: {e}"),
+        })
+        // The UI webview is privileged; never let it navigate to real content.
+        .with_navigation_handler(|url| {
+            !["http:", "https:", "file:"]
+                .iter()
+                .any(|p| url.starts_with(p))
+        })
+        .build_as_child(window)?;
+    adblock::attach(&webview); // it loads site icons; hold it to the same block list
+    Ok(webview)
 }
 
 /// ponytail: a private window is a second copy of the app started with `--private`,
@@ -142,79 +290,58 @@ impl App {
         }
     }
 
-    /// Thickness of the bar when shown. Must match the sizes in ui.html.
-    fn bar_size(&self) -> f64 {
-        match self.cfg.layout.mode.as_str() {
-            "top-compact" => 68.0,
-            "top-relaxed" => 84.0,
-            _ => self.cfg.layout.sidebar_width as f64,
-        }
-    }
-
-    fn bar_shown(&self) -> bool {
-        !self.cfg.layout.collapsed || self.peek
-    }
-
-    /// macOS: let the bar run under the title bar (traffic lights sit on top of it).
-    /// Only when the bar is on the lights' side; otherwise they would cover the page.
-    fn wants_overlay(&self) -> bool {
-        cfg!(target_os = "macos") && !self.cfg.layout.collapsed && self.side() != Side::Right
-    }
-
     fn size(&self) -> LogicalSize<f64> {
         self.window
             .inner_size()
             .to_logical(self.window.scale_factor())
     }
 
-    /// (bar, page) rectangles.
-    /// ponytail: a peeking bar pushes the page aside rather than floating over it,
-    /// so pages re-flow on hover. Upgrade path: raise the bar webview above the tab
-    /// webviews (native z-order per platform) and leave the page size alone.
-    fn rects(&self) -> (Rect, Rect) {
+    fn inset_rect(&self, [l, t, r, b]: [f64; 4]) -> Rect {
         let s = self.size();
-        let (w, h) = (s.width, s.height);
-        let t = if self.bar_shown() {
-            self.bar_size()
-        } else {
-            STRIP
+        rect(l, t, s.width - l - r, s.height - t - b)
+    }
+
+    /// The page gap right now: mid-glide, somewhere between the old and the new one.
+    fn page_insets(&self) -> [f64; 4] {
+        let target = self.insets.unwrap_or_default();
+        let Some((from, start)) = self.glide else {
+            return target;
         };
-        let (bar, page) = match self.side() {
-            Side::Top => (rect(0.0, 0.0, w, t), rect(0.0, t, w, h - t)),
-            Side::Left => (rect(0.0, 0.0, t, h), rect(t, 0.0, w - t, h)),
-            Side::Right => (rect(w - t, 0.0, t, h), rect(0.0, 0.0, w - t, h)),
-        };
-        if self.settings_open {
-            (rect(0.0, 0.0, w, h), page)
-        } else {
-            (bar, page)
+        let k = ease_out(start.elapsed().as_secs_f64() / PAGE_GLIDE.as_secs_f64());
+        std::array::from_fn(|i| from[i] + (target[i] - from[i]) * k)
+    }
+
+    fn page_visible(&self) -> bool {
+        self.insets.is_some() && !self.settings_open && !self.cover
+    }
+
+    fn layout_pages(&self) {
+        let page = self.inset_rect(self.page_insets());
+        for tab in &self.tabs {
+            if let Some(w) = &tab.webview {
+                let _ = w.set_bounds(page);
+                let _ = w.set_visible(self.active == Some(tab.id) && self.page_visible());
+            }
         }
     }
 
     fn layout(&self) {
-        let (bar, page) = self.rects();
-        let _ = self.chrome.set_bounds(bar);
-        for tab in &self.tabs {
-            if let Some(w) = &tab.webview {
-                let _ = w.set_bounds(page);
-                let _ = w.set_visible(self.active == Some(tab.id) && !self.settings_open);
-            }
+        let s = self.size();
+        let _ = self.chrome.set_bounds(rect(0.0, 0.0, s.width, s.height));
+        self.layout_pages();
+        if let Some(f) = &self.floater {
+            let _ = f.set_bounds(self.inset_rect(self.float_insets));
         }
     }
 
-    /// `layout`, plus switching the macOS title bar style when the bar moved.
-    fn relayout(&mut self) {
-        let overlay = self.wants_overlay();
-        if self.overlay != Some(overlay) {
-            self.overlay = Some(overlay);
-            #[cfg(target_os = "macos")]
-            {
-                use tao::platform::macos::WindowExtMacOS;
-                self.window.set_fullsize_content_view(overlay);
-                self.window.set_titlebar_transparent(overlay);
+    /// Advance a page glide by one frame.
+    fn tick(&mut self) {
+        if let Some((_, start)) = self.glide {
+            if start.elapsed() >= PAGE_GLIDE {
+                self.glide = None;
             }
+            self.layout_pages();
         }
-        self.layout();
     }
 
     fn tab(&self, id: u32) -> Option<&Tab> {
@@ -243,6 +370,11 @@ impl App {
             .collect()
     }
 
+    /// Both copies of the interface.
+    fn uis(&self) -> impl Iterator<Item = &WebView> {
+        std::iter::once(&self.chrome).chain(&self.floater)
+    }
+
     /// Push the current state to the UI.
     fn sync(&self) {
         let tabs: Vec<_> = self
@@ -260,15 +392,21 @@ impl App {
             "workspace": self.workspace,
             "config": self.cfg,
             "settings": self.settings_open,
-            "shown": self.bar_shown() || self.settings_open,
             "peek": self.peek,
             "private": self.private_window,
             "mac": cfg!(target_os = "macos"),
-            "lights": self.overlay == Some(true),
+            "glass": self.glass.is_some(),
+            "version": env!("CARGO_PKG_VERSION"),
+            "update": {
+                "supported": update::supported(),
+                "ready": self.update.as_ref().map(|u| u.version.as_str()),
+                "note": self.update_note,
+            },
         });
-        let _ = self
-            .chrome
-            .evaluate_script(&format!("window.wisp && wisp.state({state})"));
+        let js = format!("window.wisp && wisp.state({state})");
+        for ui in self.uis() {
+            let _ = ui.evaluate_script(&js);
+        }
         let title = self.active_tab().map(|t| t.title.as_str()).unwrap_or("");
         let app = if self.private_window {
             "Wisp (Private)"
@@ -298,9 +436,10 @@ impl App {
             self.proxy.clone(),
             self.proxy.clone(),
         );
-        let built = WebViewBuilder::new()
+        let mut builder = WebViewBuilder::new()
             .with_url(url)
-            .with_bounds(self.rects().1)
+            .with_bounds(self.inset_rect(self.page_insets()))
+            .with_visible(self.page_visible())
             .with_incognito(private)
             .with_back_forward_navigation_gestures(true)
             .with_initialization_script(keys_script(&self.cfg))
@@ -327,14 +466,24 @@ impl App {
                     let _ = p4.send_event(UserEvent::NewTab(id, url));
                 }
                 NewWindowResponse::Deny
-            })
-            .build_as_child(&self.window);
-        match built {
+            });
+        if let Some(ua) = &self.user_agent {
+            builder = builder.with_user_agent(ua);
+        }
+        match builder.build_as_child(&self.window) {
             Ok(webview) => {
                 adblock::attach(&webview);
+                native::round_corners(&webview, self.page_radius);
                 let zoom = self.cfg.behavior.default_zoom;
                 if zoom != 1.0 {
                     let _ = webview.zoom(zoom);
+                }
+                // New views stack on top; a floating bar must stay above them.
+                if let Some(f) = self.floater.as_ref().filter(|_| self.peek) {
+                    if let Some(glass) = &self.glass {
+                        glass.restack(&self.window);
+                    }
+                    native::raise(f, &self.window);
                 }
                 Some(webview)
             }
@@ -380,11 +529,27 @@ impl App {
         self.active = Some(id);
         self.last_active.insert(ws, id);
         self.settings_open = false;
-        self.layout();
+        self.layout_pages();
         if let Some(w) = self.active_webview() {
             let _ = w.focus();
         }
         self.sync();
+    }
+
+    /// The tab on screen went away (closed or moved): show the nearest remaining tab
+    /// of workspace `ws`, counting from list position `pos`, or a fresh one.
+    fn show_neighbor(&mut self, ws: u32, pos: usize) {
+        let neighbor = self
+            .tabs
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.workspace == ws)
+            .min_by_key(|(i, _)| i.abs_diff(pos))
+            .map(|(_, t)| t.id);
+        match neighbor {
+            Some(next) => self.select(next),
+            None => self.open_blank(),
+        }
     }
 
     fn close_tab(&mut self, id: u32) {
@@ -393,18 +558,30 @@ impl App {
         };
         let ws = self.tabs.remove(pos).workspace;
         if self.active == Some(id) {
-            // Show the nearest remaining tab of that workspace, or a fresh one.
-            let neighbor = self
-                .tabs
-                .iter()
-                .enumerate()
-                .filter(|(_, t)| t.workspace == ws)
-                .min_by_key(|(i, _)| i.abs_diff(pos))
-                .map(|(_, t)| t.id);
-            match neighbor {
-                Some(next) => self.select(next),
-                None => self.open_blank(),
+            self.show_neighbor(ws, pos);
+        } else {
+            self.sync();
+        }
+        self.save_session();
+    }
+
+    fn move_tab(&mut self, id: u32, to: u32) {
+        let known = self.cfg.workspaces.iter().any(|w| w.id == to);
+        let Some(pos) = self.tabs.iter().position(|t| t.id == id) else {
+            return;
+        };
+        let from = self.tabs[pos].workspace;
+        if !known || from == to {
+            return;
+        }
+        self.tabs[pos].workspace = to;
+        self.last_active.insert(to, id);
+        if self.active == Some(id) {
+            // It left the workspace on screen; hide it and show what remains here.
+            if let Some(w) = &self.tabs[pos].webview {
+                let _ = w.set_visible(false);
             }
+            self.show_neighbor(from, pos);
         } else {
             self.sync();
         }
@@ -444,22 +621,100 @@ impl App {
         Some(ids[next as usize])
     }
 
+    /// The floating copy of the interface, created the first time it is needed and
+    /// then kept (hidden) so that revealing the bar is instant.
+    fn ensure_floater(&mut self) {
+        if self.floater.is_none() {
+            match build_ui(&self.window, &self.proxy, &self.cfg, true) {
+                Ok(f) => self.floater = Some(f),
+                Err(e) => eprintln!("wisp: could not create floating bar: {e}"),
+            }
+        }
+    }
+
+    fn set_peek(&mut self, on: bool) {
+        let on = on && self.cfg.layout.collapsed;
+        self.away_since = None;
+        if self.peek == on {
+            return;
+        }
+        self.peek = on;
+        if on {
+            self.ensure_floater();
+            if let Some(f) = &self.floater {
+                let _ = f.set_bounds(self.inset_rect(self.float_insets));
+                let _ = f.set_visible(true);
+                if let Some(glass) = &self.glass {
+                    let [l, t, r, b] = self.panel_insets;
+                    let s = self.size();
+                    let frame = [l, t, s.width - l - r, s.height - t - b];
+                    glass.show(&self.window, frame, self.panel_radius);
+                }
+                native::raise(f, &self.window);
+            }
+        }
+        self.sync(); // the floater slides in, or slides out and reports `FloaterDone`
+    }
+
+    /// While the bar is collapsed: reveal it when the cursor reaches its window edge,
+    /// hide it again once the cursor has been away for a moment.
+    fn poll_cursor(&mut self) {
+        if !self.cfg.layout.collapsed || self.settings_open || self.hold_peek {
+            return;
+        }
+        let (Ok(cursor), Ok(origin)) =
+            (self.window.cursor_position(), self.window.inner_position())
+        else {
+            return;
+        };
+        let scale = self.window.scale_factor();
+        let (x, y) = (
+            (cursor.x - origin.x as f64) / scale,
+            (cursor.y - origin.y as f64) / scale,
+        );
+        let s = self.size();
+        let side = self.side();
+        let [l, _, r, b] = self.float_insets;
+        let bar = match side {
+            Side::Top => s.height - b,
+            Side::Left => s.width - r,
+            Side::Right => s.width - l,
+        };
+        // Along the bar's edge the cursor may be a little outside the window; across
+        // it, it must be within the window's span.
+        let inside = match side {
+            Side::Top => (0.0..=s.width).contains(&x),
+            _ => (0.0..=s.height).contains(&y),
+        };
+        let near = self.cfg.layout.hover_zone as f64;
+        let zone = if inside {
+            zone(side, x, y, s.width, bar, near)
+        } else {
+            Zone::Away
+        };
+        if !self.peek {
+            if zone == Zone::Edge && self.cfg.layout.hover_expand && !self.cover {
+                self.set_peek(true);
+            }
+        } else if zone != Zone::Away || self.bar_busy {
+            self.away_since = None;
+        } else if self.away_since.get_or_insert_with(Instant::now).elapsed() >= LEAVE_DELAY {
+            self.set_peek(false);
+        }
+    }
+
     fn focus_url(&mut self) {
         if self.settings_open {
             self.set_settings_open(false);
         }
-        if !self.bar_shown() {
-            self.peek = true; // the UI drops the peek again when the address bar loses focus
-            self.relayout();
-            self.sync();
-        }
+        // The interface focuses its address bar, or answers `PeekFocus` if it is hidden.
         let _ = self.chrome.focus();
         let _ = self.chrome.evaluate_script("wisp.focusUrl()");
     }
 
     fn set_settings_open(&mut self, open: bool) {
         self.settings_open = open;
-        self.layout();
+        self.layout_pages();
         let _ = match self.active_webview() {
             Some(w) if !open => w.focus(),
             _ => self.chrome.focus(),
@@ -476,6 +731,8 @@ impl App {
                 return self.focus_url();
             }
             "private_window" => return open_private_window(),
+            "check_update" => return self.check_update(true),
+            "restart_update" => return self.restart_into_update(),
             "next_tab" | "prev_tab" => {
                 let step = if name == "next_tab" { 1 } else { -1 };
                 if let Some(id) = Self::cycle(&self.workspace_tabs(), self.active, step) {
@@ -493,10 +750,8 @@ impl App {
             }
             "toggle_bar" => {
                 self.cfg.layout.collapsed = !self.cfg.layout.collapsed;
-                self.peek = false;
                 self.cfg.save();
-                self.relayout();
-                return self.sync();
+                return self.bar_mode_changed();
             }
             "focus_url" => return self.focus_url(),
             "settings" => return self.set_settings_open(!self.settings_open),
@@ -530,6 +785,63 @@ impl App {
         };
     }
 
+    /// The bar was collapsed, pinned open, or moved: drop any reveal in progress.
+    fn bar_mode_changed(&mut self) {
+        self.peek = false;
+        self.away_since = None;
+        if let Some(f) = &self.floater {
+            let _ = f.set_visible(false);
+        }
+        if let Some(glass) = &self.glass {
+            glass.hide();
+        }
+        if self.cfg.layout.collapsed {
+            self.ensure_floater();
+        }
+        self.sync();
+    }
+
+    /// Look for a new version on a background thread; the answer arrives as an event.
+    /// `asked` = the user pressed the button (so report back even when nothing is new).
+    fn check_update(&mut self, asked: bool) {
+        if !update::supported() || self.private_window || self.update.is_some() {
+            return;
+        }
+        if !asked && !self.cfg.behavior.auto_update {
+            return;
+        }
+        if asked {
+            self.update_note = "Checking\u{2026}".into();
+            self.sync();
+        }
+        let proxy = self.proxy.clone();
+        std::thread::spawn(move || {
+            let found = update::fetch().map(|ready| ready.map(Box::new));
+            let _ = proxy.send_event(UserEvent::Update(found));
+        });
+    }
+
+    /// Install the downloaded version now and start it.
+    fn restart_into_update(&mut self) {
+        let Some(ready) = self.update.take() else {
+            return;
+        };
+        self.save_session();
+        match ready.install() {
+            Ok(()) => {
+                // (On Windows the installer has taken over and this line is never reached.)
+                if let Ok(exe) = std::env::current_exe() {
+                    let _ = std::process::Command::new(exe).spawn();
+                }
+                self.quit = true;
+            }
+            Err(e) => {
+                self.update_note = format!("Could not install the update: {e}");
+                self.sync();
+            }
+        }
+    }
+
     fn recompile_adblock(&self) {
         let proxy = self.proxy.clone();
         adblock::compile(adblock::configure(&self.cfg.adblock), move || {
@@ -547,7 +859,7 @@ impl App {
             let combos: Vec<&String> = self.cfg.hotkeys.values().collect();
             let js = format!("window.__wispKeys = new Set({})", json!(combos));
             let pages = self.tabs.iter().filter_map(|t| t.webview.as_ref());
-            for w in pages.chain([&self.chrome]) {
+            for w in pages.chain(self.uis()) {
                 let _ = w.evaluate_script(&js);
             }
         }
@@ -564,16 +876,21 @@ impl App {
             }
             self.save_session();
         }
-        if !self.cfg.layout.collapsed {
-            self.peek = false;
-        }
         self.apply_theme();
-        self.relayout();
-        self.sync();
+        if old.layout.collapsed != self.cfg.layout.collapsed
+            || old.layout.mode != self.cfg.layout.mode
+        {
+            self.bar_mode_changed();
+        } else {
+            self.sync();
+        }
     }
 
     fn start(&mut self) {
         self.started = true;
+        if self.cfg.layout.collapsed {
+            self.ensure_floater();
+        }
         let first_ws = self.cfg.workspaces[0].id;
         self.workspace = first_ws;
         if self.private_window {
@@ -613,6 +930,15 @@ impl App {
             self.new_tab(&home, false);
         } else {
             self.select_workspace(start_ws);
+        }
+        // First launch after an update: show what changed.
+        if config::updated_from().is_some() {
+            let notes = concat!(
+                env!("CARGO_PKG_REPOSITORY"),
+                "/releases/tag/v",
+                env!("CARGO_PKG_VERSION")
+            );
+            self.new_tab(notes, false);
         }
     }
 
@@ -660,21 +986,81 @@ impl App {
                 }
                 Msg::SelectTab { id } => self.select(id),
                 Msg::CloseTab { id } => self.close_tab(id),
+                Msg::MoveTab { id, workspace } => self.move_tab(id, workspace),
                 Msg::SelectWorkspace { id } => self.select_workspace(id),
-                Msg::Peek { on } => {
-                    let on = on && self.cfg.layout.collapsed;
-                    if self.peek != on {
-                        self.peek = on;
-                        self.relayout();
-                        self.sync();
+                Msg::PageRect {
+                    page,
+                    float,
+                    radius,
+                    panel,
+                    panel_radius,
+                    lights,
+                    animate,
+                } => {
+                    let sane = |v: &[f64]| v.iter().all(|n| n.is_finite() && *n >= 0.0);
+                    if !sane(&page) || !sane(&float) || !sane(&[radius]) {
+                        return;
+                    }
+                    if animate && self.insets.is_some_and(|old| old != page) {
+                        self.glide = Some((self.page_insets(), Instant::now()));
+                    } else if !animate {
+                        self.glide = None;
+                    }
+                    if self.lights != lights && sane(&lights) {
+                        self.lights = lights;
+                        #[cfg(target_os = "macos")]
+                        {
+                            use tao::platform::macos::WindowExtMacOS;
+                            // The library takes "extra title bar height", from which the buttons
+                            // end up 2px above the value given (measured on macOS 26).
+                            // ponytail: may sit 1-2px off on older systems; set frames directly if so.
+                            let at = LogicalPosition::new(lights[0], lights[1] + 2.0);
+                            self.window.set_traffic_light_inset(at);
+                        }
+                    }
+                    self.insets = Some(page);
+                    self.float_insets = float;
+                    if sane(&panel) && sane(&[panel_radius]) {
+                        (self.panel_insets, self.panel_radius) = (panel, panel_radius);
+                    }
+                    if self.page_radius != radius {
+                        self.page_radius = radius;
+                        let pages = self.tabs.iter().filter_map(|t| t.webview.as_ref());
+                        pages.for_each(|w| native::round_corners(w, radius));
+                    }
+                    self.layout();
+                }
+                Msg::Cover { on } => {
+                    self.cover = on;
+                    self.layout_pages();
+                    if on {
+                        let _ = self.chrome.focus();
+                    }
+                }
+                Msg::Busy { on } => self.bar_busy = on,
+                Msg::Peek { on } => self.set_peek(on),
+                Msg::PeekFocus => {
+                    self.set_peek(true);
+                    if let Some(f) = self.floater.as_ref().filter(|_| self.peek) {
+                        self.bar_busy = true; // until the address bar there loses focus
+                        let _ = f.focus();
+                        let _ = f.evaluate_script("wisp.focusUrl()");
+                    }
+                }
+                Msg::FloaterDone => {
+                    if let Some(f) = self.floater.as_ref().filter(|_| !self.peek) {
+                        let _ = f.set_visible(false);
+                        if let Some(glass) = &self.glass {
+                            glass.hide();
+                        }
                     }
                 }
                 Msg::SaveSettings { config } => self.apply_config(*config),
             },
             UserEvent::PageKey(id, combo) => {
                 // A page can only have keyboard focus while it is the one on screen, so a
-                // key from a background tab, or while settings cover the page, is forged.
-                if self.active == Some(id) && !self.settings_open {
+                // key from a background tab, or while the interface covers the page, is forged.
+                if self.active == Some(id) && self.page_visible() {
                     self.handle(UserEvent::Ui(Msg::Key { combo }));
                 }
             }
@@ -698,12 +1084,27 @@ impl App {
                 let private = self.tab(opener).is_some_and(|t| t.private);
                 self.new_tab(&url, private);
             }
+            UserEvent::Update(found) => {
+                match found {
+                    Ok(Some(ready)) => {
+                        self.update_note = format!(
+                            "Version {} is ready. It installs when you quit.",
+                            ready.version
+                        );
+                        self.update = Some(*ready);
+                    }
+                    Ok(None) => self.update_note = "Wisp is up to date.".into(),
+                    Err(e) => self.update_note = format!("Could not check for updates: {e}"),
+                }
+                self.sync();
+            }
             UserEvent::AdblockReady => {
+                if adblock::REATTACH_AFTER_COMPILE {
+                    let pages = self.tabs.iter().filter_map(|t| t.webview.as_ref());
+                    pages.chain(self.uis()).for_each(adblock::attach);
+                }
                 if !self.started {
                     self.start();
-                } else if adblock::REATTACH_AFTER_COMPILE {
-                    let pages = self.tabs.iter().filter_map(|t| t.webview.as_ref());
-                    pages.for_each(adblock::attach);
                 }
             }
         }
@@ -749,63 +1150,75 @@ fn install_menu() -> muda::Menu {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let private_window = std::env::args().any(|a| a == "--private");
     let cfg = Config::load();
-    let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
+    #[allow(unused_mut)]
+    let mut event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
+    #[cfg(all(target_os = "macos", debug_assertions))]
+    if std::env::var_os("WISP_SHOT").is_some() {
+        // Screenshot runs must not take keyboard focus from whoever is at the machine.
+        use tao::platform::macos::EventLoopExtMacOS;
+        event_loop.set_activate_ignoring_other_apps(false);
+    }
     let proxy = event_loop.create_proxy();
 
     let builder = WindowBuilder::new()
         .with_title("Wisp")
-        .with_inner_size(LogicalSize::new(1200.0, 800.0))
-        .with_min_inner_size(LogicalSize::new(480.0, 320.0));
+        .with_inner_size(LogicalSize::new(1280.0, 820.0))
+        .with_min_inner_size(LogicalSize::new(560.0, 360.0));
     #[cfg(target_os = "macos")]
     let builder = {
-        // The window title is never drawn; whether the bar runs under the title bar
-        // is switched at runtime in `App::relayout`.
+        // The interface runs under the title bar; the traffic lights sit on top of it
+        // (the interface always keeps the top-left corner for them).
         use tao::platform::macos::WindowBuilderExtMacOS;
-        builder.with_title_hidden(true)
+        builder
+            .with_titlebar_transparent(true)
+            .with_fullsize_content_view(true)
+            .with_title_hidden(true)
     };
     let window = builder.build(&event_loop)?;
     #[cfg(target_os = "macos")]
     let _menu = install_menu();
 
-    let ui_proxy = proxy.clone();
-    let chrome = WebViewBuilder::new()
-        .with_html(include_str!("ui.html"))
-        .with_initialization_script(keys_script(&cfg))
-        .with_ipc_handler(move |req| match serde_json::from_str(req.body()) {
-            Ok(msg) => drop(ui_proxy.send_event(UserEvent::Ui(msg))),
-            Err(e) => eprintln!("wisp: bad UI message: {e}"),
-        })
-        // The UI webview is privileged; never let it navigate to real content.
-        .with_navigation_handler(|url| {
-            !["http:", "https:", "file:"]
-                .iter()
-                .any(|p| url.starts_with(p))
-        })
-        .build_as_child(&window)?;
-
+    let chrome = build_ui(&window, &proxy, &cfg, false)?;
     let mut app = App {
         tabs: Vec::new(),
+        floater: None,
         chrome,
         window,
         proxy,
         cfg,
+        user_agent: native::user_agent(),
         active: None,
         workspace: 0,
         last_active: HashMap::new(),
         next_id: 1,
+        insets: None,
+        glide: None,
+        float_insets: [0.0; 4],
+        page_radius: 0.0,
+        panel_insets: [0.0; 4],
+        panel_radius: 0.0,
+        glass: native::Glass::new(),
+        lights: [0.0; 2],
         settings_open: false,
+        cover: false,
         peek: false,
+        bar_busy: false,
+        away_since: None,
+        hold_peek: false,
+        update: None,
+        update_note: String::new(),
         private_window,
-        overlay: None,
         started: false,
         quit: false,
     };
     app.apply_theme();
-    app.relayout();
+    app.layout();
     app.recompile_adblock(); // tabs open once the block list is ready (AdblockReady)
 
+    #[cfg(all(target_os = "macos", debug_assertions))]
+    let launched = Instant::now();
+    let mut next_update_check = Instant::now() + Duration::from_secs(5);
     event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Wait;
         match event {
             Event::UserEvent(e) => app.handle(e),
             Event::WindowEvent {
@@ -816,18 +1229,68 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 event: WindowEvent::CloseRequested,
                 ..
             } => app.quit = true,
-            Event::LoopDestroyed => app.save_session(),
+            Event::MainEventsCleared => {
+                app.tick();
+                app.poll_cursor();
+                if app.started && Instant::now() >= next_update_check {
+                    next_update_check = Instant::now() + UPDATE_EVERY;
+                    app.check_update(false);
+                }
+                // Development: WISP_PEEK=1 reveals the collapsed bar after 3s and holds it;
+                // WISP_ACT=<action> runs an action after 3s; WISP_JS=<script> runs in the
+                // interface after 4s;
+                // WISP_SHOT=/path.png saves a picture of the window after 6s and quits.
+                #[cfg(all(target_os = "macos", debug_assertions))]
+                {
+                    let after = |secs| launched.elapsed() > Duration::from_secs(secs);
+                    if std::env::var_os("WISP_PEEK").is_some() && after(3) && !app.hold_peek {
+                        app.hold_peek = true;
+                        app.set_peek(true);
+                    }
+                    if let Some(name) = std::env::var("WISP_ACT").ok().filter(|_| after(3)) {
+                        // SAFETY: single-threaded here; nothing else reads the environment.
+                        unsafe { std::env::remove_var("WISP_ACT") };
+                        app.action(&name);
+                    }
+                    if let Some(js) = std::env::var("WISP_JS").ok().filter(|_| after(4)) {
+                        // SAFETY: as above.
+                        unsafe { std::env::remove_var("WISP_JS") };
+                        let _ = app.chrome.evaluate_script(&js);
+                    }
+                    if let Some(path) = std::env::var_os("WISP_SHOT").filter(|_| after(6)) {
+                        use tao::platform::macos::WindowExtMacOS;
+                        let ok = debug_shot::save(app.window.ns_window(), &path.to_string_lossy());
+                        eprintln!("wisp: screenshot {}", if ok { "saved" } else { "FAILED" });
+                        app.quit = true;
+                    }
+                }
+            }
+            Event::LoopDestroyed => {
+                app.save_session();
+                // The quiet path: a downloaded update goes in as the app closes.
+                if let Some(ready) = app.update.take()
+                    && let Err(e) = ready.install()
+                {
+                    eprintln!("wisp: could not install the update: {e}");
+                }
+            }
             _ => {}
         }
-        if app.quit {
-            *control_flow = ControlFlow::Exit;
-        }
+        *control_flow = if app.quit {
+            ControlFlow::Exit
+        } else if app.glide.is_some() {
+            ControlFlow::WaitUntil(Instant::now() + FRAME)
+        } else if app.cfg.layout.collapsed || cfg!(debug_assertions) {
+            ControlFlow::WaitUntil(Instant::now() + POLL)
+        } else {
+            ControlFlow::WaitUntil(next_update_check)
+        };
     });
 }
 
 #[cfg(test)]
 mod tests {
-    use super::App;
+    use super::{App, Side, Zone, ease_out, zone};
 
     #[test]
     fn cycling_wraps_and_survives_a_missing_current() {
@@ -838,5 +1301,30 @@ mod tests {
         assert_eq!(App::cycle(&ids, Some(99), 1), Some(10));
         assert_eq!(App::cycle(&ids, None, -1), Some(10));
         assert_eq!(App::cycle(&[], Some(1), 1), None);
+    }
+
+    #[test]
+    fn cursor_zones_around_a_collapsed_bar() {
+        // 1000px-wide window, bar 260px thick once revealed.
+        let z = |side, x, y| zone(side, x, y, 1000.0, 260.0, 30.0);
+        assert_eq!(z(Side::Right, 995.0, 300.0), Zone::Edge);
+        assert_eq!(z(Side::Right, 800.0, 300.0), Zone::Bar);
+        assert_eq!(z(Side::Right, 720.0, 300.0), Zone::Bar); // within the leave margin
+        assert_eq!(z(Side::Right, 500.0, 300.0), Zone::Away);
+        assert_eq!(z(Side::Left, 5.0, 300.0), Zone::Edge);
+        assert_eq!(z(Side::Left, 400.0, 300.0), Zone::Away);
+        assert_eq!(z(Side::Top, 500.0, 3.0), Zone::Edge);
+        assert_eq!(z(Side::Top, 500.0, 600.0), Zone::Away);
+        assert_eq!(z(Side::Right, 975.0, 300.0), Zone::Edge); // inside the reveal distance
+        assert_eq!(z(Side::Right, 1060.0, 300.0), Zone::Edge); // overshot the window edge
+        assert_eq!(z(Side::Right, 1400.0, 300.0), Zone::Away); // long gone
+    }
+
+    #[test]
+    fn glide_starts_fast_and_lands_exactly() {
+        assert_eq!(ease_out(0.0), 0.0);
+        assert_eq!(ease_out(1.0), 1.0);
+        assert_eq!(ease_out(7.0), 1.0);
+        assert!(ease_out(0.25) > 0.6);
     }
 }

@@ -9,12 +9,15 @@ engine.
 
 ## Features
 
-- **Four layouts**: sidebar on the right (default) or left, or a top bar in
-  relaxed or compact size
-- **Collapsible bar**: tuck the sidebar or top bar away to a thin strip; it
-  comes back while the mouse is on that edge
-- **Workspaces**: your own named groups of tabs (Work, Shopping, ...), each
-  remembering its tabs
+- **Sidebar or top bar**: tabs in a sidebar on the right (default) or left with
+  a hotbar across the top for the address bar and buttons, or a classic top bar
+  in relaxed or compact size. The page sits on a rounded card.
+- **Customize toolbar**: drag the address bar, any button, the workspace
+  switcher and spacers between the hotbar and the sidebar, or remove them
+- **Collapsible bar**: tuck the bar away; it floats back over the page when the
+  mouse comes near that window edge
+- **Workspaces**: named groups of tabs with their own icon and color; the
+  window takes a tint of the active one, and tabs can be moved between them
 - **Private tabs and private windows**: nothing from them is kept on disk or
   saved in the session
 - **Theme editor**: presets, up to three background colors as a gradient,
@@ -22,9 +25,11 @@ engine.
 - Ad and tracker blocking inside the engine's network layer
 - Every hotkey can be rebound
 - Session restore, saved as you browse; restored tabs load only when opened
-- Double-click an empty part of the bar to expand the window; drag it to move
+- Double-click an empty part of the bar to expand the window, drag it to move,
+  right-click it for layout options
 
-Everything is in Settings (`Cmd/Ctrl + ,`) and applies live.
+Everything is in Settings (`Cmd/Ctrl + ,`) and applies live. The interface is
+built on a small design and motion system: see [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Install
 
@@ -42,6 +47,16 @@ The installers are not code-signed yet, so the first launch needs one extra step
 - **macOS**: after dragging Wisp to Applications, run
   `xattr -cr /Applications/Wisp.app` in Terminal, then open it.
 - **Windows**: on the SmartScreen prompt choose **More info**, then **Run anyway**.
+
+## Updates
+
+Installed copies update themselves. A new version downloads in the background,
+is installed as you quit, and is simply there the next time you open Wisp, with
+its release notes in a tab. You can turn this off, or check by hand, in
+Settings > About.
+
+Every update file is signed, and Wisp refuses any file whose signature does not
+match the key it was built with. Copies you build yourself do not update.
 
 ## Default hotkeys
 
@@ -94,13 +109,34 @@ To cut a release, bump `version` in `Cargo.toml`, merge, then push a matching
 tag (`git tag v0.2.0 && git push origin v0.2.0`). The Release workflow builds
 the installers and publishes them.
 
+### Update signing key (one-time setup)
+
+Automatic updates need a signing key pair. Generate it once and keep the
+private half safe: anyone holding it can ship an update to every installed copy,
+and if it is lost, installed copies can no longer be updated automatically.
+
+```bash
+cargo packager signer generate --path ~/.wisp/update.key
+```
+
+Then, in the repository's settings on GitHub (Secrets and variables > Actions):
+
+- secret `WISP_UPDATE_PRIVATE_KEY`: the contents of `~/.wisp/update.key`
+- secret `WISP_UPDATE_PRIVATE_KEY_PASSWORD`: the password you chose
+- variable `WISP_UPDATE_PUBKEY`: the contents of `~/.wisp/update.key.pub`
+
+From the next release on, the workflow signs the update files and publishes
+`latest.json`, which installed copies read. Without the key, releases are built
+as before and offer no automatic update.
+
 ## Known limits
 
 - Ad blocking is a host list (built-in plus your own). It does not yet read
   EasyList-style filter lists or hide leftover empty ad slots.
 - Linux builds are not provided, and network-level blocking is not wired up there.
-- Workspaces group tabs but share cookies and logins; tabs cannot be moved
-  between workspaces yet.
+- Workspaces group tabs but share cookies and logins.
+- A menu that has to overlap the page hides the page while it is open (menus
+  opened from the sidebar stay inside it). Page corners are square on Windows.
 - A private window runs as a second copy of the app, so it shows its own
   Dock or taskbar icon.
 - No bookmarks, history view, or find-in-page yet.
