@@ -67,16 +67,11 @@ impl Default for Areas {
         let v = |items: &[&str]| items.iter().map(|s| s.to_string()).collect();
         Self {
             hotbar: v(&[
-                "collapse", "back", "forward", "reload", "home", "url", "shield",
+                "back", "forward", "reload", "spacer", "url", "spacer", "shield", "settings",
+                "collapse",
             ]),
             before_tabs: v(&[]),
-            after_tabs: v(&[
-                "workspaces",
-                "private_tab",
-                "private_window",
-                "spacer",
-                "settings",
-            ]),
+            after_tabs: v(&["workspaces"]),
         }
     }
 }
@@ -141,7 +136,7 @@ pub struct Workspace {
     pub id: u32,
     pub name: String,
     pub color: String,
-    /// An emoji shown for the workspace; empty = its first letter.
+    /// Name of a line icon from the interface's set; empty = a dot in the workspace color.
     #[serde(default)]
     pub icon: String,
 }
@@ -152,7 +147,7 @@ impl Default for Layout {
             mode: MODES[0].into(),
             collapsed: false,
             hover_expand: true,
-            sidebar_width: 260,
+            sidebar_width: 220,
             areas: Areas::default(),
         }
     }
@@ -246,7 +241,7 @@ impl Config {
         if !MODES.contains(&l.mode.as_str()) {
             l.mode = MODES[0].into();
         }
-        l.sidebar_width = l.sidebar_width.clamp(180, 420);
+        l.sidebar_width = l.sidebar_width.clamp(150, 420);
         l.areas.sanitize();
 
         let a = &mut self.appearance;
@@ -273,8 +268,11 @@ impl Config {
             if w.name.trim().is_empty() {
                 w.name = format!("Workspace {}", w.id);
             }
-            // The icon is shown as text; keep it to one short grapheme-ish chunk.
-            w.icon = w.icon.trim().chars().take(4).collect();
+            // An icon is a short name; anything else (an old emoji, junk) means "none".
+            let named = w.icon.len() <= 16 && w.icon.chars().all(|c| c.is_ascii_lowercase());
+            if !named {
+                w.icon.clear();
+            }
         }
         if self.workspaces.is_empty() {
             self.workspaces.push(Workspace {
@@ -433,7 +431,7 @@ mod tests {
             id,
             name: name.into(),
             color: "nope".into(),
-            icon: "  \u{1F6D2}toolong".into(),
+            icon: if id == 2 { "cart" } else { "\u{1F6D2}" }.into(),
         };
         c.workspaces = vec![ws(2, "Work"), ws(2, "Dup"), ws(0, "Zero"), ws(3, " ")];
         let c = c.sanitized();
@@ -446,7 +444,8 @@ mod tests {
         let names: Vec<_> = c.workspaces.iter().map(|w| w.name.as_str()).collect();
         assert_eq!(names, ["Work", "Workspace 3"]);
         assert_eq!(c.workspaces[0].color, "#6c8cff");
-        assert_eq!(c.workspaces[0].icon, "\u{1F6D2}too");
+        assert_eq!(c.workspaces[0].icon, "cart");
+        assert_eq!(c.workspaces[1].icon, "");
 
         let mut c = Config::default();
         c.layout.areas.hotbar = ["url", "bogus", "spacer", "url", "spacer", "back"]

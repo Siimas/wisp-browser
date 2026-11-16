@@ -11,13 +11,13 @@ engine.
 
 - **Sidebar or top bar**: tabs in a sidebar on the right (default) or left with
   a hotbar across the top for the address bar and buttons, or a classic top bar
-  in relaxed or compact size
+  in relaxed or compact size. The page sits on a rounded card.
 - **Customize toolbar**: drag the address bar, any button, the workspace
   switcher and spacers between the hotbar and the sidebar, or remove them
-- **Collapsible bar**: tuck the bar away; it slides back when the mouse comes
-  near that window edge
-- **Workspaces**: named groups of tabs with their own icon and color; the bar
-  takes a tint of the active one, and tabs can be moved between them
+- **Collapsible bar**: tuck the bar away; it floats back over the page when the
+  mouse comes near that window edge
+- **Workspaces**: named groups of tabs with their own icon and color; the
+  window takes a tint of the active one, and tabs can be moved between them
 - **Private tabs and private windows**: nothing from them is kept on disk or
   saved in the session
 - **Theme editor**: presets, up to three background colors as a gradient,
@@ -105,8 +105,8 @@ the installers and publishes them.
   EasyList-style filter lists or hide leftover empty ad slots.
 - Linux builds are not provided, and network-level blocking is not wired up there.
 - Workspaces group tabs but share cookies and logins.
-- A revealed bar pushes the page aside instead of floating over it, and a menu
-  that would overlap the page hides the page while it is open.
+- A menu that has to overlap the page hides the page while it is open (menus
+  opened from the sidebar stay inside it). Page corners are square on Windows.
 - A private window runs as a second copy of the app, so it shows its own
   Dock or taskbar icon.
 - No bookmarks, history view, or find-in-page yet.
