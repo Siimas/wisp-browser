@@ -290,7 +290,8 @@ impl App {
         let _ = f.evaluate_script(&js);
         let _ = f.set_bounds(rect(left, top, right - left, bottom - top));
         let _ = f.set_visible(true);
-        if let Some(glass) = &self.glass {
+        // (Low-power mode and "Reduce transparency" turn glass off: the menu is then solid.)
+        if let Some(glass) = self.glass.as_ref().filter(|_| !self.solid) {
             glass.show(&self.window, [x, y, w, h], show.radius);
         }
         native::raise(f, &self.window);

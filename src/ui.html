@@ -92,6 +92,11 @@
 @media (prefers-reduced-motion: reduce) {
   :root { --d-1: 1ms; --d-2: 1ms; --d-3: 1ms; }
 }
+/* Low-power mode (Settings > Behavior; set by the window as data-low): motion becomes
+   instant, as with reduced motion, and the page card jumps instead of gliding.
+   data-solid (low power, or the system's "reduce transparency"): no glass anywhere.
+   Texture, gradient paint and shadows stay: measured, they cost nothing at rest. */
+:root[data-low] { --d-1: 1ms; --d-2: 1ms; --d-3: 1ms; }
 </style>
 <style>
 /* ================= BASE ================= */
@@ -102,8 +107,9 @@ body {
   font: var(--text-md) var(--font-ui); letter-spacing: -.005em; -webkit-font-smoothing: antialiased;
   user-select: none; -webkit-user-select: none; cursor: default;
 }
-body::before { /* texture */
-  content: ""; position: fixed; inset: 0; pointer-events: none;
+body::before { /* texture. Absolute, not fixed: the same place (the body never scrolls),
+  but a fixed layer under a blend mode cost the interface about 50 MB (measured). */
+  content: ""; position: absolute; inset: 0; pointer-events: none;
   background: var(--tex); opacity: var(--tex-op); mix-blend-mode: var(--tex-blend); image-rendering: pixelated;
 }
 button { font: inherit; letter-spacing: inherit; color: inherit; border: 0; background: none; padding: 0; border-radius: var(--r-md); }
@@ -628,6 +634,9 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
 .lrow .x:hover { color: var(--fg); }
 .lrow .x svg { width: 12px; height: 12px; }
 .lrow input { flex: 1; min-width: 0; height: calc(var(--ctl) - var(--sp-1)); font: inherit; color: var(--fg); background: var(--field); border: 0; border-radius: var(--r-sm); padding: 0 var(--sp-2); }
+/* low-power: solid menus. They were glass over the interface; now they are the theme
+   background itself, raised by their shadow alone. */
+:root[data-solid] .pop, :root[data-solid] .sug { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--bg); }
 /* the list under the address bar: floating, so glass */
 .sug { position: fixed; z-index: 15; padding: var(--sp-1); border-radius: var(--r-lg); background: color-mix(in srgb, var(--bg) 64%, transparent);
   -webkit-backdrop-filter: blur(28px) saturate(1.8); backdrop-filter: blur(28px) saturate(1.8); box-shadow: var(--shadow-pop); animation: pop-in var(--d-2) var(--ease-out); transform-origin: 50% 0; }
@@ -817,6 +826,12 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
         <div class="row col" data-keys="blank page start new tab"><span>New tabs open</span>
           <div class="tiles" data-tiles="behavior.new_tab_url" aria-label="New tabs open"></div></div>
         <label class="row adv" data-keys="blank page start custom address">New tab opens <input type="text" data-k="behavior.new_tab_url"></label>
+      </div>
+      </div>
+      <div class="grp"><h2>Performance</h2>
+      <div class="card">
+        <div class="row col" data-keys="low power battery saver energy slow computer animation glass speed"><span>Low-power mode<small id="low-note"></small></span>
+          <div class="tiles" data-tiles="behavior.low_power" aria-label="Low-power mode"></div></div>
       </div>
       </div>
       <div class="grp adv"><h2>Pages</h2>
@@ -1780,6 +1795,8 @@ function renderSettings() {
   renderTed();
   const up = S.update;
   $('#about-version').textContent = S.version;
+  $('#low-note').textContent = 'Solid surfaces instead of glass, and no animation: for slower computers and longer battery life'
+    + (cfg.behavior.low_power === 'auto' ? `. Automatic turns it on in the system's power saving mode, on a low battery, or with 4 GB of memory or less or two cores or fewer (${S.low ? 'on' : 'off'} now)` : '');
   // The version sits at the top of Settings too, and leads to the About card.
   $('#about-jump').textContent = 'Wisp ' + S.version + (S.update.ready ? ' \u2192 ' + S.update.ready + ' ready' : '');
   $('#about-note').textContent = up.supported ? up.note : 'This copy was not installed from a release, so it does not update itself.';
@@ -1818,6 +1835,7 @@ const TILES = {
   'appearance.theme': [['system', 'Match system', { icon: 'sparkle' }], ['light', 'Light', { icon: 'sun' }], ['dark', 'Dark', { icon: 'moon' }]],
   'appearance.font_size': [[12, 'Small', { size: 12 }], [13, 'Default', { size: 13 }], [15, 'Large', { size: 15 }], [17, 'Larger', { size: 17 }]],
   'behavior.search_url': ENGINES.map(([url, name, mark]) => [url, name, { mark }]),
+  'behavior.low_power': [['auto', 'Automatic', { icon: 'sparkle' }], ['on', 'On', { icon: 'leaf' }], ['off', 'Off', { icon: 'close' }]],
   'behavior.restore_session': [[true, 'Where I left off', { icon: 'reload' }], [false, 'My home page', { icon: 'home' }]],
   'behavior.new_tab_url': [['about:blank', 'A blank page', { icon: 'plus' }], [() => cfg.behavior.homepage, 'My home page', { icon: 'home' }]],
 };
@@ -2182,7 +2200,7 @@ function reportPage(animate = false) {
   const m = { cmd: 'page_rect', panel: panel.map(v => Math.max(0, v)), panel_radius: px('--radius') * 1.5 + px('--sp-1'), page: [r.left, r.top, innerWidth - r.right, innerHeight - r.bottom],
     lights: [lx, 0, bw, row],
     lights_peek: side === 'top' && hidden ? [S.win ? lx - pad : lx + pad, pad, bw, px('--tabs-h')] : null,
-    float: float.map(v => Math.max(0, v)), radius: parseFloat(getComputedStyle($('#page')).borderTopLeftRadius) || 0, animate };
+    float: float.map(v => Math.max(0, v)), radius: parseFloat(getComputedStyle($('#page')).borderTopLeftRadius) || 0, animate: animate && ms('--d-3') > 20 }; // reduced motion and low power: the page jumps
   const key = JSON.stringify({ ...m, animate: 0 });
   if (key !== lastRect) { lastRect = key; post(m); }
 }
@@ -2193,7 +2211,7 @@ function render() {
   applyLook();
   // The main copy hides a collapsed bar outright; the floating copy is that bar.
   const hidden = !FLOATER && l.collapsed && !customizing;
-  for (const [name, on] of Object.entries({ floater: FLOATER, glass: S.glass, settings: S.settings, private: S.private, customizing, hidden })) flag(name, on);
+  for (const [name, on] of Object.entries({ floater: FLOATER, glass: S.glass, low: S.low, solid: S.solid, settings: S.settings, private: S.private, customizing, hidden })) flag(name, on);
   // Window buttons (macOS's, or Windows' drawn by #caption): which row makes room for them
   root.dataset.os = S.mac ? 'mac' : S.win ? 'win' : '';
   root.dataset.lights = !S.mac && !S.win ? 'none' : side === 'top' ? (hidden ? 'strip' : 'tabs') : FLOATER ? 'none' : 'hotbar';
