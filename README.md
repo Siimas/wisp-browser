@@ -30,12 +30,6 @@ already has (WebKit on macOS, WebView2 on Windows), so the download is one to
 two megabytes and engine security fixes arrive with your system updates. No
 account, no telemetry, free and open source.
 
-> [!NOTE]
-> The pictures show version 0.2.0, which is finished on `main` and will be the
-> next release. The current download is 0.1.0, which has tabs, settings, ad
-> blocking and session restore, but not yet the sidebar, workspaces or theme
-> editor.
-
 ## A sidebar that gets out of the way
 
 Tabs live in a sidebar on the right or the left, with the ones you keep pinned
