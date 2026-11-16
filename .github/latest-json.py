@@ -17,7 +17,10 @@ base = sys.argv[4] if len(sys.argv) > 4 else f"https://github.com/{repo}/release
 RULES = [
     ("macos-aarch64", "-macOS-Apple-Silicon.update.tar.gz", "app"),
     ("macos-x86_64", "-macOS-Intel.update.tar.gz", "app"),
-    ("windows-x86_64", "-Windows-x64-Setup.exe", "nsis"),
+    # Windows is left out on purpose: Windows Defender quarantined Wisp when 0.2.1
+    # updated itself (docs: CHANGELOG 0.3.0). Put this line back once the fixed update
+    # path has been shown to pass on a Windows machine with real-time protection on.
+    # ("windows-x86_64", "-Windows-x64-Setup.exe", "nsis"),
 ]
 
 platforms = {}

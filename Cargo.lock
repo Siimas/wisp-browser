@@ -3406,7 +3406,7 @@ dependencies = [
 
 [[package]]
 name = "wisp"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "block2",
  "cargo-packager-updater",
