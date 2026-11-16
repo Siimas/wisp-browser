@@ -177,10 +177,9 @@ enum UserEvent {
     /// (private, if `.2`) tab. Sent by the native menu only, never by the page.
     MenuTab(u32, String, bool),
     /// Tab `.0` is (`.1`) or is not playing media or in a call: see `App::check_media`.
-    MediaChecked(u32, bool, Why),
-    /// What the page in tab `.0` reported before unloading: typed-in text, and where
-    /// it was scrolled to. `None`: it did not answer.
-    Probed(u32, Option<(bool, f64, f64)>, Why),
+    MediaChecked(u32, bool),
+    /// What the page in tab `.0` answered `PROBE` with, before unloading.
+    Probed(u32, String),
 }
 
 /// Why a tab is being unloaded, which decides what may keep it loaded.
@@ -217,19 +216,57 @@ fn unload_due(
     after: Option<Duration>,
     pinned_too: bool,
 ) -> Option<Instant> {
-    let may =
-        loaded && !t.checking && active != Some(t.id) && !t.private && (pinned_too || !t.pinned);
+    let may = loaded
+        && t.checking.is_none()
+        && active != Some(t.id)
+        && !t.private
+        && (pinned_too || !t.pinned);
     after.filter(|_| may).map(|a| t.seen + a)
 }
 
 /// Asks a page, before it is unloaded, whether text was typed into it (a changed field
 /// or a focused editor, top frame only) and where it is scrolled to.
-const PROBE: &str = r#"(() => {
+///
+/// It runs in the page's own world, so the page can tamper with everything it touches
+/// (`scrollX`, `querySelectorAll`, getters that throw). The engine turns the result
+/// into JSON and on macOS the app aborts if that fails (a NaN, a Date), so the answer
+/// is only ever a string of literals and integers: "typed,x,y" with typed 0 or 1, or
+/// "keep" if anything went wrong. `parse_probe` reads it.
+const PROBE: &str = r#"(() => { try {
   const skip = ['hidden', 'checkbox', 'radio', 'submit', 'button', 'reset', 'image', 'file', 'range', 'color'];
-  const typed = [...document.querySelectorAll('input, textarea')]
-    .some(e => !skip.includes(e.type) && e.value !== e.defaultValue);
-  return [typed || !!(document.activeElement && document.activeElement.isContentEditable), scrollX, scrollY];
-})()"#;
+  let typed = false;
+  for (const e of document.querySelectorAll('input, textarea'))
+    if (!skip.includes(e.type) && e.value !== e.defaultValue) { typed = true; break; }
+  const a = document.activeElement;
+  return ((typed || (a && a.isContentEditable)) ? '1' : '0') + ',' + (scrollX | 0) + ',' + (scrollY | 0);
+} catch (e) { return 'keep'; } })()"#;
+
+/// How long a page has to answer `PROBE`. A page that never finished loading may never
+/// answer at all.
+const PROBE_WAIT: Duration = Duration::from_secs(5);
+
+/// `PROBE`'s answer as the engine hands it over (a JSON string): whether text was
+/// typed, and the scroll position. `None` for anything else, which keeps the tab.
+fn parse_probe(out: &str) -> Option<(bool, i32, i32)> {
+    let answer: String = serde_json::from_str(out).ok()?;
+    let mut parts = answer.split(',');
+    let typed = match parts.next()? {
+        "0" => false,
+        "1" => true,
+        _ => return None,
+    };
+    let x = parts.next()?.parse().ok()?;
+    let y = parts.next()?.parse().ok()?;
+    parts.next().is_none().then_some((typed, x, y))
+}
+
+/// The address a tab shows: what its engine reports (single-page sites change it
+/// without a load event), if that is a web address, else the last one loaded.
+fn live_url(t: &Tab) -> String {
+    let live = t.webview.as_ref().and_then(|w| w.url().ok());
+    live.filter(|u| u.starts_with("http://") || u.starts_with("https://"))
+        .unwrap_or_else(|| t.url.clone())
+}
 
 struct Tab {
     id: u32,
@@ -245,8 +282,10 @@ struct Tab {
     zoom: f64,
     /// When it was last on screen (or opened).
     seen: Instant,
-    /// Being checked before unloading (see `App::check_media`).
-    checking: bool,
+    /// Being checked before unloading (see `App::check_media`): since when, and why.
+    checking: Option<(Instant, Why)>,
+    /// A page finished loading in its current web view.
+    settled: bool,
     /// Set when the tab is unloaded, used when it comes back.
     wake: Option<Wake>,
 }
@@ -255,7 +294,7 @@ struct Tab {
 struct Wake {
     /// The page it showed, and where it was scrolled to.
     url: String,
-    scroll: Option<(f64, f64)>,
+    scroll: Option<(i32, i32)>,
     /// When it was asked to come back.
     since: Option<Instant>,
 }
@@ -663,7 +702,7 @@ impl App {
         if let Some(ua) = &self.user_agent {
             builder = builder.with_user_agent(ua);
         }
-        let (builder, p5) = (self.with_downloads(builder), self.proxy.clone());
+        let (builder, p5) = (self.with_downloads(builder, id), self.proxy.clone());
         match builder.build_as_child(&self.window) {
             Ok(webview) => {
                 adblock::attach(&webview);
@@ -707,7 +746,8 @@ impl App {
             url: url.to_string(),
             loading: false,
             seen: Instant::now(),
-            checking: false,
+            checking: None,
+            settled: false,
             wake: None,
             zoom: self.cfg.behavior.default_zoom,
         });
@@ -849,7 +889,8 @@ impl App {
             url: src.url.clone(),
             loading: false,
             seen: Instant::now(),
-            checking: false,
+            checking: None,
+            settled: false,
             wake: None,
             zoom: self.cfg.behavior.default_zoom,
         };
@@ -898,7 +939,8 @@ impl App {
             url: closed.url,
             loading: false,
             seen: Instant::now(),
-            checking: false,
+            checking: None,
+            settled: false,
             wake: None,
             zoom: self.cfg.behavior.default_zoom,
         };
@@ -937,7 +979,15 @@ impl App {
         (minutes > 0).then(|| Duration::from_secs(60 * minutes))
     }
 
+    /// When tab `t` next needs attention: due for unloading, or its check timed out.
+    /// A tab with a download running is never due.
     fn unload_due(&self, t: &Tab) -> Option<Instant> {
+        if let Some((since, _)) = t.checking {
+            return Some(since + PROBE_WAIT);
+        }
+        if self.downloads.borrow().running_in(t.id) {
+            return None;
+        }
         let (after, pinned) = (self.unload_after(), self.cfg.behavior.unload_pinned);
         unload_due(t, t.webview.is_some(), self.active, after, pinned)
     }
@@ -945,23 +995,27 @@ impl App {
     /// When the next background tab becomes due for unloading, if any: the event loop
     /// wakes then, and not at all for this when nothing is loaded in the background.
     fn next_unload(&self) -> Option<Instant> {
-        if !self.started || self.downloads.borrow().running() {
+        if !self.started {
             return None;
         }
         self.tabs.iter().filter_map(|t| self.unload_due(t)).min()
     }
 
-    /// Check every tab that is due, and unload those not in use.
+    /// Check every tab that is due, and unload those not in use. A check the page never
+    /// answered ends here too.
     fn unload_idle(&mut self) {
         let now = Instant::now();
-        let due: Vec<u32> = self
+        let due: Vec<(u32, Option<Why>)> = self
             .tabs
             .iter()
             .filter(|t| self.unload_due(t).is_some_and(|at| at <= now))
-            .map(|t| t.id)
+            .map(|t| (t.id, t.checking.map(|c| c.1)))
             .collect();
-        for id in due {
-            self.check_media(id, Why::Idle);
+        for (id, checking) in due {
+            match checking {
+                None => self.check_media(id, Why::Idle),
+                Some(why) => self.probed(id, None, why),
+            }
         }
     }
 
@@ -989,27 +1043,37 @@ impl App {
         let Some(tab) = self.tab_mut(id).filter(|t| t.webview.is_some()) else {
             return;
         };
-        tab.checking = true;
+        tab.checking = Some((Instant::now(), why));
         if let Some(w) = &tab.webview {
             native::media_busy(w, move |busy| {
-                let _ = proxy.send_event(UserEvent::MediaChecked(id, busy, why));
+                let _ = proxy.send_event(UserEvent::MediaChecked(id, busy));
             });
         }
     }
 
-    /// Then ask the page itself (`PROBE`, answered as `UserEvent::Probed`).
+    /// Then ask the page itself (`PROBE`, answered as `UserEvent::Probed`, or not at
+    /// all: then `unload_idle` ends the check after `PROBE_WAIT`).
     fn probe(&mut self, id: u32, why: Why) {
         let proxy = self.proxy.clone();
         let Some(tab) = self.tab_mut(id) else { return };
         let Some(w) = &tab.webview else { return };
-        tab.checking = true;
-        let p = proxy.clone();
-        let asked = w.evaluate_script_with_callback(PROBE, move |out| {
-            let found = serde_json::from_str(&out).ok();
-            let _ = p.send_event(UserEvent::Probed(id, found, why));
+        tab.checking = Some((Instant::now(), why));
+        let _ = w.evaluate_script_with_callback(PROBE, move |out| {
+            let _ = proxy.send_event(UserEvent::Probed(id, out));
         });
-        if asked.is_err() {
-            let _ = proxy.send_event(UserEvent::Probed(id, None, why));
+    }
+
+    /// The page answered (`found`), or did not in time (`None`): unload or keep.
+    fn probed(&mut self, id: u32, found: Option<(bool, i32, i32)>, why: Why) {
+        let after = self.unload_after();
+        let Some(tab) = self.tab(id) else { return };
+        let idle = after.is_some_and(|a| tab.seen.elapsed() >= a);
+        // A page that never finished loading has nothing to lose.
+        let edited = found.map_or(tab.settled, |f| f.0);
+        if keeps(why, false, edited, idle) {
+            self.keep(id);
+        } else {
+            self.unload(id, found.map(|f| (f.1, f.2)));
         }
     }
 
@@ -1018,22 +1082,25 @@ impl App {
         #[cfg(debug_assertions)]
         eprintln!("wisp: tab {id} kept loaded (in use)");
         if let Some(tab) = self.tab_mut(id) {
-            tab.checking = false;
+            tab.checking = None;
             tab.seen = Instant::now();
         }
     }
 
     /// Drop the tab's page, keeping its address, title and place. Never the tab on
-    /// screen, and nothing while a download runs.
-    fn unload(&mut self, id: u32, scroll: Option<(f64, f64)>) {
-        let blocked = self.active == Some(id) || self.downloads.borrow().running();
+    /// screen, nor one whose download is running.
+    fn unload(&mut self, id: u32, scroll: Option<(i32, i32)>) {
+        let blocked = self.active == Some(id) || self.downloads.borrow().running_in(id);
         let Some(tab) = self.tab_mut(id) else { return };
-        tab.checking = false;
-        if blocked || tab.webview.take().is_none() {
+        tab.checking = None;
+        if blocked || tab.webview.is_none() {
             return;
         }
+        tab.url = live_url(tab);
+        tab.webview = None;
+        tab.settled = false;
         #[cfg(debug_assertions)]
-        eprintln!("wisp: tab {id} unloaded");
+        eprintln!("wisp: tab {id} unloaded at {}", tab.url);
         tab.loading = false;
         tab.wake = Some(Wake {
             url: tab.url.clone(),
@@ -1059,7 +1126,7 @@ impl App {
         else {
             return;
         };
-        if let Some((x, y)) = wake.scroll.filter(|&(x, y)| x != 0.0 || y != 0.0) {
+        if let Some((x, y)) = wake.scroll.filter(|&s| s != (0, 0)) {
             let _ = w.evaluate_script(&format!("scrollTo({x}, {y})"));
         }
     }
@@ -1463,7 +1530,8 @@ impl App {
                 url: saved.url,
                 loading: false,
                 seen: Instant::now(),
-                checking: false,
+                checking: None,
+                settled: false,
                 wake: None,
                 zoom: self.cfg.behavior.default_zoom,
             });
@@ -1493,9 +1561,10 @@ impl App {
         let tabs = self
             .tabs
             .iter()
-            .filter(|t| !t.private && t.url.starts_with("http"))
-            .map(|t| SavedTab {
-                url: t.url.clone(),
+            .map(|t| (t, live_url(t)))
+            .filter(|(t, url)| !t.private && url.starts_with("http"))
+            .map(|(t, url)| SavedTab {
+                url,
                 title: t.title.clone(),
                 workspace: t.workspace,
                 pinned: t.pinned,
@@ -1537,7 +1606,12 @@ impl App {
                 Msg::PinTab { id, pinned } => self.set_pinned(id, pinned),
                 Msg::DuplicateTab { id } => self.duplicate_tab(id),
                 Msg::CloseOtherTabs { id } => self.close_other_tabs(id),
-                Msg::UnloadTab { id } => self.probe(id, Why::Asked),
+                // Not a private tab: its sign-ins would go with its page.
+                Msg::UnloadTab { id } => {
+                    if self.tab(id).is_some_and(|t| !t.private) {
+                        self.probe(id, Why::Asked);
+                    }
+                }
                 Msg::UnloadOtherTabs { id } => self.unload_other_tabs(id),
                 Msg::PageRect {
                     page,
@@ -1613,8 +1687,9 @@ impl App {
                     self.handle(UserEvent::Ui(Msg::Key { combo }));
                 }
             }
+            // Late events from a web view that was unloaded are dropped.
             UserEvent::Title(id, title) => {
-                if let Some(tab) = self.tab_mut(id) {
+                if let Some(tab) = self.tab_mut(id).filter(|t| t.webview.is_some()) {
                     tab.title = title;
                     self.retitled(id);
                     self.sync();
@@ -1624,9 +1699,10 @@ impl App {
                 if started && self.find_last.as_ref().is_some_and(|f| f.0 == id) {
                     self.find_last = None; // a new page: the next search starts over
                 }
-                if let Some(tab) = self.tab_mut(id) {
+                if let Some(tab) = self.tab_mut(id).filter(|t| t.webview.is_some()) {
                     tab.loading = started;
                     tab.url = url;
+                    tab.settled |= !started;
                     let woke = if started { None } else { tab.wake.take() };
                     self.sync();
                     if !started {
@@ -1662,25 +1738,22 @@ impl App {
                     self.new_tab(&url, private);
                 }
             }
-            UserEvent::MediaChecked(id, busy, why) => {
+            // Answers to a check that ended already (timed out) are ignored.
+            UserEvent::MediaChecked(id, busy) => {
+                let Some((_, why)) = self.tab(id).and_then(|t| t.checking) else {
+                    return;
+                };
                 if keeps(why, busy, false, true) {
                     self.keep(id);
                 } else {
                     self.probe(id, why);
                 }
             }
-            UserEvent::Probed(id, found, why) => {
-                let after = self.unload_after();
-                let idle = self
-                    .tab(id)
-                    .zip(after)
-                    .is_some_and(|(t, a)| t.seen.elapsed() >= a);
-                let edited = found.is_none_or(|f| f.0);
-                if keeps(why, false, edited, idle) {
-                    self.keep(id);
-                } else {
-                    self.unload(id, found.map(|f| (f.1, f.2)));
-                }
+            UserEvent::Probed(id, out) => {
+                let Some((_, why)) = self.tab(id).and_then(|t| t.checking) else {
+                    return;
+                };
+                self.probed(id, parse_probe(&out), why);
             }
             UserEvent::Found(id, found) => self.found(id, found),
             UserEvent::Downloads => self.downloads_changed(),
@@ -1919,8 +1992,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        App, CLOSED_MAX, Side, Tab, Why, Zone, ease_out, group_pinned, keeps, place_tab,
-        remember_closed, unload_due, zone,
+        App, CLOSED_MAX, Side, Tab, Why, Zone, ease_out, group_pinned, keeps, parse_probe,
+        place_tab, remember_closed, unload_due, zone,
     };
     use std::time::{Duration, Instant};
 
@@ -1935,7 +2008,8 @@ mod tests {
             url: format!("https://example.com/{id}"),
             loading: false,
             seen: Instant::now(),
-            checking: false,
+            checking: None,
+            settled: false,
             wake: None,
             zoom: 1.0,
         }
@@ -2092,9 +2166,9 @@ mod tests {
         assert_eq!(due(&t, true, Some(2), None, false), None);
         assert_eq!(due(&t, true, Some(1), after, false), None);
         assert_eq!(due(&t, false, Some(2), after, false), None);
-        t.checking = true;
+        t.checking = Some((Instant::now(), Why::Idle));
         assert_eq!(due(&t, true, Some(2), after, false), None);
-        t.checking = false;
+        t.checking = None;
         // Private: never on its own (its sign-ins live only in its page).
         t.private = true;
         assert_eq!(due(&t, true, Some(2), after, true), None);
@@ -2116,5 +2190,31 @@ mod tests {
         assert!(keeps(Why::Others, true, false, false));
         assert!(keeps(Why::Others, false, true, false));
         assert!(!keeps(Why::Asked, true, true, false)); // the user picked this tab
+    }
+
+    #[test]
+    fn only_a_well_formed_probe_answer_lets_a_tab_go() {
+        // The engine hands over the script's string as JSON.
+        assert_eq!(parse_probe(r#""0,0,2000""#), Some((false, 0, 2000)));
+        assert_eq!(parse_probe(r#""1,-5,12""#), Some((true, -5, 12)));
+        // Anything else keeps the tab: the script's own fallback, a page that broke it,
+        // no answer, junk.
+        for bad in [
+            r#""keep""#,
+            r#""2,0,0""#,
+            r#""0,0""#,
+            r#""0,0,0,0""#,
+            r#""0,NaN,0""#,
+            r#""0,1.5,0""#,
+            r#""true,0,0""#,
+            r#""0,99999999999,0""#,
+            "[false,0,0]",
+            "0",
+            "null",
+            "",
+            "\"0,0,0",
+        ] {
+            assert_eq!(parse_probe(bad), None, "{bad}");
+        }
     }
 }

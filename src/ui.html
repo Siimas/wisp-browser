@@ -1118,7 +1118,7 @@ function tabMenu(id, e) {
   openPop(e, [
     ...(t.private ? [] : [mi(t.pinned ? 'Unpin tab' : 'Pin tab', () => post({ cmd: 'pin_tab', id, pinned: !t.pinned }))]),
     mi('Duplicate tab', () => post({ cmd: 'duplicate_tab', id })),
-    ...(!t.asleep && id !== S.active ? [mi('Unload tab', () => post({ cmd: 'unload_tab', id }))] : []),
+    ...(!t.asleep && !t.private && id !== S.active ? [mi('Unload tab', () => post({ cmd: 'unload_tab', id }))] : []),
     ...(S.tabs.some(o => o.id !== id && o.id !== S.active && !o.asleep && !o.pinned && !o.private) ? [mi('Unload other tabs', () => post({ cmd: 'unload_other_tabs', id }))] : []),
     el('hr'),
     ...(S.private ? [] : others.map(w => mi([wsMark(w), 'Move to ' + w.name], () => post({ cmd: 'move_tab', id, workspace: w.id })))),

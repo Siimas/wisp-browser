@@ -15,6 +15,12 @@ All notable changes to Wisp are recorded here. The format follows
   unloaded tab's icon rests faded. "Unload tab" and "Unload other tabs" are in
   the tab's right-click menu. Ten busy sites went from 2.3 GB to 0.5 GB with
   nine unloaded.
+  An unloaded tab comes back as a fresh load of its current address, so it
+  loses its back and forward history, `sessionStorage` and any state held in
+  the page, and the position of scrolling areas inside the page (the page's own
+  scroll position is restored). A page that was the result of a form
+  submission reloads as a plain visit. Typed text is noticed in the page's own
+  fields and editors, not inside frames or shadow DOM.
 
 ### Changed
 
