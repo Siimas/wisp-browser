@@ -162,6 +162,8 @@ def run(app, server, profile, config, token, idle):
         raise RuntimeError("Wisp did not start")
     try:
         launch = server.wait(token, 60) - t0
+        if not idle:  # warm-up run
+            return {}
         time.sleep(SETTLE)
         return {"launch_s": launch, "memory_mb": memory_mb(main), "idle_cpu_pct": idle_cpu(main, idle)}
     finally:
@@ -171,7 +173,10 @@ def run(app, server, profile, config, token, idle):
 def stop(main):
     """Stop the instance we started, by process id only."""
     pids = tree(main)
-    os.kill(main, signal.SIGTERM)
+    try:
+        os.kill(main, signal.SIGTERM)
+    except ProcessLookupError:
+        raise RuntimeError("Wisp exited by itself during the measurement") from None
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline and any(pid == main for pid, _, _ in ps()):
         time.sleep(0.25)
@@ -196,6 +201,9 @@ def measure(args):
     with tempfile.TemporaryDirectory(prefix="wisp-perf-") as tmp:
         tmp = pathlib.Path(tmp).resolve()  # /var is /private/var; ps reports the real path
         app = bundle(tmp)
+        # Unrecorded: the first launch on a machine fills system caches (it was 2x slower
+        # and 30% heavier than the next ones on the CI runner).
+        run(app, server, tmp / "warmup", {}, "warmup", 0)
         for i in range(args.runs):
             for suffix, config in LAYOUTS.items():  # interleaved, so drift hits both alike
                 name = f"run{i}{suffix}"
