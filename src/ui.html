@@ -561,7 +561,9 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
     </div></section>
 
     <section id="settings" class="sheet"><div>
-      <h1>Settings <button class="btn primary" data-act="settings">Done</button></h1>
+      <h1>Settings
+        <span class="chips"><button class="btn" id="about-jump" title="Version and updates"></button>
+          <button class="btn primary" data-act="settings">Done</button></span></h1>
 
       <h2>Layout</h2>
       <div class="card">
@@ -1113,6 +1115,11 @@ function tabMenu(id, e) {
     mi('Close tab', () => post({ cmd: 'close_tab', id }), { danger: true }),
   ]);
 }
+// Open Settings at the About card (version, check for updates, restart to update).
+function showAbout() {
+  if (!S.settings) act('settings');
+  setTimeout(() => $('#about-version').closest('.card').scrollIntoView({ block: 'center' }), ms('--d-3'));
+}
 function barMenu(e) {
   const l = cfg.layout, mode = (m, label) => mi(label, () => { l.mode = m; save(); }, { checked: l.mode === m });
   openPop(e, [
@@ -1120,7 +1127,8 @@ function barMenu(e) {
     mode('top-relaxed', 'Top bar, relaxed'), mode('top-compact', 'Top bar, compact'), el('hr'),
     mi('Collapse the bar', () => act('toggle_bar'), { checked: l.collapsed }),
     mi('Show when the mouse comes near', () => { l.hover_expand = !l.hover_expand; save(); }, { checked: l.hover_expand }), el('hr'),
-    mi('Customize toolbar…', () => setCustomizing(true)),
+    mi('Customize toolbar…', () => setCustomizing(true)), el('hr'),
+    mi('About Wisp ' + S.version + ' and updates', showAbout),
   ]);
 }
 
@@ -1322,6 +1330,8 @@ function renderSettings() {
   renderTed();
   const up = S.update;
   $('#about-version').textContent = S.version;
+  // The version sits at the top of Settings too, and leads to the About card.
+  $('#about-jump').textContent = 'Wisp ' + S.version + (S.update.ready ? ' \u2192 ' + S.update.ready + ' ready' : '');
   $('#about-note').textContent = up.supported ? up.note : 'This copy was not installed from a release, so it does not update itself.';
   $('#about-check').hidden = !up.supported || !!up.ready;
   $('#about-restart').hidden = !up.ready;
@@ -1606,6 +1616,7 @@ $('#reset-keys').onclick = () => { cfg.hotkeys = {}; save(); };
 $('#ws-new').onclick = () => { const id = Math.max(0, ...cfg.workspaces.map(w => w.id)) + 1; cfg.workspaces.push({ id, name: 'Workspace ' + id, color: WS_COLORS[cfg.workspaces.length % WS_COLORS.length], icon: '' }); save(); };
 $('#modes').onclick = e => { const b = e.target.closest('[data-mode]'); if (b) { cfg.layout.mode = b.dataset.mode; save(); } };
 $('#open-customize').onclick = () => setCustomizing(true);
+$('#about-jump').onclick = () => $('#about-version').closest('.card').scrollIntoView({ block: 'center', behavior: 'smooth' });
 $('#ted-prev').onclick = () => { tedPage = (tedPage + SWATCHES.length - 1) % SWATCHES.length; renderTed(); };
 $('#ted-next').onclick = () => { tedPage = (tedPage + 1) % SWATCHES.length; renderTed(); };
 $('#ted-dial').onpointerdown = e => { // turn by dragging up/down or sideways
