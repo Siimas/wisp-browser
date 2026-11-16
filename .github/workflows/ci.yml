@@ -34,3 +34,42 @@ jobs:
           cargo install cargo-about --locked --version 0.9.3 --features cli
           cargo about generate --locked --fail about.hbs -o THIRD-PARTY-NOTICES
           git diff --exit-code THIRD-PARTY-NOTICES
+
+  # Performance budget (bench/budget.json, CONTRIBUTING.md). macOS measures a running
+  # release build; Windows checks the binary size only.
+  perf:
+    name: perf (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # The last result from main, to show what this change moves (best effort).
+      - uses: actions/cache/restore@v4
+        with:
+          path: perf-base.json
+          key: perf-main-${{ runner.os }}-${{ github.sha }}
+          restore-keys: perf-main-${{ runner.os }}-
+      - name: Performance budget
+        run: python bench/perf_check.py --out perf.json --base perf-base.json ${{ runner.os == 'Windows' && '--size-only' || '' }}
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-${{ runner.os }}
+          path: perf.json
+          if-no-files-found: ignore
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: cp perf.json perf-base.json
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: perf-base.json
+          key: perf-main-${{ runner.os }}-${{ github.sha }}
