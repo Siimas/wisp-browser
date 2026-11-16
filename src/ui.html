@@ -543,6 +543,8 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
           <option value="https://www.startpage.com/sp/search?query=%s">Startpage</option>
         </datalist>
         <label class="row">Reopen last session's tabs on start <input type="checkbox" data-k="behavior.restore_session"></label>
+        <label class="row"><span>Keep history<small>Remembers the pages you visit, on this computer only, to suggest them in the address bar. Off: nothing new is recorded; clear what is there from History</small></span>
+          <input type="checkbox" data-k="behavior.keep_history"></label>
         <label class="row">Default page zoom <input type="number" min="0.3" max="4" step="0.1" data-k="behavior.default_zoom"></label>
       </div>
 
@@ -1377,7 +1379,7 @@ function renderHistory(rows) { // latest first, so days come out in order
     const time = new Date(r.last * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
     card.append(libRow(r, time, rowBtn('close', 'Delete from history', () => { post({ cmd: 'forget', url: r.url }); sheetAsk(); })));
   }
-  $('#history .list').replaceChildren(...out, ...emptyNote(rows, 'Pages you visit will be listed here. Private tabs are never recorded.'));
+  $('#history .list').replaceChildren(...out, ...emptyNote(rows, cfg.behavior.keep_history ? 'Pages you visit will be listed here. Private tabs are never recorded.' : 'History is switched off in Settings > Behavior.'));
 }
 function renderBookmarks(rows) {
   const card = el('div', { className: 'card' }, ...rows.map(r => {

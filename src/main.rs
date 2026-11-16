@@ -1504,6 +1504,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             Event::LoopDestroyed => {
                 app.save_session();
+                app.store.flush_if_unsaved();
                 // The quiet path: a downloaded update goes in as the app closes.
                 if let Some(ready) = app.update.take()
                     && let Err(e) = ready.install()

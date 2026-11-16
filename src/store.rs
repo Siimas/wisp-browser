@@ -6,9 +6,13 @@
 //! when it was last visited. Private tabs are never recorded, and a private window
 //! opens the store read-only: it can suggest from what is there but changes nothing.
 //!
-//! ponytail: each file is rewritten whole on every change (about 1 MB at the history
-//! cap), and a second normal window (a second copy of the app) would overwrite the
-//! first one's file. Upgrade path: an append-only log, or SQLite.
+//! Everything is held in memory (about 5 MB at the history cap) and matched by a
+//! plain scan, a few milliseconds when full: see `speed_when_full` below.
+//!
+//! ponytail: each file is rewritten whole (about 3 MB at the history cap), so visits
+//! are written at most every `SAVE_EVERY` and on quit rather than per page; and a
+//! second normal window (a second copy of the app) would overwrite the first one's
+//! file. Upgrade path: an append-only log, or SQLite.
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -16,12 +20,14 @@ use std::{
     collections::HashSet,
     fs,
     path::PathBuf,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 /// History size cap: this many distinct addresses. One more and the address visited
 /// longest ago is dropped.
-pub const MAX_VISITS: usize = 5000;
+pub const MAX_VISITS: usize = 20_000;
+/// Visits reach the disk at most this often (and on quit); a crash loses no more.
+const SAVE_EVERY: Duration = Duration::from_secs(30);
 /// Rows offered under the address bar, not counting the final "Search for" row.
 const MAX_SUGGESTIONS: usize = 7;
 /// Of those, at most this many are open tabs.
@@ -72,6 +78,9 @@ pub struct Store {
     read_only: bool,
     visits: Vec<Visit>,
     bookmarks: Vec<Bookmark>,
+    /// Visits changed since `history.json` was written, and when that was.
+    unsaved: bool,
+    saved: Option<Instant>,
 }
 
 pub fn now() -> u64 {
@@ -133,11 +142,17 @@ impl Store {
                 Vec::new()
             })
         }
+        let mut visits: Vec<Visit> = read(&dir, "history.json");
+        if visits.len() > MAX_VISITS {
+            visits.sort_by_key(|v| std::cmp::Reverse(v.last));
+            visits.truncate(MAX_VISITS);
+        }
         Self {
-            visits: read(&dir, "history.json"),
+            visits,
             bookmarks: read(&dir, "bookmarks.json"),
             dir: Some(dir),
             read_only,
+            ..Self::default()
         }
     }
 
@@ -156,8 +171,25 @@ impl Store {
         }
     }
 
-    fn save_history(&self) {
+    /// Write history now: after something the user did on purpose, and on quit.
+    pub fn flush(&mut self) {
         self.save("history.json", &self.visits);
+        (self.unsaved, self.saved) = (false, Some(Instant::now()));
+    }
+
+    /// A visit changed history: write it, unless that happened a moment ago.
+    fn touched(&mut self) {
+        self.unsaved = true;
+        if self.saved.is_none_or(|at| at.elapsed() >= SAVE_EVERY) {
+            self.flush();
+        }
+    }
+
+    /// On quit: write what `touched` held back.
+    pub fn flush_if_unsaved(&mut self) {
+        if self.unsaved {
+            self.flush();
+        }
     }
 
     fn save_bookmarks(&self) {
@@ -188,7 +220,7 @@ impl Store {
             let oldest = (0..self.visits.len()).min_by_key(|&i| self.visits[i].last);
             self.visits.swap_remove(oldest.unwrap_or(0));
         }
-        self.save_history();
+        self.touched();
     }
 
     /// A page already in history announced its title (often after it finished loading).
@@ -201,14 +233,14 @@ impl Store {
             && v.title != title
         {
             v.title = title;
-            self.save_history();
+            self.touched();
         }
     }
 
     pub fn forget(&mut self, url: &str) {
         if !self.read_only {
             self.visits.retain(|v| v.url != url);
-            self.save_history();
+            self.flush();
         }
     }
 
@@ -216,7 +248,7 @@ impl Store {
     pub fn clear_since(&mut self, since: u64) {
         if !self.read_only {
             self.visits.retain(|v| v.last < since);
-            self.save_history();
+            self.flush();
         }
     }
 
@@ -400,7 +432,8 @@ impl crate::App {
 
     /// A page finished loading in tab `id`.
     pub(crate) fn visited(&mut self, id: u32) {
-        if let Some(t) = self.tabs.iter().find(|t| t.id == id) {
+        let keep = self.cfg.behavior.keep_history;
+        if let Some(t) = self.tabs.iter().find(|t| t.id == id).filter(|_| keep) {
             self.store.record(&t.url, &t.title, t.private, now());
         }
     }
@@ -418,7 +451,8 @@ impl crate::App {
                 let tabs: Vec<(u32, &str, &str)> = self
                     .tabs
                     .iter()
-                    .filter(|t| Some(t.id) != self.active)
+                    // Private tabs are not offered: their titles stay in the tab list only.
+                    .filter(|t| Some(t.id) != self.active && !t.private)
                     .map(|t| (t.id, t.url.as_str(), t.title.as_str()))
                     .collect();
                 let mut rows = self.store.suggest(&query, &tabs, now());
@@ -617,6 +651,10 @@ mod tests {
         s.record("https://open.test/", "", false, NOW + 5); // a reload keeps the title
         s.record("file:///etc/hosts", "Not the web", false, NOW);
         s.toggle_bookmark("https://open.test/", "Open", NOW);
+        // The reload came within `SAVE_EVERY` of the first write: held back until quit.
+        assert!(s.unsaved);
+        s.flush_if_unsaved();
+        assert!(!s.unsaved);
         let saved = fs::read_to_string(dir.join("history.json")).unwrap();
         assert!(saved.contains("open.test") && !saved.contains("secret"));
         assert_eq!((s.visits.len(), s.visits[0].count), (1, 2));
@@ -646,6 +684,61 @@ mod tests {
         // What was written comes back.
         let again = Store::load(dir.clone(), false);
         assert_eq!((again.visits, again.bookmarks), (s.visits, s.bookmarks));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Not a pass/fail test: prints how long the store takes when full and well past
+    /// full. `cargo test --release speed -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn speed_when_full() {
+        let dir = std::env::temp_dir().join(format!("wisp-store-speed-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        for n in [MAX_VISITS, 100_000] {
+            let mut s = Store {
+                dir: Some(dir.clone()),
+                ..Store::default()
+            };
+            s.visits = (0..n as u64)
+                .map(|i| Visit {
+                    url: format!(
+                        "https://site{}.test/section/{i}/a-fairly-long-path?id={i}",
+                        i % 900
+                    ),
+                    title: format!("A page title of ordinary length, number {i}"),
+                    count: 1 + (i % 13) as u32,
+                    last: NOW - i * 600,
+                })
+                .collect();
+            let t = Instant::now();
+            for q in ["site4", "ordinary 77", "zzz-nothing", "s"] {
+                std::hint::black_box(s.suggest(q, &[], NOW));
+            }
+            let suggest = t.elapsed() / 4;
+            let t = Instant::now();
+            std::hint::black_box(s.history("ordinary 77"));
+            println!(
+                "{n} pages: suggest {suggest:?}, search history {:?}",
+                t.elapsed()
+            );
+            if n > MAX_VISITS {
+                continue;
+            }
+            s.flush();
+            let t = Instant::now();
+            s.record("https://new.test/", "New", false, NOW); // over the cap: drops one
+            let record = t.elapsed();
+            let t = Instant::now();
+            s.flush();
+            let write = t.elapsed();
+            let t = Instant::now();
+            let loaded = Store::load(dir.clone(), false).visits.len();
+            let size = fs::metadata(dir.join("history.json")).unwrap().len() / 1024;
+            println!(
+                "  record {record:?}, write {write:?}, load {:?} ({loaded} rows), file {size} KB",
+                t.elapsed()
+            );
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 
