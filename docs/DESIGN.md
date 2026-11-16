@@ -153,6 +153,7 @@ Rules:
 | Switching workspace | Tab list slides 16 px from that workspace's side, `--d-3`; the window tint changes with it |
 | Menu or workspace editor | Scales from 96% at its anchor, `--d-2` |
 | Settings / Customize sheet | Rises 6 px and fades in, `--d-3` |
+| Find bar opened (Mod+F) or closed | A row appears between the hotbar and the page: it drops 8 px and fades in over `--d-2` while the page card glides down to make room |
 | Address bar focus | Lifts to `--surface`, accent ring grows, `--d-2` |
 | Page loading | Spinner in the tab, sweep under the hotbar |
 | Hover, press | Background `--d-1`; press scale as above |
