@@ -175,7 +175,14 @@ i.dot { display: block; width: 8px; height: 8px; border-radius: 50%; background:
 @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(334%); } }
 
 /* ================= SIDEBAR (a column) / TAB ROW (top-bar layouts) ================= */
-#sidebar { display: flex; min-width: 0; min-height: 0; }
+#sidebar { display: flex; min-width: 0; min-height: 0; position: relative; }
+/* Resize the sidebar by dragging its inner edge: no setting needed. */
+#grip { display: none; position: absolute; top: 0; bottom: 0; width: var(--gap); cursor: col-resize; z-index: 3; touch-action: none; }
+#grip::after { content: ""; position: absolute; top: var(--sp-2); bottom: var(--sp-2); left: calc(50% - 1px); width: 2px; border-radius: var(--r-full); background: var(--accent); opacity: 0; transition: opacity var(--d-1); }
+#grip:hover::after, #grip.dragging::after { opacity: .7; }
+:root[data-side=right]:not([data-floater]) #grip { display: block; left: 0; }
+:root[data-side=left]:not([data-floater]) #grip { display: block; right: 0; }
+:root[data-customizing] #grip { display: none; }
 .area { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); min-width: 0; }
 .area:empty { display: none; }
 #tabs { display: flex; gap: var(--sp-0); min-width: 0; min-height: 0; }
@@ -527,6 +534,7 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
 <div id="app">
   <header id="hotbar"><div class="area" data-area="hotbar"></div><div id="progress"></div></header>
   <aside id="sidebar">
+    <div id="grip" title="Drag to resize; double-click to reset" aria-hidden="true"></div>
     <div class="area" data-area="before_tabs"></div>
     <button id="ws-head" title="Edit this workspace"><span class="dot"></span><span class="name"></span></button>
     <div id="badge"></div>
@@ -554,7 +562,9 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
     </div></section>
 
     <section id="settings" class="sheet"><div>
-      <h1>Settings <button class="btn primary" data-act="settings">Done</button></h1>
+      <h1>Settings
+        <span class="chips"><button class="btn" id="about-jump" title="Version and updates"></button>
+          <button class="btn primary" data-act="settings">Done</button></span></h1>
 
       <h2>Layout</h2>
       <div class="card">
@@ -574,7 +584,6 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
           <input type="checkbox" data-k="layout.hover_expand"></label>
         <label class="row"><span>Reveal distance<small>How close to the edge the mouse must come: further right reveals the bar sooner</small></span>
           <input type="range" min="4" max="160" step="4" data-k="layout.hover_zone"></label>
-        <label class="row">Sidebar width <input type="range" min="150" max="420" step="10" data-k="layout.sidebar_width"></label>
       </div>
 
       <h2>Workspaces</h2>
@@ -622,8 +631,8 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
         <label class="row"><span>Search engine<small>URL with %s where the search goes</small></span>
           <input type="text" data-k="behavior.search_url" list="engines"></label>
         <datalist id="engines">
-          <option value="https://duckduckgo.com/?q=%s">DuckDuckGo</option>
           <option value="https://www.google.com/search?q=%s">Google</option>
+          <option value="https://duckduckgo.com/?q=%s">DuckDuckGo</option>
           <option value="https://www.bing.com/search?q=%s">Bing</option>
           <option value="https://search.brave.com/search?q=%s">Brave</option>
           <option value="https://www.startpage.com/sp/search?query=%s">Startpage</option>
@@ -1113,6 +1122,11 @@ function tabMenu(id, e) {
     mi('Close tab', () => post({ cmd: 'close_tab', id }), { danger: true }),
   ]);
 }
+// Open Settings at the About card (version, check for updates, restart to update).
+function showAbout() {
+  if (!S.settings) act('settings');
+  setTimeout(() => $('#about-version').closest('.card').scrollIntoView({ block: 'center' }), ms('--d-3'));
+}
 function barMenu(e) {
   const l = cfg.layout, mode = (m, label) => mi(label, () => { l.mode = m; save(); }, { checked: l.mode === m });
   openPop(e, [
@@ -1120,7 +1134,8 @@ function barMenu(e) {
     mode('top-relaxed', 'Top bar, relaxed'), mode('top-compact', 'Top bar, compact'), el('hr'),
     mi('Collapse the bar', () => act('toggle_bar'), { checked: l.collapsed }),
     mi('Show when the mouse comes near', () => { l.hover_expand = !l.hover_expand; save(); }, { checked: l.hover_expand }), el('hr'),
-    mi('Customize toolbar…', () => setCustomizing(true)),
+    mi('Customize toolbar…', () => setCustomizing(true)), el('hr'),
+    mi('About Wisp ' + S.version + ' and updates', showAbout),
   ]);
 }
 
@@ -1373,6 +1388,8 @@ function renderSettings() {
   renderTed();
   const up = S.update;
   $('#about-version').textContent = S.version;
+  // The version sits at the top of Settings too, and leads to the About card.
+  $('#about-jump').textContent = 'Wisp ' + S.version + (S.update.ready ? ' \u2192 ' + S.update.ready + ' ready' : '');
   $('#about-note').textContent = up.supported ? up.note : 'This copy was not installed from a release, so it does not update itself.';
   $('#about-check').hidden = !up.supported || !!up.ready;
   $('#about-restart').hidden = !up.ready;
@@ -1658,6 +1675,7 @@ $('#reset-keys').onclick = () => { cfg.hotkeys = {}; save(); };
 $('#ws-new').onclick = () => { const id = Math.max(0, ...cfg.workspaces.map(w => w.id)) + 1; cfg.workspaces.push({ id, name: 'Workspace ' + id, color: WS_COLORS[cfg.workspaces.length % WS_COLORS.length], icon: '' }); save(); };
 $('#modes').onclick = e => { const b = e.target.closest('[data-mode]'); if (b) { cfg.layout.mode = b.dataset.mode; save(); } };
 $('#open-customize').onclick = () => setCustomizing(true);
+$('#about-jump').onclick = () => $('#about-version').closest('.card').scrollIntoView({ block: 'center', behavior: 'smooth' });
 $('#ted-prev').onclick = () => { tedPage = (tedPage + SWATCHES.length - 1) % SWATCHES.length; renderTed(); };
 $('#ted-next').onclick = () => { tedPage = (tedPage + 1) % SWATCHES.length; renderTed(); };
 $('#ted-dial').onpointerdown = e => { // turn by dragging up/down or sideways
@@ -1671,13 +1689,15 @@ $('#ted-dial').onkeydown = e => { const step = { ArrowUp: 10, ArrowRight: 10, Ar
 $('#cz-done').onclick = () => setCustomizing(false);
 $('#cz-reset').onclick = () => { cfg.layout.areas = structuredClone(DEFAULT_AREAS); areasKey = ''; renderAreas(); renderDynamic(); save(); };
 
-// Empty parts of the bar behave like a title bar: drag to move, double-click to expand,
-// right-click for layout options.
+// Empty parts of the bar behave like a title bar: drag to move, right-click for layout
+// options. A double-click expands the window from the hotbar, and opens a new tab (at
+// the end of the list) from the empty space around the tabs, in a sidebar or a tab row.
 const EMPTY = '#hotbar, #sidebar, #tabs, #pins, .area, .spacer';
 addEventListener('mousedown', e => {
   if (!$('#pop').hidden && !e.target.closest('#pop')) closePop();
   if (customizing || e.button !== 0 || !e.target.matches(EMPTY)) return;
-  post({ cmd: e.detail === 2 ? 'maximize' : 'drag' });
+  if (e.detail !== 2) return post({ cmd: 'drag' });
+  if (e.target.closest('#sidebar')) act('new_tab'); else post({ cmd: 'maximize' });
 });
 addEventListener('contextmenu', e => {
   if (e.target.matches('input, textarea')) return;
@@ -1767,6 +1787,23 @@ addEventListener('keydown', e => {
   else if (S.settings && !e.target.closest('input, textarea, select')) act('settings');
 });
 dark.addEventListener('change', () => cfg && applyLook());
+// Sidebar width: drag the sidebar's inner edge; double-click it for the default.
+$('#grip').onpointerdown = e => {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  const grip = e.currentTarget, right = root.dataset.side === 'right';
+  grip.setPointerCapture(e.pointerId);
+  grip.classList.add('dragging');
+  const move = ev => {
+    const w = Math.round(right ? innerWidth - ev.clientX : ev.clientX);
+    cfg.layout.sidebar_width = Math.max(150, Math.min(420, w)); // same limits as config.rs
+    root.style.setProperty('--side-w', cfg.layout.sidebar_width + 'px');
+    reportPage(); // the page follows the edge as it moves
+  };
+  const up = () => { grip.removeEventListener('pointermove', move); grip.removeEventListener('pointerup', up); grip.classList.remove('dragging'); save(); };
+  grip.addEventListener('pointermove', move); grip.addEventListener('pointerup', up);
+};
+$('#grip').ondblclick = () => { cfg.layout.sidebar_width = 220; root.style.setProperty('--side-w', '220px'); reportPage(true); save(); };
 new ResizeObserver(() => S && reportPage()).observe($('#page'));
 post({ cmd: 'ready' });
 </script>

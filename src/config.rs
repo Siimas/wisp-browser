@@ -199,9 +199,9 @@ impl Default for Appearance {
 impl Default for Behavior {
     fn default() -> Self {
         Self {
-            homepage: "https://duckduckgo.com".into(),
+            homepage: "https://www.google.com".into(),
             new_tab_url: "about:blank".into(),
-            search_url: "https://duckduckgo.com/?q=%s".into(),
+            search_url: "https://www.google.com/search?q=%s".into(),
             restore_session: true,
             default_zoom: 1.0,
             auto_update: true,
