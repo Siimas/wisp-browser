@@ -7,6 +7,12 @@ updates:
     groups:
       cargo:
         patterns: ["*"]
+    # These must stay on the versions wry itself uses; they move when wry moves.
+    ignore:
+      - dependency-name: "windows-core"
+      - dependency-name: "webview2-com"
+      - dependency-name: "block2"
+      - dependency-name: "objc2*"
   - package-ecosystem: github-actions
     directory: /
     schedule:
