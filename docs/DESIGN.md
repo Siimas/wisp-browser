@@ -91,6 +91,9 @@ Workspace icons are picked from the same set and take the workspace's color.
   `--surface` and gains an accent ring.
 - **Long tab titles fade out** (a mask) instead of ending in "…".
 - **Close buttons appear on hover only.**
+- **Pinned tabs are tiles**: icon only, resting on `--field`, in a grid above
+  "New tab" in a sidebar and at the start of the row in a top bar. They have
+  no close button; the close-tab hotkey only steps off them.
 - **macOS window buttons** are moved to sit on the center line of the first
   row of controls, at `--gap` + 5 px from the left edge.
 
@@ -150,6 +153,8 @@ Rules:
 | Revealed bar let go (cursor away for 180 ms) | Slides back 11 px and fades. `--d-1` `--ease-in` |
 | Bar collapsed or pinned open, layout changed | The page card **glides** to its new size over `--d-3` with the same soft landing (driven natively, `PAGE_GLIDE` in `main.rs`) while the bar slides in over `--d-3` |
 | New tab / closed tab | Grows from / folds to zero height with a fade. `--d-2` in, `--d-1` out |
+| Dragging a tab | The tab lifts (`--shadow-pop`) and follows the pointer inside its own group; the tabs it passes slide one place over, `--d-2` `--ease-move`. Let go and everything glides home |
+| Pinning, unpinning, a new order from elsewhere | Every tab glides from where it was to where it now is, `--d-2` `--ease-move`. A pinned tile itself appears and goes by scaling from 80% |
 | Switching workspace | Tab list slides 16 px from that workspace's side, `--d-3`; the window tint changes with it |
 | Menu or workspace editor | Scales from 96% at its anchor, `--d-2` |
 | Settings / Customize sheet | Rises 6 px and fades in, `--d-3` |

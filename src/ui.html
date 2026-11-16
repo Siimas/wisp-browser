@@ -241,6 +241,27 @@ i.dot { display: block; width: 8px; height: 8px; border-radius: 50%; background:
 :root[data-lights=tabs] #sidebar { padding-left: var(--lights); }
 :root[data-lights=strip] #page { margin-top: 28px; }
 
+/* ================= PINNED TABS + TAB DRAG =================
+   Pinned tabs are icon-only tiles in their own box: a grid above "New tab" in a
+   sidebar, the start of the row in a top bar. */
+#pins { display: flex; gap: 2px; flex: none; min-width: 0; }
+#pins:empty { display: none; }
+#pins .tab { padding: 0; justify-content: center; background: var(--field); }
+#pins .tab:hover { background: color-mix(in srgb, var(--field), var(--hover)); }
+#pins .tab.active { background: var(--surface); }
+#pins .tab .title, #pins .tab .x { display: none; }
+:root:not([data-side=top]) #pins { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(var(--row) + var(--sp-2)), 1fr)); gap: var(--sp-1); }
+:root[data-side=top] #pins { order: 1; align-items: center; }
+:root[data-side=top] #pins .tab { flex: none; width: calc(var(--tabs-h) - 8px); }
+#pins .tab.enter { animation: pin-in var(--d-2) var(--ease-out); }
+#pins .tab.leave { animation: pin-out var(--d-1) var(--ease-in) forwards; }
+@keyframes pin-in { from { opacity: 0; transform: scale(.8); } }
+@keyframes pin-out { to { opacity: 0; transform: scale(.8); } }
+/* Reordering: tabs glide between places; the one being dragged is lifted off the bar. */
+.tab, .tab img { -webkit-user-drag: none; }
+#sidebar.reordering .tab { transition: transform var(--d-2) var(--ease-move), background var(--d-1), color var(--d-1), box-shadow var(--d-1); }
+#sidebar .tab.lifted { z-index: 1; background: var(--surface); color: var(--fg); box-shadow: var(--shadow-pop); }
+
 /* ================= FLOATER =================
    A second copy of this page in its own view above the tabs, showing only the
    collapsed bar as a floating panel. */
@@ -400,6 +421,7 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
     <button id="ws-head" title="Edit this workspace"><span class="dot"></span><span class="name"></span></button>
     <div id="badge"></div>
     <hr class="sep">
+    <div id="pins" role="tablist" aria-label="Pinned tabs"></div>
     <button id="new" title="New tab" aria-label="New tab"></button>
     <div id="tabs" role="tablist"></div>
     <div class="area" data-area="after_tabs"></div>
@@ -715,8 +737,11 @@ function makeTab(id) {
   const x = el('button', { className: 'x', title: 'Close tab', ariaLabel: 'Close tab' }, svg('close'));
   x.onclick = e => { e.stopPropagation(); post({ cmd: 'close_tab', id }); };
   const tab = el('div', { className: 'tab', role: 'tab', tabIndex: 0 }, el('span', { className: 'fav' }), el('span', { className: 'title' }), x);
+  tab.dataset.id = id;
   tab.onclick = () => post({ cmd: 'select_tab', id });
-  tab.onauxclick = e => { if (e.button === 1) post({ cmd: 'close_tab', id }); };
+  tab.onpointerdown = e => tabDragStart(e, id, tab);
+  tab.onanimationend = () => tab.classList.remove('enter'); // or moving the node would replay it
+  tab.onauxclick = e => { if (e.button === 1 && !tab.closest('#pins')) post({ cmd: 'close_tab', id }); };
   tab.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') post({ cmd: 'select_tab', id }); };
   tab.oncontextmenu = e => { e.preventDefault(); tabMenu(id, e); };
   return tab;
@@ -737,26 +762,106 @@ function updateTab(node, t) {
   }
 }
 function renderTabs() {
-  const box = $('#tabs'), swapped = lastWs !== null && lastWs !== S.workspace, seen = new Set();
-  let cursor = box.firstElementChild; // walk the list, stepping over tabs that are animating out
-  for (const t of S.tabs) {
-    let node = tabEls.get(t.id);
-    if (!node) { node = makeTab(t.id); tabEls.set(t.id, node); if (lastWs !== null && !swapped) node.classList.add('enter'); }
-    updateTab(node, t);
-    while (cursor && cursor.classList.contains('leave')) cursor = cursor.nextElementSibling;
-    if (cursor === node) cursor = cursor.nextElementSibling; else box.insertBefore(node, cursor);
-    seen.add(t.id);
-  }
+  const boxes = [$('#tabs'), $('#pins')], swapped = lastWs !== null && lastWs !== S.workspace, seen = new Set();
+  const place = () => {
+    const cursor = boxes.map(b => b.firstElementChild); // walk each list, stepping over tabs that are animating out
+    for (const t of S.tabs) {
+      let node = tabEls.get(t.id);
+      if (!node) { node = makeTab(t.id); tabEls.set(t.id, node); if (lastWs !== null && !swapped) node.classList.add('enter'); }
+      updateTab(node, t);
+      const k = +!!t.pinned;
+      while (cursor[k] && cursor[k].classList.contains('leave')) cursor[k] = cursor[k].nextElementSibling;
+      if (cursor[k] === node) cursor[k] = node.nextElementSibling;
+      else { if (cursor[1 - k] === node) cursor[1 - k] = node.nextElementSibling; boxes[k].insertBefore(node, cursor[k]); }
+      seen.add(t.id);
+    }
+  };
+  // The same tabs in a new order (dragged, pinned, unpinned): glide to it, do not jump.
+  const order = S.tabs.map(t => t.id + (t.pinned ? 'p' : '')).join();
+  const moved = !swapped && order !== tabOrder && S.tabs.length === tabEls.size && S.tabs.every(t => tabEls.has(t.id));
+  if (moved) glideTabs(place); else place();
+  tabOrder = order;
   for (const [id, node] of tabEls) if (!seen.has(id)) { // closed: fold away, then remove
     tabEls.delete(id);
     if (swapped) node.remove(); else { node.classList.add('leave'); setTimeout(() => node.remove(), ms('--d-1')); }
   }
   if (swapped) { // slide in from the side the new workspace sits on
     const order = cfg.workspaces.map(w => w.id), dir = order.indexOf(S.workspace) > order.indexOf(lastWs) ? 'swap-next' : 'swap-prev';
-    box.classList.remove('swap-next', 'swap-prev'); void box.offsetWidth; box.classList.add(dir);
+    for (const box of boxes) { box.classList.remove('swap-next', 'swap-prev'); void box.offsetWidth; box.classList.add(dir); }
   }
   lastWs = S.workspace;
 }
+
+// ---------- tab order: gliding, and dragging to reorder ----------
+// Run `change` (which may move tab nodes), then let every tab glide from where it
+// was to where it now is.
+let tabOrder = '', glideTimer = 0, tabDrag = null;
+const liveTabs = box => [...box.children].filter(n => !n.classList.contains('leave'));
+function glideTabs(change) {
+  const nodes = [...tabEls.values()], was = nodes.map(n => n.getBoundingClientRect()), bar = $('#sidebar');
+  change();
+  for (const n of nodes) { n.style.transition = 'none'; n.style.transform = ''; }
+  nodes.forEach((n, i) => { const r = n.getBoundingClientRect(); if (was[i].width && r.width) n.style.transform = `translate(${was[i].left - r.left}px, ${was[i].top - r.top}px)`; });
+  void bar.offsetWidth;
+  bar.classList.add('reordering');
+  for (const n of nodes) n.style.transition = n.style.transform = '';
+  clearTimeout(glideTimer);
+  glideTimer = setTimeout(() => { bar.classList.remove('reordering'); for (const n of nodes) n.classList.remove('lifted'); }, ms('--d-2'));
+}
+// Dragging uses pointer events, like Customize mode. The tab follows the pointer
+// inside its own box (pinned or not, so the groups never mix), the others slide to
+// the places they would take, and letting go glides everything home.
+// ponytail: a long list does not scroll while you drag; add edge scrolling if wanted.
+function tabDragStart(e, id, node) {
+  if (e.button === 0 && !customizing && !e.target.closest('.x')) tabDrag = { id, node, x: e.clientX, y: e.clientY, pointer: e.pointerId };
+}
+addEventListener('pointermove', e => {
+  const d = tabDrag;
+  if (!d) return;
+  if (!d.slots) { // not a drag until the pointer has really moved: a click still selects
+    if (Math.hypot(e.clientX - d.x, e.clientY - d.y) < 5) return;
+    d.box = d.node.parentNode;
+    d.tabs = liveTabs(d.box);
+    d.slots = d.tabs.map(n => n.getBoundingClientRect());
+    d.from = d.to = d.tabs.indexOf(d.node);
+    clearTimeout(glideTimer);
+    $('#sidebar').classList.add('reordering');
+    d.node.classList.add('lifted');
+    d.node.style.transition = 'none';
+    try { d.node.setPointerCapture(d.pointer); } catch {}
+    post({ cmd: 'busy', on: true }); // a revealed bar stays while dragging
+  }
+  if (liveTabs(d.box).length !== d.tabs.length) return tabDragEnd(false); // a tab came or went: let go
+  // Travel is held to the span of the slots: along the list, or across the grid.
+  const s = d.slots, home = s[d.from], xs = s.map(r => r.left - home.left), ys = s.map(r => r.top - home.top);
+  const dx = Math.max(Math.min(...xs), Math.min(e.clientX - d.x, Math.max(...xs)));
+  const dy = Math.max(Math.min(...ys), Math.min(e.clientY - d.y, Math.max(...ys)));
+  d.node.style.transform = `translate(${dx}px, ${dy}px)`;
+  const far = i => Math.hypot(xs[i] - dx, ys[i] - dy); // it takes the slot it is nearest to
+  d.to = s.reduce((best, _, i) => far(i) < far(best) ? i : best, d.to);
+  d.tabs.forEach((n, i) => { // those in between step one slot towards where it came from
+    if (n === d.node) return;
+    const j = i > d.from && i <= d.to ? i - 1 : i < d.from && i >= d.to ? i + 1 : i;
+    n.style.transform = j === i ? '' : `translate(${s[j].left - s[i].left}px, ${s[j].top - s[i].top}px)`;
+  });
+});
+function tabDragEnd(drop) {
+  const d = tabDrag;
+  tabDrag = null;
+  if (!d || !d.slots) return;
+  try { d.node.releasePointerCapture(d.pointer); } catch {}
+  post({ cmd: 'busy', on: false });
+  const moved = drop && d.to !== d.from;
+  glideTabs(() => { if (moved) d.box.insertBefore(d.node, d.to > d.from ? d.tabs[d.to].nextSibling : d.tabs[d.to]); });
+  const eat = ev => { ev.stopPropagation(); ev.preventDefault(); }; // the release is not a click on the tab
+  addEventListener('click', eat, true);
+  setTimeout(() => removeEventListener('click', eat, true));
+  if (!moved) return;
+  tabOrder = [$('#pins'), $('#tabs')].flatMap((box, i) => liveTabs(box).map(n => n.dataset.id + (i ? '' : 'p'))).join(); // Rust will say the same
+  post({ cmd: 'reorder_tab', id: d.id, index: (d.box.id === 'tabs' ? liveTabs($('#pins')).length : 0) + d.to });
+}
+addEventListener('pointerup', () => tabDragEnd(true));
+addEventListener('pointercancel', () => tabDragEnd(false));
 
 // ---------- parts that change with every state ----------
 function renderDynamic() {
@@ -824,10 +929,13 @@ function wsEditor(ws, anchor, fresh) {
 const mi = (label, onclick, opt = {}) => el('button', { className: 'mi' + (opt.danger ? ' danger' : ''), onclick: () => { closePop(); onclick(); } },
   ...[].concat(label), ...(opt.checked ? [el('span', { className: 'check', textContent: '✓' })] : []));
 function tabMenu(id, e) {
-  const others = cfg.workspaces.filter(w => w.id !== S.workspace);
+  const others = cfg.workspaces.filter(w => w.id !== S.workspace), t = S.tabs.find(t => t.id === id) || {};
   openPop(e, [
+    ...(t.private ? [] : [mi(t.pinned ? 'Unpin tab' : 'Pin tab', () => post({ cmd: 'pin_tab', id, pinned: !t.pinned }))]),
+    mi('Duplicate tab', () => post({ cmd: 'duplicate_tab', id })), el('hr'),
     ...(S.private ? [] : others.map(w => mi([wsMark(w), 'Move to ' + w.name], () => post({ cmd: 'move_tab', id, workspace: w.id })))),
     ...(others.length && !S.private ? [el('hr')] : []),
+    ...(S.tabs.some(o => o.id !== id && !o.pinned) ? [mi('Close other tabs', () => post({ cmd: 'close_other_tabs', id }))] : []),
     mi('Close tab', () => post({ cmd: 'close_tab', id }), { danger: true }),
   ]);
 }
@@ -1159,7 +1267,7 @@ $('#cz-reset').onclick = () => { cfg.layout.areas = structuredClone(DEFAULT_AREA
 
 // Empty parts of the bar behave like a title bar: drag to move, double-click to expand,
 // right-click for layout options.
-const EMPTY = '#hotbar, #sidebar, #tabs, .area, .spacer';
+const EMPTY = '#hotbar, #sidebar, #tabs, #pins, .area, .spacer';
 addEventListener('mousedown', e => {
   if (!$('#pop').hidden && !e.target.closest('#pop')) closePop();
   if (customizing || e.button !== 0 || !e.target.matches(EMPTY)) return;
