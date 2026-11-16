@@ -94,9 +94,9 @@ Get the installer for your system from the
 
 | System | File |
 | --- | --- |
-| macOS, Apple Silicon | `Wisp_<version>_aarch64.dmg` |
-| macOS, Intel | `Wisp_<version>_x64.dmg` |
-| Windows 10 or 11, 64-bit | `wisp_<version>_x64-setup.exe` |
+| macOS, Apple Silicon | `Wisp-<version>-macOS-Apple-Silicon.dmg` |
+| macOS, Intel | `Wisp-<version>-macOS-Intel.dmg` |
+| Windows 10 or 11, 64-bit | `Wisp-<version>-Windows-x64-Setup.exe` |
 
 The installers are not code-signed yet, so the first launch needs one extra
 step:

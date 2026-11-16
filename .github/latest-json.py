@@ -15,9 +15,9 @@ base = sys.argv[4] if len(sys.argv) > 4 else f"https://github.com/{repo}/release
 
 # what the updater calls each platform, how its update file's name ends, and its kind
 RULES = [
-    ("macos-aarch64", "_aarch64.app.tar.gz", "app"),
-    ("macos-x86_64", "_x64.app.tar.gz", "app"),
-    ("windows-x86_64", "_x64-setup.exe", "nsis"),
+    ("macos-aarch64", "-macOS-Apple-Silicon.update.tar.gz", "app"),
+    ("macos-x86_64", "-macOS-Intel.update.tar.gz", "app"),
+    ("windows-x86_64", "-Windows-x64-Setup.exe", "nsis"),
 ]
 
 platforms = {}
