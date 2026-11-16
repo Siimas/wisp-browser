@@ -36,6 +36,7 @@
      follows keeps the same 9px they keep from each other. */
   --lights: 82px;
   --strip: 28px;      /* the window buttons' own strip when a top bar is tucked away */
+  --cap-w: 46px;      /* one Windows window button (the system's own width) */
   --float-pad: 8px;   /* a floating bar's distance from the window edge */
   --float-shadow: 28px; /* room kept beside a floating bar for its shadow */
 
@@ -86,6 +87,8 @@
     color-mix(in oklab, oklch(from var(--ws) l c calc(h + 34)) var(--sig-b), var(--bg))); }
 }
 :root[data-mode=top-compact] { --tabs-h: 34px; --hotbar-h: 34px; --ctl: 24px; }
+/* Windows: the three window buttons at the top-right, then a --gap before anything else. */
+:root[data-os=win] { --lights: calc(3 * var(--cap-w) + var(--gap)); --strip: 32px; }
 @media (prefers-reduced-motion: reduce) {
   :root { --d-1: 1ms; --d-2: 1ms; --d-3: 1ms; }
 }
@@ -129,6 +132,7 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: var(--sp-1) var(-
 :root[data-side=right] #edge { top: var(--hotbar-h); bottom: 0; right: 0; width: var(--gap); }
 :root[data-side=left] #edge { top: var(--hotbar-h); bottom: 0; left: 0; width: var(--gap); }
 :root[data-side=top] #edge { top: 0; left: var(--lights); right: 0; height: var(--gap); }
+:root[data-os=win][data-side=top] #edge { left: 0; right: var(--lights); }
 
 /* ================= ITEMS (things the user can place) ================= */
 .ib { width: var(--ctl); height: var(--ctl); display: grid; place-items: center; flex: none; color: var(--mute); }
@@ -267,10 +271,32 @@ i.dot { display: block; width: 8px; height: 8px; border-radius: 50%; background:
 /* With the workspace switcher on screen, the header above the tabs would say it twice. */
 :root[data-ws-placed] #ws-head, :root[data-ws-placed]:not([data-private]) #sidebar > hr.sep { display: none !important; }
 
-/* macOS window buttons sit over the top-left corner: whatever is there makes room. */
-:root[data-lights=hotbar] #hotbar { padding-left: var(--lights); }
-:root[data-lights=tabs] #sidebar { padding-left: var(--lights); }
+/* The window buttons share the first row: macOS's over its left end, Windows' (#caption)
+   over its right end. Whatever is there makes room; data-lights says which row that is. */
+:root[data-os=mac][data-lights=hotbar] #hotbar { padding-left: var(--lights); }
+:root[data-os=mac][data-lights=tabs] #sidebar { padding-left: var(--lights); }
+:root[data-os=win][data-lights=hotbar] #hotbar { padding-right: var(--lights); }
+:root[data-os=win][data-lights=tabs] #sidebar { padding-right: var(--lights); }
+:root[data-lights=hotbar][data-hotbar-empty] #hotbar { height: var(--hotbar-h); } /* still their row */
 :root[data-lights=strip] #page { margin-top: var(--strip); }
+
+/* ================= WINDOW BUTTONS (Windows) =================
+   Windows gets no title bar of its own: the first row is the title bar. Its buttons are
+   drawn here as the system draws them (its glyph font, sizes and colors), flush with the
+   window's top-right corner, or the floating panel's. #rim is the top resize edge, which
+   the system cannot see under the interface. */
+#caption, #rim { display: none; }
+:root[data-os=win]:not([data-lights=none]) #caption { display: flex; position: absolute; z-index: 5; top: 0; right: 0; height: var(--cap-h); }
+:root[data-lights=hotbar] { --cap-h: var(--hotbar-h); }
+:root[data-lights=tabs] { --cap-h: var(--tabs-h); }
+:root[data-lights=strip] { --cap-h: var(--strip); }
+#caption button { width: var(--cap-w); height: 100%; border-radius: 0; display: grid; place-items: center;
+  font: 10px "Segoe Fluent Icons", "Segoe MDL2 Assets"; color: var(--fg); }
+#caption button:hover, #caption .max[data-state=hover] { background: color-mix(in srgb, var(--fg) 7%, transparent); }
+#caption button:active, #caption .max[data-state=press] { background: color-mix(in srgb, var(--fg) 4%, transparent); color: color-mix(in srgb, var(--fg) 60%, transparent); transform: none; }
+#caption .close:hover { background: #c42b1c; color: #fff; }
+#caption .close:active { background: #c42b1ce6; color: #ffffffb3; }
+:root[data-os=win]:not([data-max]):not([data-floater]) #rim { display: block; position: absolute; z-index: 6; top: 0; left: 0; right: 0; height: 5px; cursor: n-resize; }
 
 /* ================= PINNED TABS + TAB DRAG =================
    Pinned tabs are icon-only tiles in their own box: a grid above "New tab" in a
@@ -471,6 +497,7 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
 /* top bar tucked away on macOS: the find bar shares the strip with the window buttons */
 :root[data-find][data-lights=strip] #find { padding: var(--sp-1) var(--gap) var(--sp-1) var(--lights); }
 :root[data-find][data-lights=strip] #page { margin-top: 0; }
+:root[data-os=win][data-find][data-lights=strip] #find { padding: var(--sp-1) var(--lights) var(--sp-1) var(--gap); }
 .findbox { display: flex; align-items: center; gap: var(--sp-2); width: var(--find-w); min-width: 0; height: var(--ctl); padding: 0 var(--sp-2) 0 var(--sp-3);
   border-radius: var(--r-md); background: var(--field); box-shadow: var(--shadow-0); color: var(--mute);
   transition: background var(--d-1), box-shadow var(--d-2) var(--ease-out); }
@@ -544,6 +571,8 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
     <div class="area" data-area="after_tabs"></div>
   </aside>
   <div id="edge"></div>
+  <div id="caption"><button class="min" title="Minimize" aria-label="Minimize">&#xE921;</button><button class="max"></button><button class="close" title="Close" aria-label="Close">&#xE8BB;</button></div>
+  <div id="rim"></div>
   <!-- page tools: the find bar (filled in by the PAGE TOOLS script block) -->
   <div id="find" role="search">
     <div class="findbox"><input id="find-q" type="text" placeholder="Find in page" aria-label="Find in page" spellcheck="false" autocomplete="off"><span id="find-n" aria-live="polite"></span></div>
@@ -700,6 +729,8 @@ let S = null, cfg = null, shownUrl = null, customizing = false, wasPeek = false,
 
 window.wisp = {
   state(s) { S = s; cfg = s.config; render(); },
+  // Windows: the system reports the pointer on the maximize button (see native::SnapButton).
+  snap(s) { $('#caption .max').dataset.state = s === 'click' ? 'hover' : s === 'leave' ? '' : s; },
   focusUrl() {
     const u = $('#url');
     if (u && u.getClientRects().length) { u.focus(); u.select(); }
@@ -1561,19 +1592,23 @@ function reportPage(animate = false) {
   if (FLOATER) return;
   const r = $('#page').getBoundingClientRect(), side = root.dataset.side;
   const pad = px('--float-pad'), bar = cfg.layout.sidebar_width + pad + px('--float-shadow');
-  const top = Math.max(0, px('--hotbar-h') - pad - 2); // tucks just under the hotbar
+  // Tucks just under the hotbar; on Windows starts below it, clear of the window buttons.
+  const top = S.win ? px('--hotbar-h') : Math.max(0, px('--hotbar-h') - pad - 2);
   const float = side === 'right' ? [innerWidth - bar, top, 0, 0] : side === 'left' ? [0, top, innerWidth - bar, 0]
     : [0, 0, 0, innerHeight - (px('--tabs-h') + px('--hotbar-h') + pad + px('--float-shadow'))];
   const sh = px('--float-shadow'), panel = side === 'right' ? [float[0] + sh, float[1] + pad, pad, pad]
     : side === 'left' ? [pad, float[1] + pad, float[2] + sh, pad] : [pad, pad, pad, float[3] + sh];
-  // macOS window buttons: on the center line of the row they share (the tab row or the
-  // hotbar, or their own strip when a top bar is tucked away), at --gap + 5px from the left.
+  // The window buttons' box on the row they share (the tab row or the hotbar, or their own
+  // strip when a top bar is tucked away): macOS's at --gap + 5px from the left, centered
+  // on the row; Windows' (#caption) flush with the top-right corner.
   // `lights_peek`: where they go while a tucked-away top bar floats in, so they sit on its
   // tab row the same way.
-  const hidden = root.hasAttribute('data-hidden'), lx = px('--gap') + 5;
+  const hidden = root.hasAttribute('data-hidden');
+  const row = side === 'top' ? (hidden ? px('--strip') : px('--tabs-h')) : px('--hotbar-h');
+  const bw = S.win ? 3 * px('--cap-w') : 60, lx = S.win ? innerWidth - bw : px('--gap') + 5;
   const m = { cmd: 'page_rect', panel: panel.map(v => Math.max(0, v)), panel_radius: px('--radius') * 1.5 + px('--sp-1'), page: [r.left, r.top, innerWidth - r.right, innerHeight - r.bottom],
-    lights: [lx, (side === 'top' ? (hidden ? px('--strip') : px('--tabs-h')) : px('--hotbar-h')) / 2],
-    lights_peek: side === 'top' && hidden ? [pad + lx, pad + px('--tabs-h') / 2] : null,
+    lights: [lx, 0, bw, row],
+    lights_peek: side === 'top' && hidden ? [S.win ? lx - pad : lx + pad, pad, bw, px('--tabs-h')] : null,
     float: float.map(v => Math.max(0, v)), radius: parseFloat(getComputedStyle($('#page')).borderTopLeftRadius) || 0, animate };
   const key = JSON.stringify({ ...m, animate: 0 });
   if (key !== lastRect) { lastRect = key; post(m); }
@@ -1587,8 +1622,13 @@ function render() {
   // The main copy hides a collapsed bar outright; the floating copy is that bar.
   const hidden = !FLOATER && l.collapsed && !customizing;
   for (const [name, on] of Object.entries({ floater: FLOATER, glass: S.glass, settings: S.settings, private: S.private, customizing, hidden })) flag(name, on);
-  // macOS window buttons: who makes room for them
-  root.dataset.lights = !S.mac ? 'none' : side === 'top' ? (hidden ? 'strip' : 'tabs') : FLOATER ? 'none' : 'hotbar';
+  // Window buttons (macOS's, or Windows' drawn by #caption): which row makes room for them
+  root.dataset.os = S.mac ? 'mac' : S.win ? 'win' : '';
+  root.dataset.lights = !S.mac && !S.win ? 'none' : side === 'top' ? (hidden ? 'strip' : 'tabs') : FLOATER ? 'none' : 'hotbar';
+  flag('max', S.maximized);
+  const mx = $('#caption .max'); // Windows' own words and glyphs
+  mx.textContent = S.maximized ? '\uE923' : '\uE922';
+  mx.title = mx.ariaLabel = S.maximized ? 'Restore Down' : 'Maximize';
 
   if (FLOATER && S.peek !== wasPeek) { // slide in; or slide out, then let the window hide this view
     clearTimeout(outTimer);
@@ -1640,6 +1680,13 @@ addEventListener('mousedown', e => {
   if (e.detail !== 2) return post({ cmd: 'drag' });
   if (e.target.closest('#sidebar')) act('new_tab'); else post({ cmd: 'maximize' });
 });
+$('#caption .min').onclick = () => post({ cmd: 'minimize' });
+$('#caption .max').onclick = () => post({ cmd: 'maximize' });
+$('#caption .close').onclick = () => post({ cmd: 'close' });
+// The top edge resizes; its ends resize from the corner.
+const rimEdge = x => x < 16 ? 'nw' : x > innerWidth - 16 ? 'ne' : 'n';
+$('#rim').onmousemove = e => { e.target.style.cursor = rimEdge(e.clientX) + '-resize'; };
+$('#rim').onmousedown = e => { if (e.button === 0) post({ cmd: 'resize', edge: rimEdge(e.clientX) }); };
 addEventListener('contextmenu', e => {
   if (e.target.matches('input, textarea')) return;
   e.preventDefault();
