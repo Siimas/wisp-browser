@@ -17,6 +17,15 @@ Planned as 0.2.0.
   in folder for finished files.
 - Right-clicking a link or image in a page offers to open it in a new tab, and
   links in a private tab.
+- History: visited pages are remembered on this computer only (never from
+  private tabs), listed by day in a History sheet with search, delete, and
+  "Clear browsing data" for a time range, optionally with cookies and site
+  data. Settings > Behavior > Keep history turns recording off.
+- Bookmarks: a toolbar button and a shortcut to bookmark the current page, and
+  a Bookmarks sheet to search, rename and delete them.
+- Address bar suggestions from open tabs, bookmarks and history, ranked by how
+  often and how recently a page was visited. Nothing is sent anywhere while
+  you type.
 - Automatic updates: installed copies look for a newer release shortly after
   start and every six hours, download it in the background, and install it as
   the app quits. The next launch opens the release notes in a tab. Every update

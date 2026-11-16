@@ -34,7 +34,9 @@ Private tabs show a fixed icon and make no such request.
   what any browser shows them.
 - **Searches**: text typed in the address bar that is not an address is sent to
   your search engine when you press Enter (DuckDuckGo by default, changeable in
-  Settings). Nothing is sent while you type.
+  Settings). Nothing is sent while you type: the suggestions under the address
+  bar come only from your own open tabs, bookmarks and history
+  (`src/store.rs`), never from a search engine.
 - **Downloads**: a file you download is fetched by the system web engine from
   the site that offers it. Wisp makes no request of its own for it.
 - **Find in page** searches the page on your computer. What you type in the find
@@ -56,13 +58,24 @@ Private tabs show a fixed icon and make no such request.
   (`session.json`: addresses and titles) and the last version run (`version`),
   in `~/Library/Application Support/Wisp/` on macOS and `%APPDATA%\Wisp\` on
   Windows.
-- Cookies, cache and site storage, kept by the system web engine. See
+- History (`history.json`): for each page visited, its address, title, number
+  of visits and time of the last visit. At most 20,000 addresses are kept; the
+  one visited longest ago is dropped first. Written at most every 30 seconds
+  and when the app quits. Turn it off with Settings > Behavior > Keep history;
+  delete entries, or everything, from History (Clear browsing data). Same
+  folder as the settings.
+- Bookmarks (`bookmarks.json`): address, title and the time each was added.
+  Same folder.
+- Cookies, cache and site storage, kept by the system web engine. History >
+  Clear browsing data can remove these too. See
   [Uninstall](README.md#uninstall) for the folders.
 - Files you download, in your Downloads folder. The list of downloads shown in
   the toolbar (file name, the site it came from, and whether it finished) is
   held in memory only and is gone when Wisp quits.
 - Private tabs and private windows keep nothing on disk and are left out of the
-  saved session. The exception is a file you download from one: it is saved to
+  saved session and of history. A private window can read your history and
+  bookmarks to suggest addresses, but cannot change them, and private tabs are
+  never offered as suggestions.
   your Downloads folder like any other, and appears in the downloads list until
   Wisp quits.
 

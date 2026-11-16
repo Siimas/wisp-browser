@@ -23,7 +23,7 @@ pub const MODES: [&str; 4] = [
 ];
 pub const TEXTURES: [&str; 5] = ["none", "grain", "dots", "lines", "grid"];
 /// Everything the user can place in a toolbar area. `spacer` may appear many times.
-pub const ITEMS: [&str; 14] = [
+pub const ITEMS: [&str; 17] = [
     "collapse",
     "back",
     "forward",
@@ -37,6 +37,9 @@ pub const ITEMS: [&str; 14] = [
     "shield",
     "downloads",
     "settings",
+    "bookmark",
+    "history",
+    "bookmarks",
     "spacer",
 ];
 
@@ -76,6 +79,7 @@ impl Default for Areas {
                 "spacer",
                 "url",
                 "spacer",
+                "bookmark",
                 "shield",
                 "downloads",
                 "settings",
@@ -136,6 +140,8 @@ pub struct Behavior {
     pub default_zoom: f64,
     /// Download new versions in the background and install them on quit.
     pub auto_update: bool,
+    /// Record visited pages. Off: nothing new is recorded (what is there stays until cleared).
+    pub keep_history: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
@@ -195,6 +201,7 @@ impl Default for Behavior {
             restore_session: true,
             default_zoom: 1.0,
             auto_update: true,
+            keep_history: true,
         }
     }
 }
@@ -236,6 +243,9 @@ pub fn default_hotkeys() -> BTreeMap<String, String> {
         ("zoom_out", "Mod+Minus".to_string()),
         ("zoom_reset", "Mod+0".to_string()),
         ("settings", "Mod+Comma".to_string()),
+        ("history", "Mod+Y".to_string()),
+        ("bookmarks", "Mod+Shift+O".to_string()),
+        ("bookmark_page", "Mod+D".to_string()),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
@@ -420,8 +430,13 @@ pub fn resolve_input(input: &str, search_url: &str) -> String {
             return format!("https://{s}");
         }
     }
+    search(s, search_url)
+}
+
+/// The search engine's address for `query`.
+pub fn search(query: &str, search_url: &str) -> String {
     let mut q = String::new();
-    for b in s.bytes() {
+    for b in query.bytes() {
         match b {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
                 q.push(b as char)

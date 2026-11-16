@@ -157,7 +157,8 @@ Rules:
 | Pinning, unpinning, a new order from elsewhere | Every tab glides from where it was to where it now is, `--d-2` `--ease-move`. A pinned tile itself appears and goes by scaling from 80% |
 | Switching workspace | Tab list slides 16 px from that workspace's side, `--d-3`; the window tint changes with it |
 | Menu or workspace editor | Scales from 96% at its anchor, `--d-2` |
-| Settings / Customize sheet | Rises 6 px and fades in, `--d-3` |
+| Settings / Customize / History / Bookmarks sheet | Rises 6 px and fades in, `--d-3` |
+| Suggestions under the address bar | Scales from 96% at the bar, `--d-2`; the chosen row is raised (`--surface`, `--shadow-1`) |
 | Find bar opened (Mod+F) or closed | A row appears between the hotbar and the page: it drops 8 px and fades in over `--d-2` while the page card glides down to make room |
 | Address bar focus | Lifts to `--surface`, accent ring grows, `--d-2` |
 | Page loading | Spinner in the tab, sweep under the hotbar |
@@ -182,6 +183,14 @@ Consequences worth knowing when designing:
 - The main interface cannot draw over a page. Menus opened from the sidebar
   are kept inside the sidebar (narrowing to fit). A menu that still has to
   overlap the page hides the page while it is open.
+- The suggestions list under the address bar is glass, like a menu. Under a
+  docked bar it is drawn by the main interface, so the page is hidden while it
+  is open; under a floating (revealed) bar it floats over the page, and the
+  floating view grows downwards to make room (`store::Msg::Grow`).
+- Lists of pages (suggestions, History, Bookmarks) use one row, `.lrow`: a
+  mark, the title, the address in `--mute`, a note, and buttons that appear on
+  hover. Rows show a letter, not the site's icon, so opening a list contacts
+  no site.
 - Page corners are rounded on macOS; on Windows the card is square for now.
 
 ### Layouts

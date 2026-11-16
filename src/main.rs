@@ -14,6 +14,7 @@ mod config;
 mod debug_shot;
 mod native;
 mod page_tools;
+mod store;
 mod update;
 
 use config::{Config, SavedTab, Session};
@@ -142,6 +143,9 @@ enum Msg {
         id: u32,
         op: String,
     },
+    /// History, bookmarks and suggestions: see `store::Msg`.
+    #[serde(untagged)]
+    Library(store::Msg),
 }
 
 enum UserEvent {
@@ -325,6 +329,8 @@ struct App {
     update_note: String,
     /// Started with `--private`: every tab is private and nothing is saved.
     private_window: bool,
+    /// History and bookmarks.
+    store: store::Store,
     started: bool,
     quit: bool,
     /// Page tools: this session's downloads, and the last search (tab, query).
@@ -497,6 +503,7 @@ impl App {
             "settings": self.settings_open,
             "peek": self.peek,
             "private": self.private_window,
+            "bookmarked": self.active_tab().is_some_and(|t| self.store.is_bookmarked(&t.url)),
             "mac": cfg!(target_os = "macos"),
             "glass": self.glass.is_some(),
             "version": env!("CARGO_PKG_VERSION"),
@@ -969,6 +976,7 @@ impl App {
                 return self.focus_url();
             }
             "private_window" => return open_private_window(),
+            "history" | "bookmarks" | "bookmark_page" => return self.library_action(name),
             "check_update" => return self.check_update(true),
             "restart_update" => return self.restart_into_update(),
             "licenses" => {
@@ -1004,7 +1012,7 @@ impl App {
             }
             "focus_url" => return self.focus_url(),
             "find" => {
-                if !self.settings_open && self.active_webview().is_some() {
+                if self.page_visible() && self.active_webview().is_some() {
                     let _ = self.chrome.focus();
                     let _ = self.chrome.evaluate_script("wisp.find()");
                 }
@@ -1319,6 +1327,7 @@ impl App {
                 Msg::Find { query, back } => self.find(query, back),
                 Msg::FindClose => self.find_close(),
                 Msg::Download { id, op } => self.download_op(id, &op),
+                Msg::Library(msg) => self.library(msg),
             },
             UserEvent::PageKey(id, combo) => {
                 // A page can only have keyboard focus while it is the one on screen, so a
@@ -1330,6 +1339,7 @@ impl App {
             UserEvent::Title(id, title) => {
                 if let Some(tab) = self.tab_mut(id) {
                     tab.title = title;
+                    self.retitled(id);
                     self.sync();
                 }
             }
@@ -1343,10 +1353,17 @@ impl App {
                     self.sync();
                     if !started {
                         self.save_session(); // saved as you browse, so a crash loses nothing
+                        self.visited(id);
                     }
                 }
             }
             UserEvent::NewTab(opener, url) => {
+                // The address is the page's choice: web addresses only, so a page
+                // cannot have the app open a local file or a script address. Checked
+                // first, so a request that is dropped does not use up a private choice.
+                if !(url.starts_with("http://") || url.starts_with("https://")) {
+                    return;
+                }
                 let opener = self.tab(opener);
                 // Private if the opener is, or if the user just chose "Open Link in
                 // Private Tab" in its right-click menu (which the app itself observed).
@@ -1354,11 +1371,7 @@ impl App {
                     .and_then(|t| t.webview.as_ref())
                     .is_some_and(native::take_private);
                 let private = picked || opener.is_some_and(|t| t.private);
-                // The address is the page's choice: web addresses only, so a page
-                // cannot have the app open a local file or a script address.
-                if url.starts_with("http://") || url.starts_with("https://") {
-                    self.new_tab(&url, private);
-                }
+                self.new_tab(&url, private);
             }
             UserEvent::MenuTab(opener, url, private) => {
                 let web = url.starts_with("http://") || url.starts_with("https://");
@@ -1494,6 +1507,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         update: None,
         update_note: String::new(),
         private_window,
+        store: store::Store::load(config::dir(), private_window),
         started: false,
         quit: false,
         downloads: Default::default(),
@@ -1555,6 +1569,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             Event::LoopDestroyed => {
                 app.save_session();
+                app.store.flush_if_unsaved();
                 // The quiet path: a downloaded update goes in as the app closes.
                 if let Some(ready) = app.update.take()
                     && let Err(e) = ready.install()
