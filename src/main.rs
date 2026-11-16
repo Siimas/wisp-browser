@@ -12,6 +12,7 @@ mod adblock;
 mod config;
 #[cfg(all(target_os = "macos", debug_assertions))]
 mod debug_shot;
+mod media;
 mod native;
 mod page_tools;
 mod store;
@@ -60,6 +61,13 @@ enum Msg {
     Ready,
     Drag,
     Maximize,
+    // Windows: the interface draws the window buttons and the top resize edge.
+    Minimize,
+    Close,
+    /// Resize from the top edge ("n") or a top corner ("ne", "nw").
+    Resize {
+        edge: String,
+    },
     Key {
         combo: String,
     },
@@ -109,13 +117,14 @@ enum Msg {
         panel: [f64; 4],
         #[serde(default)]
         panel_radius: f64,
-        /// macOS: where the window buttons go: x of the first one, and the vertical
-        /// center of the row they share with the bar.
+        /// Where the window buttons go (macOS's, or the ones the interface draws on
+        /// Windows): the box they take on the row they share with the bar, as left, top,
+        /// width, height.
         #[serde(default)]
-        lights: [f64; 2],
-        /// macOS: the same while a tucked-away top bar floats in, if they move then.
+        lights: [f64; 4],
+        /// The same while a tucked-away top bar floats in, if they move then.
         #[serde(default)]
-        lights_peek: Option<[f64; 2]>,
+        lights_peek: Option<[f64; 4]>,
         /// Glide to the new size (a layout change) instead of jumping.
         animate: bool,
     },
@@ -151,15 +160,49 @@ enum Msg {
         id: u32,
         op: String,
     },
+    /// A button of the media player, for the media in tab `id`; `at` is where to seek to.
+    Media {
+        id: u32,
+        op: media::Op,
+        #[serde(default)]
+        at: f64,
+    },
     /// History, bookmarks and suggestions: see `store::Msg`.
     #[serde(untagged)]
     Library(store::Msg),
 }
 
+/// The only messages a page may send (see `build_webview`).
+#[derive(Deserialize)]
+#[serde(tag = "cmd", rename_all = "snake_case")]
+enum PageMsg {
+    Key { combo: String },
+    Media(media::Report),
+}
+
+/// Scheme, host and port of an address ("https://example.com:8443"); `None` for
+/// addresses without a host (about:, data:, file:).
+fn origin(url: &str) -> Option<&str> {
+    let (scheme, rest) = url.split_once("://")?;
+    let host = &rest[..rest.find(['/', '?', '#']).unwrap_or(rest.len())];
+    (!host.is_empty() && !host.contains('@')).then(|| &url[..scheme.len() + 3 + host.len()])
+}
+
+/// Every frame of a page can reach the message handler (on macOS), so a message counts
+/// only if it comes from the document the tab shows: same origin as the tab's address,
+/// or, for an address without one (a blank tab, a local file), that very address.
+fn same_origin(from: &str, tab_url: &str) -> bool {
+    let doc = |u: &str| u.split('#').next().unwrap_or_default().to_string();
+    match origin(tab_url) {
+        Some(o) => origin(from) == Some(o),
+        None => !from.is_empty() && doc(from) == doc(tab_url),
+    }
+}
+
 enum UserEvent {
     Ui(Msg),
-    /// Hotkey reported by the page in tab `.0`.
-    PageKey(u32, String),
+    /// A message from the page in tab `.0`, sent by a frame at address `.1` (unchecked yet).
+    Page(u32, String, Box<PageMsg>),
     Title(u32, String),
     Load(u32, bool, String),
     /// A page in tab `.0` asked for a new window.
@@ -176,6 +219,10 @@ enum UserEvent {
     /// Chosen in the right-click menu of the page in tab `.0`: open this address in a
     /// (private, if `.2`) tab. Sent by the native menu only, never by the page.
     MenuTab(u32, String, bool),
+    /// Windows: the pointer on the maximize button, as the system reports it to
+    /// `native::SnapButton`: "hover", "press", "leave" or "click".
+    #[cfg(windows)]
+    Snap(&'static str),
 }
 
 struct Tab {
@@ -190,6 +237,8 @@ struct Tab {
     url: String,
     loading: bool,
     zoom: f64,
+    /// What it is playing, if anything; `media.playing()` says whether it is audible now.
+    media: media::Slot,
 }
 
 /// A closed tab, remembered for this run so it can be reopened.
@@ -327,11 +376,15 @@ struct App {
     solid: bool,
     /// low-power: when to check the cursor next while the bar is collapsed.
     poll_every: Duration,
-    /// macOS: where the window buttons go, at rest and while the bar floats in.
-    lights: [f64; 2],
-    lights_peek: Option<[f64; 2]>,
-    /// macOS: inset of the window buttons, as last applied.
-    lights_at: [f64; 2],
+    /// Where the window buttons go, at rest and while the bar floats in.
+    lights: [f64; 4],
+    lights_peek: Option<[f64; 4]>,
+    /// macOS: where they were last put.
+    #[cfg(target_os = "macos")]
+    lights_at: [f64; 4],
+    /// Windows: lies over the interface's maximize button so the system knows it is there.
+    #[cfg(windows)]
+    snap: Option<native::SnapButton>,
     settings_open: bool,
     /// A menu or sheet in the interface is using the page area.
     cover: bool,
@@ -352,6 +405,8 @@ struct App {
     store: store::Store,
     started: bool,
     quit: bool,
+    /// As last told to the interface (Windows draws its own restore/maximize button).
+    maximized: bool,
     /// Page tools: this session's downloads, and the last search (tab, query).
     downloads: page_tools::SharedDownloads,
     find_last: Option<(u32, String)>,
@@ -498,6 +553,30 @@ impl App {
             .collect()
     }
 
+    /// The media the player shows: the one started most recently, in any tab but the
+    /// one on screen (which has its own controls), unless dismissed.
+    fn media_tab(&self) -> Option<&Tab> {
+        let shown = self.tabs.iter().filter(|t| self.active != Some(t.id));
+        shown
+            .filter(|t| t.media.shown())
+            .max_by_key(|t| t.media.started)
+    }
+
+    /// A button of the media player.
+    fn media_op(&mut self, id: u32, op: media::Op, at: f64) {
+        let Some(tab) = self.tab_mut(id) else { return };
+        if op == media::Op::Dismiss {
+            tab.media.dismissed = true;
+            return self.sync();
+        }
+        let (Some(m), Some(w)) = (&tab.media.now, &tab.webview) else {
+            return;
+        };
+        if let Some(js) = media::script(op, at, m) {
+            let _ = w.evaluate_script(&js);
+        }
+    }
+
     /// Both copies of the interface.
     fn uis(&self) -> impl Iterator<Item = &WebView> {
         std::iter::once(&self.chrome).chain(&self.floater)
@@ -511,7 +590,8 @@ impl App {
             .filter(|t| t.workspace == self.workspace)
             .map(|t| {
                 json!({"id": t.id, "title": t.title, "url": t.url, "loading": t.loading,
-                       "private": t.private, "pinned": t.pinned})
+                       "private": t.private, "pinned": t.pinned,
+                       "playing": t.media.playing(), "muted": t.media.muted()})
             })
             .collect();
         let state = json!({
@@ -524,11 +604,14 @@ impl App {
             "private": self.private_window,
             "bookmarked": self.active_tab().is_some_and(|t| self.store.is_bookmarked(&t.url)),
             "mac": cfg!(target_os = "macos"),
+            "win": cfg!(windows),
+            "maximized": self.maximized,
             "glass": self.glass.is_some() && !self.solid,
             "low": self.low,
             "solid": self.solid,
             "version": env!("CARGO_PKG_VERSION"),
             "downloads": self.downloads.borrow().json(),
+            "media": self.media_tab().map(|t| t.media.json(t.id, &t.title, &t.url, t.private)),
             "update": {
                 "supported": update::supported(),
                 "ready": self.update.as_ref().map(|u| u.version.as_str()),
@@ -575,14 +658,22 @@ impl App {
             .with_incognito(private)
             .with_back_forward_navigation_gestures(true)
             .with_initialization_script(keys_script(&self.cfg))
-            // Pages are untrusted: the only message accepted from them is a hotkey press,
-            // and only while their tab is the active one (see `PageKey`).
+            .with_initialization_script(include_str!("media.js"))
+            // Pages are untrusted: the only messages accepted from them are a hotkey press,
+            // only while their tab is the active one, and what they are playing, checked
+            // and rate-limited (see media.rs); both only from the document the tab shows,
+            // not from frames of other sites inside it (see `UserEvent::Page`). The tab is
+            // the one this handler belongs to, whatever the message says.
             // ponytail: the active page can still fake a press (e.g. close its own tab)
             // or swallow hotkeys while focused. Upgrade path: native key capture per
             // platform instead of the injected listener.
             .with_ipc_handler(move |req| {
-                if let Ok(Msg::Key { combo }) = serde_json::from_str(req.body()) {
-                    let _ = p1.send_event(UserEvent::PageKey(id, combo));
+                if req.body().len() > media::MAX_MESSAGE {
+                    return;
+                }
+                if let Ok(msg) = serde_json::from_str(req.body()) {
+                    let from = req.uri().to_string();
+                    let _ = p1.send_event(UserEvent::Page(id, from, Box::new(msg)));
                 }
             })
             .with_document_title_changed_handler(move |title| {
@@ -644,6 +735,7 @@ impl App {
             url: url.to_string(),
             loading: false,
             zoom: self.cfg.behavior.default_zoom,
+            media: Default::default(),
         });
         self.select(id);
     }
@@ -764,6 +856,7 @@ impl App {
             url: src.url.clone(),
             loading: false,
             zoom: self.cfg.behavior.default_zoom,
+            media: Default::default(),
         };
         self.insert_tab(copy, after);
     }
@@ -810,6 +903,7 @@ impl App {
             url: closed.url,
             loading: false,
             zoom: self.cfg.behavior.default_zoom,
+            media: Default::default(),
         };
         self.insert_tab(tab, closed.index);
     }
@@ -898,24 +992,29 @@ impl App {
         }
     }
 
-    /// macOS: put the window buttons where the interface asked, for the bar as it is now.
+    /// Put the window buttons where the interface asked, for the bar as it is now.
     fn place_lights(&mut self) {
         let at = match self.lights_peek {
             Some(l) if self.peek => l,
             _ => self.lights,
         };
-        if at == self.lights_at {
-            return;
-        }
-        self.lights_at = at;
         #[cfg(target_os = "macos")]
-        {
+        if at != self.lights_at {
+            self.lights_at = at;
             use tao::platform::macos::WindowExtMacOS;
             // The library takes "extra title bar height", from which the buttons
             // end up 2px above the value given (measured on macOS 26).
             // ponytail: may sit 1-2px off on older systems; set frames directly if so.
-            let at = LogicalPosition::new(at[0], at[1] + 2.0);
+            let at = LogicalPosition::new(at[0], at[1] + at[3] / 2.0 + 2.0);
             self.window.set_traffic_light_inset(at);
+        }
+        // Windows: the interface draws them; the system is shown where maximize is. Always
+        // placed, not only on a change: it goes in physical pixels (the scale may have
+        // changed under the same logical box) and back on top of a floater just raised.
+        #[cfg(windows)]
+        if let Some(snap) = &self.snap {
+            let w = at[2] / 3.0;
+            snap.place([at[0] + w, at[1], w, at[3]], self.window.scale_factor());
         }
     }
 
@@ -926,7 +1025,6 @@ impl App {
             return;
         }
         self.peek = on;
-        self.place_lights();
         if on {
             self.ensure_floater();
             if let Some(f) = &self.floater {
@@ -936,6 +1034,7 @@ impl App {
                 native::raise(f, &self.window);
             }
         }
+        self.place_lights(); // after the raise: on Windows it must stay above the floater
         self.sync(); // the floater slides in, or slides out and reports `FloaterDone`
     }
 
@@ -1273,6 +1372,7 @@ impl App {
                 url: saved.url,
                 loading: false,
                 zoom: self.cfg.behavior.default_zoom,
+                media: Default::default(),
             });
         }
         group_pinned(&mut self.tabs);
@@ -1323,6 +1423,17 @@ impl App {
                     let _ = self.window.drag_window();
                 }
                 Msg::Maximize => self.window.set_maximized(!self.window.is_maximized()),
+                Msg::Minimize => self.window.set_minimized(true),
+                Msg::Close => self.quit = true,
+                Msg::Resize { edge } => {
+                    use tao::window::ResizeDirection as D;
+                    let dir = match edge.as_str() {
+                        "ne" => D::NorthEast,
+                        "nw" => D::NorthWest,
+                        _ => D::North,
+                    };
+                    let _ = self.window.drag_resize_window(dir);
+                }
                 Msg::Key { combo } => {
                     if let Some(action) = self.cfg.action_for(&combo).map(str::to_string) {
                         self.action(&action);
@@ -1409,13 +1520,34 @@ impl App {
                 Msg::Find { query, back } => self.find(query, back),
                 Msg::FindClose => self.find_close(),
                 Msg::Download { id, op } => self.download_op(id, &op),
+                Msg::Media { id, op, at } => self.media_op(id, op, at),
                 Msg::Library(msg) => self.library(msg),
             },
-            UserEvent::PageKey(id, combo) => {
-                // A page can only have keyboard focus while it is the one on screen, so a
-                // key from a background tab, or while the interface covers the page, is forged.
-                if self.active == Some(id) && self.page_visible() {
-                    self.handle(UserEvent::Ui(Msg::Key { combo }));
+            UserEvent::Page(id, from, msg) => {
+                // Checked against the address the view shows now (it follows redirects
+                // before the tab's own record does). On macOS `from` is the sending frame's
+                // address; WebView2 only hears the top document, so there it always matches.
+                let view = self.tab(id).and_then(|t| t.webview.as_ref());
+                if !view
+                    .and_then(|w| w.url().ok())
+                    .is_some_and(|u| same_origin(&from, &u))
+                {
+                    return;
+                }
+                match *msg {
+                    // A page can only have keyboard focus while it is the one on screen, so a
+                    // key from a background tab, or while the interface covers the page, is forged.
+                    PageMsg::Key { combo } => {
+                        if self.active == Some(id) && self.page_visible() {
+                            self.handle(UserEvent::Ui(Msg::Key { combo }));
+                        }
+                    }
+                    PageMsg::Media(report) => {
+                        let changed = self.tab_mut(id).is_some_and(|t| t.media.report(report));
+                        if changed {
+                            self.sync();
+                        }
+                    }
                 }
             }
             UserEvent::Title(id, title) => {
@@ -1430,6 +1562,9 @@ impl App {
                     self.find_last = None; // a new page: the next search starts over
                 }
                 if let Some(tab) = self.tab_mut(id) {
+                    if started {
+                        tab.media = media::Slot::default(); // a new page: its media is gone
+                    }
                     tab.loading = started;
                     tab.url = url;
                     self.sync();
@@ -1482,6 +1617,14 @@ impl App {
                 if self.refresh_power() {
                     self.sync();
                 }
+            }
+            #[cfg(windows)]
+            UserEvent::Snap(what) => {
+                if what == "click" {
+                    self.window.set_maximized(!self.window.is_maximized());
+                }
+                let js = format!("window.wisp && wisp.snap('{what}')");
+                self.uis().for_each(|ui| drop(ui.evaluate_script(&js)));
             }
             UserEvent::AdblockReady => {
                 if adblock::REATTACH_AFTER_COMPILE {
@@ -1566,6 +1709,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_title("Wisp")
         .with_inner_size(LogicalSize::new(1280.0, 820.0))
         .with_min_inner_size(LogicalSize::new(560.0, 360.0));
+    // Windows: no title bar of its own. The interface's first row is the title bar and
+    // draws the window buttons; the system keeps the shadow, the side and bottom resize
+    // edges, snapping and rounded corners (see Msg::Minimize and #caption in ui.html).
+    #[cfg(windows)]
+    let builder = {
+        use tao::platform::windows::WindowBuilderExtWindows;
+        builder
+            .with_decorations(false)
+            .with_undecorated_shadow(true)
+    };
     #[cfg(target_os = "macos")]
     let builder = {
         // The interface runs under the title bar; the traffic lights sit on top of it
@@ -1604,9 +1757,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         low: false,
         solid: false,
         poll_every: POLL,
-        lights: [0.0; 2],
+        lights: [0.0; 4],
         lights_peek: None,
-        lights_at: [0.0; 2],
+        #[cfg(target_os = "macos")]
+        lights_at: [0.0; 4],
+        #[cfg(windows)]
+        snap: None,
         settings_open: false,
         cover: false,
         peek: false,
@@ -1619,17 +1775,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         store: store::Store::load(config::dir(), private_window),
         started: false,
         quit: false,
+        maximized: false,
         downloads: Default::default(),
         find_last: None,
     };
     app.refresh_power();
     let power_proxy = app.proxy.clone();
     native::on_power_change(move || drop(power_proxy.send_event(UserEvent::Power)));
+    #[cfg(windows)]
+    {
+        let proxy = app.proxy.clone();
+        app.snap = native::SnapButton::new(&app.window, move |what| {
+            let _ = proxy.send_event(UserEvent::Snap(what));
+        });
+    }
     app.apply_theme();
     app.layout();
     app.recompile_adblock(); // tabs open once the block list is ready (AdblockReady)
 
-    #[cfg(all(target_os = "macos", debug_assertions))]
+    #[cfg(debug_assertions)]
     let launched = Instant::now();
     let mut next_update_check = Instant::now() + Duration::from_secs(5);
     event_loop.run(move |event, _, control_flow| {
@@ -1638,7 +1802,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Event::WindowEvent {
                 event: WindowEvent::Resized(_),
                 ..
-            } => app.layout(),
+            } => {
+                app.layout();
+                app.place_lights(); // Windows: in physical pixels, so again after a scale change
+                let max = app.window.is_maximized();
+                if max != app.maximized {
+                    app.maximized = max;
+                    app.sync(); // the restore/maximize button changes
+                }
+            }
+            Event::WindowEvent {
+                event: WindowEvent::ScaleFactorChanged { .. },
+                ..
+            } => app.place_lights(),
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
                 ..
@@ -1659,8 +1835,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Development: WISP_PEEK=1 reveals the collapsed bar after 3s and holds it;
                 // WISP_ACT=<action> runs an action after 3s; WISP_JS=<script> runs in the
                 // interface after 4s;
-                // WISP_SHOT=/path.png saves a picture of the window after 6s and quits.
-                #[cfg(all(target_os = "macos", debug_assertions))]
+                // WISP_SHOT=/path.png (macOS) saves a picture of the window after 6s and quits;
+                // on Windows, .github/workflows/windows-shots.yml captures the screen instead.
+                #[cfg(debug_assertions)]
                 {
                     let after = |secs| launched.elapsed() > Duration::from_secs(secs);
                     if std::env::var_os("WISP_PEEK").is_some() && after(3) && !app.hold_peek {
@@ -1677,6 +1854,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         unsafe { std::env::remove_var("WISP_JS") };
                         let _ = app.chrome.evaluate_script(&js);
                     }
+                    #[cfg(target_os = "macos")]
                     if let Some(path) = std::env::var_os("WISP_SHOT").filter(|_| after(6)) {
                         use tao::platform::macos::WindowExtMacOS;
                         let ok = debug_shot::save(app.window.ns_window(), &path.to_string_lossy());
@@ -1712,8 +1890,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        App, CLOSED_MAX, Side, Tab, Zone, ease_out, group_pinned, low_power, place_tab,
-        remember_closed, zone,
+        App, CLOSED_MAX, PageMsg, Side, Tab, Zone, ease_out, group_pinned, low_power, origin,
+        place_tab, remember_closed, same_origin, zone,
     };
     use crate::native::Power;
 
@@ -1756,6 +1934,7 @@ mod tests {
             url: format!("https://example.com/{id}"),
             loading: false,
             zoom: 1.0,
+            media: Default::default(),
         }
     }
 
@@ -1889,5 +2068,61 @@ mod tests {
         assert_eq!(ease_out(1.0), 1.0);
         assert_eq!(ease_out(7.0), 1.0);
         assert!(ease_out(0.25) > 0.6);
+    }
+
+    #[test]
+    fn a_page_can_send_only_keys_and_media() {
+        let page = |body| serde_json::from_str::<PageMsg>(body);
+        for forged in [
+            r#"{"cmd":"close_tab","id":1}"#,
+            r#"{"cmd":"navigate","url":"https://example.com"}"#,
+            r#"{"cmd":"select_tab","id":1}"#,
+            r#"{"cmd":"action","name":"private_window"}"#,
+            r#"{"cmd":"media","pos":"x"}"#,
+            "not json",
+        ] {
+            assert!(page(forged).is_err(), "{forged}");
+        }
+        assert!(matches!(
+            page(r#"{"cmd":"key","combo":"Mod+T"}"#),
+            Ok(PageMsg::Key { .. })
+        ));
+        // A button press shaped like the interface's is just an empty report from the page.
+        assert!(matches!(
+            page(r#"{"cmd":"media","id":3,"op":"dismiss"}"#),
+            Ok(PageMsg::Media(_))
+        ));
+    }
+
+    #[test]
+    fn only_the_tabs_own_document_may_speak_for_it() {
+        let tab = "https://bank.example/account?x=1#top";
+        assert!(same_origin("https://bank.example/", tab));
+        assert!(same_origin("https://bank.example/other/page", tab));
+        // Frames of other sites, and lookalikes, do not count.
+        for other in [
+            "https://ads.example/frame",
+            "http://bank.example/",
+            "https://bank.example:8443/",
+            "https://bank.example.evil.test/",
+            "https://bank.example@evil.test/",
+            "about:blank",
+            "about:srcdoc",
+            "file:///bank.example/",
+            "data:text/html,hi",
+            "",
+        ] {
+            assert!(!same_origin(other, tab), "{other}");
+        }
+        // Without an origin (a blank tab, a local file) only that same document counts.
+        assert!(same_origin("about:blank", "about:blank"));
+        assert!(same_origin("file:///a.html", "file:///a.html#x"));
+        assert!(!same_origin("file:///b.html", "file:///a.html"));
+        assert!(!same_origin("about:srcdoc", "about:blank"));
+        assert_eq!(
+            origin("https://a.example:1/b?c"),
+            Some("https://a.example:1")
+        );
+        assert_eq!(origin("https://a.example?q"), Some("https://a.example"));
     }
 }

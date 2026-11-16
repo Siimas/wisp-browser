@@ -13,6 +13,12 @@ All notable changes to Wisp are recorded here. The format follows
   mode, on a low battery, or on a computer with 4 GB of memory or less or two
   cores or fewer. The system's "Reduce transparency" setting now turns glass
   off too.
+- A media player at the bottom of the sidebar while another tab plays audio or
+  video: title and artist, previous, play/pause, next, mute, and a progress line
+  you can drag to seek. Click the title to go to the tab; close it to hide it
+  until playback starts again. In the top-bar layouts it is a button beside
+  "New tab" that opens the same player. A playing tab shows a speaker you can
+  click to mute it.
 
 ### Changed
 
