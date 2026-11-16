@@ -142,6 +142,8 @@ pub struct Behavior {
     pub auto_update: bool,
     /// Record visited pages. Off: nothing new is recorded (what is there stays until cleared).
     pub keep_history: bool,
+    /// Settings shows every setting; off, only the simple ones.
+    pub advanced_settings: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
@@ -202,6 +204,7 @@ impl Default for Behavior {
             default_zoom: 1.0,
             auto_update: true,
             keep_history: true,
+            advanced_settings: false,
         }
     }
 }

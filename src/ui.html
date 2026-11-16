@@ -346,9 +346,10 @@ i.dot { display: block; width: 8px; height: 8px; border-radius: 50%; background:
 #settings > .set { max-width: calc(184px + var(--sp-5) + 640px); display: grid; grid-template-columns: 184px minmax(0, 1fr); column-gap: var(--sp-5);
   grid-template-areas: "h1 h1" "nav find" "nav main"; grid-template-rows: auto auto 1fr; align-items: start; }
 .set > h1 { grid-area: h1; margin-bottom: var(--sp-4); padding-left: var(--sp-2); } /* on the menu's icons */
-.set-find { grid-area: find; position: relative; display: flex; align-items: center; }
+.set-find { grid-area: find; position: relative; display: flex; align-items: center; gap: var(--sp-2); }
+#settings:not([data-adv]) .adv { display: none; } /* Simple shows only the simple settings */
 .set-find > svg { position: absolute; left: var(--sp-3); color: var(--mute); pointer-events: none; }
-#set-q { width: 100%; height: var(--row); padding: 0 var(--sp-3) 0 calc(var(--sp-3) + 16px + var(--sp-2)); font: inherit; color: var(--fg);
+#set-q { flex: 1; min-width: 0; height: var(--row); padding: 0 var(--sp-3) 0 calc(var(--sp-3) + 16px + var(--sp-2)); font: inherit; color: var(--fg);
   background: var(--field); border: 0; border-radius: var(--r-md); box-shadow: var(--shadow-0); }
 #set-q::placeholder { color: var(--mute); }
 #set-nav { grid-area: nav; position: sticky; top: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-0); }
@@ -368,7 +369,8 @@ i.dot { display: block; width: 8px; height: 8px; border-radius: 50%; background:
 #settings[data-q] .grp > h2, #settings[data-q] .sec > .grp:first-of-type > h2 { margin-top: var(--sp-3); }
 #settings .miss { display: none !important; }
 #settings .card > .row.top { box-shadow: none; } /* the first row shown has no hairline above it */
-#set-none { padding: var(--sp-4) var(--sp-3); margin: 0; }
+#set-none, #set-more { padding: var(--sp-4) var(--sp-3) 0; margin: 0; }
+#set-more .btn { margin-left: var(--sp-2); }
 @container (max-width: 720px) {
   #settings > .set { grid-template-columns: minmax(0, 1fr); grid-template-areas: "h1" "find" "nav" "main"; }
   .set > h1 { padding-left: var(--sp-3); } /* one column: the title, the icons and the text below */
@@ -404,12 +406,21 @@ input[type=color] { width: 40px; height: var(--ctl); padding: 0; border: 1px sol
 .row .key { min-width: 150px; text-align: center; }
 .row .key.rec { border-color: var(--accent); color: var(--accent); }
 .chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); align-items: center; }
-.modes { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--sp-2); }
-.modes button { display: flex; flex-direction: column; align-items: center; gap: var(--sp-2); padding: var(--sp-3) var(--sp-1); border: 1px solid var(--line); font-size: var(--text-sm); }
-.modes button.on { border-color: var(--accent); background: var(--hover); }
+/* Tiles: a pick-one choice drawn as small pictures (the layout, search engine, light or
+   dark...). One component, filled from TILES; a radio group with arrow keys. */
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(96px, (100% - 2 * var(--sp-2)) / 3), 1fr)); gap: var(--sp-2); } /* three at least */
+.tile { display: flex; flex-direction: column; align-items: center; gap: var(--sp-2); padding: var(--sp-3) var(--sp-1); border: 1px solid var(--line); font-size: var(--text-sm); text-align: center; }
+.tile[aria-checked=true] { border-color: var(--accent); background: var(--hover); }
+.tile .pic { display: grid; place-items: center; }
+.tile .pic.mark { font-size: var(--text-lg); font-weight: 500; }
+/* The same component as a two-way switch (Simple or Advanced) */
+.seg { display: flex; flex: none; gap: var(--sp-0); padding: var(--sp-0); border-radius: var(--r-md); background: var(--field); box-shadow: var(--shadow-0); }
+.seg .tile { flex-direction: row; height: calc(var(--row) - 2 * var(--sp-0)); padding: 0 var(--sp-3); border: 0; color: var(--mute); border-radius: max(0px, var(--r-md) - var(--sp-0)); }
+.seg .tile:hover { color: var(--fg); }
+.seg .tile[aria-checked=true] { background: var(--surface); color: var(--fg); box-shadow: var(--shadow-1); }
 /* a small drawing of each layout: sizes are the picture's own */
-.modes .pic { width: 56px; height: 38px; border: 1.5px solid currentColor; border-radius: 5px; position: relative; opacity: .8; }
-.modes .pic::before, .modes .pic::after { content: ""; position: absolute; background: currentColor; opacity: .5; }
+.tile .pic { width: 56px; height: 38px; border: 1.5px solid currentColor; border-radius: 5px; position: relative; opacity: .8; }
+.tile .pic::before, .tile .pic::after { content: ""; position: absolute; background: currentColor; opacity: .5; }
 .pic.sr::after { top: 0; bottom: 0; right: 0; width: 30%; } .pic.sr::before { top: 0; left: 0; right: 30%; height: 22%; opacity: .25; }
 .pic.sl::after { top: 0; bottom: 0; left: 0; width: 30%; } .pic.sl::before { top: 0; right: 0; left: 30%; height: 22%; opacity: .25; }
 .pic.tr::after { left: 0; right: 0; top: 0; height: 40%; }
@@ -609,12 +620,18 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
         <label class="row" data-keys="other words people search for"><span>Label<small>What it does</small></span>
           <input type="checkbox" data-k="section.key"></label>
       data-k binds it to the config (renderSettings fills it, onField saves it). The search
-      reads the row's own text plus data-keys, so nothing else needs registering. -->
+      reads the row's own text plus data-keys, so nothing else needs registering.
+
+      Simple or Advanced: a row, group or section with class "adv" shows only in Advanced
+      (search in Simple still finds it, and offers to switch). A pick-one choice is a tile
+      row, <div class="tiles" data-tiles="section.key" aria-label="..."></div>, with its
+      choices in TILES; keep the raw field beside it as an "adv" row. -->
     <section id="settings" class="sheet"><div class="set">
       <h1>Settings
         <span class="chips"><button class="btn" id="about-jump" title="Version and updates"></button>
           <button class="btn primary" data-act="settings">Done</button></span></h1>
-      <div class="set-find"><input id="set-q" type="text" role="searchbox" placeholder="Find in Settings" aria-label="Find in Settings" aria-controls="set-main" spellcheck="false" autocomplete="off"></div>
+      <div class="set-find"><input id="set-q" type="text" role="searchbox" placeholder="Find in Settings" aria-label="Find in Settings" aria-controls="set-main" spellcheck="false" autocomplete="off">
+        <div class="tiles seg" data-tiles="behavior.advanced_settings" aria-label="How many settings to show"></div></div>
       <nav id="set-nav" role="tablist" aria-label="Settings sections" aria-orientation="vertical"></nav>
       <div id="set-main">
 
@@ -622,18 +639,13 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
       <div class="grp"><h2>Layout</h2>
       <div class="card">
         <div class="row col" data-keys="sidebar vertical tabs top bar horizontal tabs position left right compact layout">
-          <div class="modes" id="modes">
-            <button data-mode="sidebar-right"><span class="pic sr"></span>Sidebar right</button>
-            <button data-mode="sidebar-left"><span class="pic sl"></span>Sidebar left</button>
-            <button data-mode="top-relaxed"><span class="pic tr"></span>Top, relaxed</button>
-            <button data-mode="top-compact"><span class="pic tc"></span>Top, compact</button>
-          </div>
+          <div class="tiles" data-tiles="layout.mode" aria-label="Layout"></div>
         </div>
         <div class="row" data-keys="toolbar rearrange address bar hotbar"><span>Buttons and their placement<small>Move the address bar, buttons and workspaces between the hotbar and the sidebar</small></span>
           <button class="btn" id="open-customize">Customize toolbar</button></div>
-        <label class="row" data-keys="hover peek reveal collapsed hidden bar"><span>Show when the mouse comes near<small>While collapsed, moving the mouse to that edge floats the bar over the page until you leave</small></span>
+        <label class="row adv" data-keys="hover peek reveal collapsed hidden bar"><span>Show when the mouse comes near<small>While collapsed, moving the mouse to that edge floats the bar over the page until you leave</small></span>
           <input type="checkbox" data-k="layout.hover_expand"></label>
-        <label class="row" data-keys="hover edge"><span>Reveal distance<small>How close to the edge the mouse must come: further right reveals the bar sooner</small></span>
+        <label class="row adv" data-keys="hover edge"><span>Reveal distance<small>How close to the edge the mouse must come: further right reveals the bar sooner</small></span>
           <input type="range" min="4" max="160" step="4" data-k="layout.hover_zone"></label>
       </div>
       </div>
@@ -655,19 +667,19 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
           </div>
         </div>
         <div class="row col" data-keys="themes colour schemes"><span>Presets</span><div class="presets" id="presets"></div></div>
-        <label class="row" data-keys="grain noise pattern dots lines grid">Texture
+        <label class="row adv" data-keys="grain noise pattern dots lines grid">Texture
           <select data-k="appearance.texture">
             <option value="none">None</option><option value="grain">Grain</option><option value="dots">Dots</option>
             <option value="lines">Lines</option><option value="grid">Grid</option>
           </select></label>
         <label class="row" data-keys="colour highlight">Accent color <input type="color" data-k="appearance.accent"></label>
-        <label class="row" data-keys="dark mode night mode light mode theme appearance"><span>Light or dark<small>Used for pages, and for the bar when no background color is set</small></span>
-          <select data-k="appearance.theme">
-            <option value="system">Match system</option><option value="light">Light</option><option value="dark">Dark</option>
-          </select></label>
-        <label class="row" data-keys="radius rounded corners">Corner roundness <input type="range" min="0" max="20" data-k="appearance.radius"></label>
-        <label class="row" data-keys="font size bigger smaller larger">Interface text size <input type="number" min="10" max="20" data-k="appearance.font_size"></label>
-        <label class="row col" data-keys="style stylesheet tokens code"><span>Custom CSS<small>Restyle the interface yourself; the design tokens (--accent, --radius, --d-2, ...) are yours to override. Applies as you type.</small></span>
+        <div class="row col" data-keys="dark mode night mode light mode theme appearance system"><span>Light or dark<small>Used for pages, and for the bar when no background color is set</small></span>
+          <div class="tiles" data-tiles="appearance.theme" aria-label="Light or dark"></div></div>
+        <label class="row adv" data-keys="radius rounded corners">Corner roundness <input type="range" min="0" max="20" data-k="appearance.radius"></label>
+        <div class="row col" data-keys="font size bigger smaller larger"><span>Text size<small>For the bar, menus and Settings; pages zoom on their own with the zoom keys</small></span>
+          <div class="tiles" data-tiles="appearance.font_size" aria-label="Text size"></div></div>
+        <label class="row adv" data-keys="font size bigger smaller larger">Interface text size <input type="number" min="10" max="20" data-k="appearance.font_size"></label>
+        <label class="row col adv" data-keys="style stylesheet tokens code"><span>Custom CSS<small>Restyle the interface yourself; the design tokens (--accent, --radius, --d-2, ...) are yours to override. Applies as you type.</small></span>
           <textarea data-k="appearance.custom_css" spellcheck="false" placeholder=":root { --d-2: 400ms; }  .tab.active { box-shadow: inset 0 0 0 1px var(--accent); }"></textarea></label>
       </div>
       </div>
@@ -684,12 +696,15 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
       <div class="sec" data-sec="browsing" data-name="Tabs and browsing" data-icon="window">
       <div class="grp"><h2>Starting up and new tabs</h2>
       <div class="card">
-        <label class="row" data-keys="startup restore session continue where you left off">Reopen last session's tabs on start <input type="checkbox" data-k="behavior.restore_session"></label>
+        <div class="row col" data-keys="startup restore session reopen tabs continue where you left off"><span>When Wisp starts</span>
+          <div class="tiles" data-tiles="behavior.restore_session" aria-label="When Wisp starts"></div></div>
         <label class="row" data-keys="start page home button">Homepage <input type="text" data-k="behavior.homepage"></label>
-        <label class="row" data-keys="blank page start">New tab opens <input type="text" data-k="behavior.new_tab_url"></label>
+        <div class="row col" data-keys="blank page start new tab"><span>New tabs open</span>
+          <div class="tiles" data-tiles="behavior.new_tab_url" aria-label="New tabs open"></div></div>
+        <label class="row adv" data-keys="blank page start custom address">New tab opens <input type="text" data-k="behavior.new_tab_url"></label>
       </div>
       </div>
-      <div class="grp"><h2>Pages</h2>
+      <div class="grp adv"><h2>Pages</h2>
       <div class="card">
         <label class="row" data-keys="scale bigger smaller text size">Default page zoom <input type="number" min="0.3" max="4" step="0.1" data-k="behavior.default_zoom"></label>
       </div>
@@ -697,9 +712,11 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
       </div>
 
       <div class="sec" data-sec="search" data-name="Search" data-icon="search">
-      <div class="grp"><h2>Search</h2>
+      <div class="grp"><h2>Address bar</h2>
       <div class="card">
-        <label class="row" data-keys="default search engine google duckduckgo bing brave startpage"><span>Search engine<small>URL with %s where the search goes</small></span>
+        <div class="row col" data-keys="default search engine"><span>Search engine<small>Where what you type in the address bar is searched</small></span>
+          <div class="tiles" data-tiles="behavior.search_url" aria-label="Search engine"></div></div>
+        <label class="row adv" data-keys="default search engine custom url template"><span>Search address<small>Any engine: its search URL with %s where the search goes</small></span>
           <input type="text" data-k="behavior.search_url" list="engines"></label>
         <datalist id="engines">
           <option value="https://www.google.com/search?q=%s">Google</option>
@@ -715,8 +732,8 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
       <div class="sec" data-sec="privacy" data-name="Privacy and security" data-icon="shield">
       <div class="grp"><h2>Ad blocking</h2>
       <div class="card">
-        <label class="row" data-keys="ad blocker adblock tracking trackers content blocker">Block ads and trackers <input type="checkbox" data-k="adblock.enabled"></label>
-        <label class="row col" data-keys="block list blocklist domains sites"><span>Extra hosts to block<small>One per line, e.g. ads.example.com. Subdomains are included.</small></span>
+        <label class="row" data-keys="ad blocker adblock tracking trackers content blocker"><span>Block ads and trackers<small>Pages load faster, and companies cannot follow you from site to site</small></span> <input type="checkbox" data-k="adblock.enabled"></label>
+        <label class="row col adv" data-keys="block list blocklist domains sites"><span>Extra hosts to block<small>One per line, e.g. ads.example.com. Subdomains are included.</small></span>
           <textarea data-k="adblock.extra_hosts" spellcheck="false"></textarea></label>
       </div>
       </div>
@@ -732,7 +749,7 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
       </div>
       </div>
 
-      <div class="sec" data-sec="shortcuts" data-name="Shortcuts" data-icon="keyboard">
+      <div class="sec adv" data-sec="shortcuts" data-name="Shortcuts" data-icon="keyboard">
       <div class="grp" data-keys="hotkeys keyboard shortcuts keys bindings"><h2>Keyboard shortcuts</h2>
       <div class="card" id="hotkeys"></div>
       <p><button class="btn" id="reset-keys">Reset hotkeys to defaults</button></p>
@@ -754,6 +771,7 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
       </div>
 
       <p id="set-none" role="status" hidden></p>
+      <p id="set-more" hidden></p>
       </div>
     </div></section>
 
@@ -1410,7 +1428,6 @@ function renderSettings() {
     const v = get(cfg, f.dataset.k);
     if (f.type === 'checkbox') f.checked = v; else f.value = Array.isArray(v) ? v.join('\n') : v;
   }
-  for (const b of $('#modes').children) b.classList.toggle('on', b.dataset.mode === cfg.layout.mode);
 
   const a = cfg.appearance;
   $('#presets').replaceChildren(...PRESETS.map(p => {
@@ -1443,7 +1460,82 @@ function renderSettings() {
   }
   if (!window.__wispRecording) renderHotkeys();
   $('#set-clear').hidden = S.private;
-  if (setQ.value) filterSettings(); // the lists above were drawn afresh
+  renderTiles(); applyAdvanced();
+  filterSettings(); // the lists above were drawn afresh
+}
+
+// ---------- tiles: pick-one choices drawn as small pictures ----------
+// Each choice: [value (or a function giving it), label, picture]. The picture is a layout
+// drawing (`pic`), an icon from ICON, a lettermark (`mark`, never a copied logo) or text
+// at a size. A value that matches no choice shows as "Custom", which opens the advanced
+// field instead of overwriting what is there.
+const ENGINES = [['https://www.google.com/search?q=%s', 'Google', 'G'], ['https://duckduckgo.com/?q=%s', 'DuckDuckGo', 'D'],
+  ['https://www.bing.com/search?q=%s', 'Bing', 'B'], ['https://search.brave.com/search?q=%s', 'Brave', 'Br'],
+  ['https://www.startpage.com/sp/search?query=%s', 'Startpage', 'S']];
+const TILES = {
+  'behavior.advanced_settings': [[false, 'Simple'], [true, 'Advanced']],
+  'layout.mode': [['sidebar-right', 'Sidebar right', { pic: 'sr' }], ['sidebar-left', 'Sidebar left', { pic: 'sl' }],
+    ['top-relaxed', 'Top, relaxed', { pic: 'tr' }], ['top-compact', 'Top, compact', { pic: 'tc' }]],
+  'appearance.theme': [['system', 'Match system', { icon: 'sparkle' }], ['light', 'Light', { icon: 'sun' }], ['dark', 'Dark', { icon: 'moon' }]],
+  'appearance.font_size': [[12, 'Small', { size: 12 }], [13, 'Default', { size: 13 }], [15, 'Large', { size: 15 }], [17, 'Larger', { size: 17 }]],
+  'behavior.search_url': ENGINES.map(([url, name, mark]) => [url, name, { mark }]),
+  'behavior.restore_session': [[true, 'Where I left off', { icon: 'reload' }], [false, 'My home page', { icon: 'home' }]],
+  'behavior.new_tab_url': [['about:blank', 'A blank page', { icon: 'plus' }], [() => cfg.behavior.homepage, 'My home page', { icon: 'home' }]],
+};
+function tilePic(p) {
+  if (!p) return [];
+  const pic = el('span', { className: 'pic' + (p.pic ? ' ' + p.pic : p.mark ? ' mark' : '') });
+  if (p.icon) pic.append(svg(p.icon));
+  if (p.mark) pic.textContent = p.mark;
+  if (p.size) { pic.textContent = 'Aa'; pic.style.fontSize = p.size + 'px'; }
+  pic.ariaHidden = 'true';
+  return [pic];
+}
+function renderTiles() {
+  for (const box of document.querySelectorAll('#settings .tiles')) {
+    const k = box.dataset.tiles, cur = get(cfg, k);
+    const opts = TILES[k].map(([v, label, pic]) => ({ v: typeof v === 'function' ? v() : v, label, pic }))
+      .filter((o, i, all) => all.findIndex(x => x.v === o.v) === i);
+    if (!opts.some(o => o.v === cur)) opts.push({ v: cur, label: 'Custom', pic: { icon: 'edit' }, custom: true });
+    const sig = JSON.stringify(opts.map(o => [o.v, o.label]));
+    if (box.dataset.sig !== sig) { // rebuilt only when the choices change, so focus stays put
+      const had = [...box.children].indexOf(document.activeElement);
+      box.dataset.sig = sig;
+      box.setAttribute('role', 'radiogroup');
+      box.replaceChildren(...opts.map(o => {
+        const b = el('button', { className: 'tile' }, ...tilePic(o.pic), el('span', { textContent: o.label }));
+        b.setAttribute('role', 'radio');
+        Object.assign(b, { tileValue: o.v, tileCustom: !!o.custom });
+        if (o.custom) b.title = 'Set in Advanced';
+        return b;
+      }));
+      if (had >= 0) box.children[Math.min(had, box.children.length - 1)].focus();
+    }
+    for (const b of box.children) { const on = b.tileValue === cur; b.setAttribute('aria-checked', on); b.tabIndex = on ? 0 : -1; }
+  }
+}
+function pickTile(b) {
+  const k = b.parentNode.dataset.tiles;
+  if (b.tileCustom) { // the value came from the advanced field: go there rather than replace it
+    setAdvanced(true);
+    const f = $(`#settings [data-k="${k}"]`);
+    f.scrollIntoView({ block: 'center' }); f.focus();
+    return;
+  }
+  set(cfg, k, b.tileValue);
+  if (k === 'behavior.advanced_settings') applyAdvanced();
+  applyLook(); renderTiles(); filterSettings(); save();
+}
+// Simple or Advanced, remembered in the config.
+function applyAdvanced() {
+  const on = !!cfg.behavior.advanced_settings;
+  $('#settings').toggleAttribute('data-adv', on);
+  if (!on && $('#set-' + setSec)?.classList.contains('adv')) showSec('appearance');
+}
+function setAdvanced(on) {
+  if (!!cfg.behavior.advanced_settings === on) return;
+  cfg.behavior.advanced_settings = on;
+  applyAdvanced(); renderTiles(); filterSettings(); save();
 }
 
 // ---------- settings: sections and search ----------
@@ -1457,6 +1549,7 @@ function buildSetNav() {
     const name = s.dataset.sec, b = el('button', { className: 'set-tab', id: 'set-tab-' + name, title: s.dataset.name }, svg(s.dataset.icon), el('span', { textContent: s.dataset.name }));
     b.dataset.sec = name;
     b.setAttribute('role', 'tab'); b.setAttribute('aria-controls', s.id = 'set-' + name);
+    if (s.classList.contains('adv')) b.classList.add('adv');
     s.setAttribute('role', 'tabpanel'); s.setAttribute('aria-labelledby', b.id);
     s.prepend(el('h3', { className: 'sec-t', textContent: s.dataset.name }));
     $('#set-nav').append(b);
@@ -1478,10 +1571,13 @@ function openSettings(name) {
   if (S.settings) showSec(name); else { setSec = name; act('settings'); }
 }
 // Every word typed must appear in a row's text or its data-keys. A section's or a group's
-// own name (and keys) matching shows all of it.
+// own name (and keys) matching shows all of it. In Simple, advanced rows that match are
+// named under the results, with a way to show them.
 function filterSettings() {
-  const words = setQ.value.toLowerCase().split(/\s+/).filter(Boolean);
+  const words = setQ.value.toLowerCase().split(/\s+/).filter(Boolean), simple = !cfg.behavior.advanced_settings;
   const has = (e, extra = e.textContent) => words.every(w => (extra + ' ' + (e.dataset.keys || '')).toLowerCase().includes(w));
+  const adv = e => simple && !!e.closest('.adv'), elsewhere = new Set();
+  const name = r => ((r.querySelector(':scope > span') || r).firstChild?.textContent || '').trim();
   $('#settings').toggleAttribute('data-q', words.length > 0);
   for (const b of $('#set-nav').children) b.setAttribute('aria-selected', !words.length && b.dataset.sec === setSec);
   let first = true;
@@ -1494,23 +1590,29 @@ function filterSettings() {
       for (const c of g.querySelectorAll(':scope > .card')) {
         let top = true;
         for (const r of c.querySelectorAll(':scope > .row')) {
-          const hit = all || has(r), shown = hit && !r.hidden;
+          const hit = all || has(r), shown = hit && !r.hidden && !adv(r);
+          if (hit && words.length && adv(r)) elsewhere.add(name(r));
           r.classList.toggle('miss', !hit);
           r.classList.toggle('top', shown && top);
           if (shown) { top = false; gHit = true; }
         }
-        c.classList.toggle('miss', top && !all);
+        c.classList.toggle('miss', top);
       }
-      for (const p of g.querySelectorAll(':scope > p')) { const hit = all || has(p); p.classList.toggle('miss', !hit); gHit ||= hit; }
-      g.classList.toggle('miss', !gHit && !all);
-      sHit ||= gHit || all;
+      for (const p of g.querySelectorAll(':scope > p')) { const hit = all || has(p); p.classList.toggle('miss', !hit); gHit ||= hit && !adv(p); }
+      g.classList.toggle('miss', !gHit);
+      sHit ||= gHit;
     }
     s.classList.toggle('miss', !sHit);
     s.classList.toggle('first', sHit && first);
     if (sHit) first = false;
   }
+  const more = $('#set-more'), names = [...elsewhere].filter(Boolean);
+  more.hidden = !words.length || !names.length;
+  if (!more.hidden) more.replaceChildren((first ? 'Nothing in the simple settings matches. In Advanced: ' : 'Also in Advanced: ')
+    + names.slice(0, 4).join(', ') + (names.length > 4 ? ', and ' + (names.length - 4) + ' more.' : '.'),
+    el('button', { className: 'btn', textContent: 'Show advanced settings', onclick: () => setAdvanced(true) }));
   const none = $('#set-none');
-  none.hidden = !words.length || !first;
+  none.hidden = !words.length || !first || !more.hidden;
   none.textContent = 'Nothing in Settings matches \u201c' + setQ.value.trim() + '\u201d.';
 }
 
@@ -1778,12 +1880,20 @@ $('#edge').onclick = () => post({ cmd: 'peek', on: true });
 $('#edge').onmouseenter = () => cfg.layout.hover_expand && post({ cmd: 'peek', on: true });
 $('#reset-keys').onclick = () => { cfg.hotkeys = {}; save(); };
 $('#ws-new').onclick = () => { const id = Math.max(0, ...cfg.workspaces.map(w => w.id)) + 1; cfg.workspaces.push({ id, name: 'Workspace ' + id, color: WS_COLORS[cfg.workspaces.length % WS_COLORS.length], icon: '' }); save(); };
-$('#modes').onclick = e => { const b = e.target.closest('[data-mode]'); if (b) { cfg.layout.mode = b.dataset.mode; save(); } };
 $('#open-customize').onclick = () => setCustomizing(true);
 $('#set-clear-btn').onclick = e => clearMenu(e.currentTarget);
+$('#settings').addEventListener('click', e => { const b = e.target.closest('.tile'); if (b) pickTile(b); });
+$('#settings').addEventListener('keydown', e => { // in a group of tiles: arrows move, Space or Enter chooses
+  const box = e.target.closest('[role=radiogroup]');
+  const step = box && { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[e.key];
+  if (!step && !(box && (e.key === 'Home' || e.key === 'End'))) return;
+  e.preventDefault();
+  const all = [...box.children], i = all.indexOf(e.target);
+  all[e.key === 'Home' ? 0 : e.key === 'End' ? all.length - 1 : (i + step + all.length) % all.length].focus();
+});
 $('#set-nav').onclick = e => { const b = e.target.closest('.set-tab'); if (b) showSec(b.dataset.sec); };
 $('#set-nav').onkeydown = e => { // arrows move through the menu, either way round
-  const tabs = [...$('#set-nav').children], i = tabs.indexOf(document.activeElement);
+  const tabs = [...$('#set-nav').children].filter(t => t.getClientRects().length), i = tabs.indexOf(document.activeElement);
   const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[e.key];
   const to = e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : step ? (i + step + tabs.length) % tabs.length : -1;
   if (i < 0 || to < 0) return;
@@ -1837,6 +1947,7 @@ function onField(e) {
   if (!k || !cfg) return;
   let v = f.type === 'checkbox' ? f.checked : f.type === 'number' || f.type === 'range' ? Number(f.value) : f.value;
   if (k === 'adblock.extra_hosts') v = v.split('\n').map(s => s.trim()).filter(Boolean);
+  if (k === 'behavior.homepage' && cfg.behavior.new_tab_url === cfg.behavior.homepage) cfg.behavior.new_tab_url = v; // "My home page" follows it
   set(cfg, k, v);
   if (e.type === 'input') { applyLook(); reportPage(); } else save();
 }

@@ -333,6 +333,24 @@ section's or group's own name matching shows all of it. Escape empties the
 box, then closes Settings. Typing a letter anywhere outside a field starts a
 search, and Mod+F focuses the box.
 
+**Simple and Advanced.** A switch beside the search box (remembered in the
+config, `behavior.advanced_settings`; Simple by default). Simple is about
+choices, not parameters: the things a person picks from, drawn as tiles.
+Advanced shows everything, raw fields included. Both edit the same config. A
+row, group or section with class `adv` shows only in Advanced; a search in
+Simple still finds those and names them under the results, with a button to
+show them.
+
+**Tiles** are the one component for a pick-one choice: the layout, light or
+dark, text size, search engine, what opens at start and in a new tab, and the
+Simple/Advanced switch itself (`.seg`, the same component drawn as a segmented
+control). Each is a radio group: a small picture (a layout drawing, a line
+icon, or a plain lettermark for a search engine, never a copied logo) over its
+name, the chosen one outlined in `--accent`. Arrow keys move, Space or Enter
+chooses. A value set in Advanced that matches no tile shows as a checked
+"Custom" tile, which opens the advanced field rather than overwriting it.
+Choices live in `TILES` in `ui.html`.
+
 **Keyboard**: the menu is one tab stop; the arrow keys (either direction, so
 the same in the row of tabs), Home and End move through it.
 
@@ -344,6 +362,9 @@ the same in the row of tabs), Home and End move through it.
   <input type="checkbox" data-k="section.key"></label>
 ```
 
+Add `adv` to its class if only Advanced should show it. For a pick-one setting,
+add a tile row (`<div class="tiles" data-tiles="section.key" aria-label="…">`)
+and its choices in `TILES`, and keep the raw field as an `adv` row.
 `data-k` binds it to the config; the search reads the row's text and
 `data-keys` (add the words the label alone would miss: "dark mode",
 "ad blocker", "version"). A new group is a `.grp` (an `h2` and a card) inside a
