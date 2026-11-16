@@ -1,14 +1,15 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 //! Wisp: a small browser shell around the operating system's own web engine.
-//! One window holds a "chrome" webview (tab strip, toolbar, settings page) and one
-//! webview per tab below it.
+//! One window holds a "chrome" webview (the sidebar or top bar, plus the settings
+//! page) and one webview per tab beside it.
 
 mod adblock;
 mod config;
 
-use config::Config;
+use config::{Config, SavedTab, Session};
 use serde::Deserialize;
 use serde_json::json;
+use std::collections::HashMap;
 use tao::{
     dpi::{LogicalPosition, LogicalSize},
     event::{Event, WindowEvent},
@@ -17,18 +18,41 @@ use tao::{
 };
 use wry::{NewWindowResponse, PageLoadEvent, Rect, WebView, WebViewBuilder};
 
+/// Thickness of the strip left at the window edge while the bar is collapsed.
+const STRIP: f64 = 6.0;
+
 /// Messages from the UI (and, for `Key` only, from pages).
 #[derive(Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
 enum Msg {
     Ready,
     Drag,
-    Key { combo: String },
-    Action { name: String },
-    Navigate { url: String },
-    SelectTab { id: u32 },
-    CloseTab { id: u32 },
-    SaveSettings { config: Config },
+    Maximize,
+    Key {
+        combo: String,
+    },
+    Action {
+        name: String,
+    },
+    Navigate {
+        url: String,
+    },
+    SelectTab {
+        id: u32,
+    },
+    CloseTab {
+        id: u32,
+    },
+    SelectWorkspace {
+        id: u32,
+    },
+    /// Mouse entered or left the collapsed bar.
+    Peek {
+        on: bool,
+    },
+    SaveSettings {
+        config: Box<Config>,
+    },
 }
 
 enum UserEvent {
@@ -37,17 +61,28 @@ enum UserEvent {
     PageKey(u32, String),
     Title(u32, String),
     Load(u32, bool, String),
-    NewTab(String),
+    /// A page in tab `.0` asked for a new window.
+    NewTab(u32, String),
     AdblockReady,
 }
 
 struct Tab {
     id: u32,
-    webview: WebView,
+    workspace: u32,
+    private: bool,
+    /// `None` until the tab is first shown: restored tabs cost nothing until used.
+    webview: Option<WebView>,
     title: String,
     url: String,
     loading: bool,
     zoom: f64,
+}
+
+#[derive(PartialEq)]
+enum Side {
+    Top,
+    Left,
+    Right,
 }
 
 struct App {
@@ -57,9 +92,20 @@ struct App {
     window: Window,
     proxy: EventLoopProxy<UserEvent>,
     cfg: Config,
-    active: usize,
+    /// Id of the tab on screen.
+    active: Option<u32>,
+    /// Id of the workspace on screen.
+    workspace: u32,
+    /// workspace id -> the tab last used there.
+    last_active: HashMap<u32, u32>,
     next_id: u32,
     settings_open: bool,
+    /// The collapsed bar is temporarily shown (mouse over it, or typing an address).
+    peek: bool,
+    /// Started with `--private`: every tab is private and nothing is saved.
+    private_window: bool,
+    /// macOS: whether the bar currently extends under the title bar.
+    overlay: Option<bool>,
     started: bool,
     quit: bool,
 }
@@ -76,14 +122,43 @@ fn keys_script(cfg: &Config) -> String {
     include_str!("keys.js").replace("__KEYS__", &serde_json::to_string(&combos).unwrap())
 }
 
+/// ponytail: a private window is a second copy of the app started with `--private`,
+/// which keeps it fully separate for free but shows a second Dock/taskbar icon.
+/// Upgrade path: several windows inside one process.
+fn open_private_window() {
+    let spawned = std::env::current_exe()
+        .and_then(|exe| std::process::Command::new(exe).arg("--private").spawn());
+    if let Err(e) = spawned {
+        eprintln!("wisp: could not open private window: {e}");
+    }
+}
+
 impl App {
-    fn chrome_height(&self) -> f64 {
-        // Must match --tabs-h + --bar-h in ui.html.
-        if self.cfg.appearance.compact {
-            68.0
-        } else {
-            84.0
+    fn side(&self) -> Side {
+        match self.cfg.layout.mode.as_str() {
+            "sidebar-left" => Side::Left,
+            "sidebar-right" => Side::Right,
+            _ => Side::Top,
         }
+    }
+
+    /// Thickness of the bar when shown. Must match the sizes in ui.html.
+    fn bar_size(&self) -> f64 {
+        match self.cfg.layout.mode.as_str() {
+            "top-compact" => 68.0,
+            "top-relaxed" => 84.0,
+            _ => self.cfg.layout.sidebar_width as f64,
+        }
+    }
+
+    fn bar_shown(&self) -> bool {
+        !self.cfg.layout.collapsed || self.peek
+    }
+
+    /// macOS: let the bar run under the title bar (traffic lights sit on top of it).
+    /// Only when the bar is on the lights' side; otherwise they would cover the page.
+    fn wants_overlay(&self) -> bool {
+        cfg!(target_os = "macos") && !self.cfg.layout.collapsed && self.side() != Side::Right
     }
 
     fn size(&self) -> LogicalSize<f64> {
@@ -92,18 +167,80 @@ impl App {
             .to_logical(self.window.scale_factor())
     }
 
-    fn layout(&self) {
-        let (s, top) = (self.size(), self.chrome_height());
-        let chrome_h = if self.settings_open { s.height } else { top };
-        let _ = self.chrome.set_bounds(rect(0.0, 0.0, s.width, chrome_h));
-        for (i, tab) in self.tabs.iter().enumerate() {
-            let _ = tab
-                .webview
-                .set_bounds(rect(0.0, top, s.width, s.height - top));
-            let _ = tab
-                .webview
-                .set_visible(i == self.active && !self.settings_open);
+    /// (bar, page) rectangles.
+    /// ponytail: a peeking bar pushes the page aside rather than floating over it,
+    /// so pages re-flow on hover. Upgrade path: raise the bar webview above the tab
+    /// webviews (native z-order per platform) and leave the page size alone.
+    fn rects(&self) -> (Rect, Rect) {
+        let s = self.size();
+        let (w, h) = (s.width, s.height);
+        let t = if self.bar_shown() {
+            self.bar_size()
+        } else {
+            STRIP
+        };
+        let (bar, page) = match self.side() {
+            Side::Top => (rect(0.0, 0.0, w, t), rect(0.0, t, w, h - t)),
+            Side::Left => (rect(0.0, 0.0, t, h), rect(t, 0.0, w - t, h)),
+            Side::Right => (rect(w - t, 0.0, t, h), rect(0.0, 0.0, w - t, h)),
+        };
+        if self.settings_open {
+            (rect(0.0, 0.0, w, h), page)
+        } else {
+            (bar, page)
         }
+    }
+
+    fn layout(&self) {
+        let (bar, page) = self.rects();
+        let _ = self.chrome.set_bounds(bar);
+        for tab in &self.tabs {
+            if let Some(w) = &tab.webview {
+                let _ = w.set_bounds(page);
+                let _ = w.set_visible(self.active == Some(tab.id) && !self.settings_open);
+            }
+        }
+    }
+
+    /// `layout`, plus switching the macOS title bar style when the bar moved.
+    fn relayout(&mut self) {
+        let overlay = self.wants_overlay();
+        if self.overlay != Some(overlay) {
+            self.overlay = Some(overlay);
+            #[cfg(target_os = "macos")]
+            {
+                use tao::platform::macos::WindowExtMacOS;
+                self.window.set_fullsize_content_view(overlay);
+                self.window.set_titlebar_transparent(overlay);
+            }
+        }
+        self.layout();
+    }
+
+    fn tab(&self, id: u32) -> Option<&Tab> {
+        self.tabs.iter().find(|t| t.id == id)
+    }
+
+    fn tab_mut(&mut self, id: u32) -> Option<&mut Tab> {
+        self.tabs.iter_mut().find(|t| t.id == id)
+    }
+
+    fn active_tab(&self) -> Option<&Tab> {
+        self.active.and_then(|id| self.tab(id))
+    }
+
+    fn active_webview(&self) -> Option<&WebView> {
+        self.active_tab().and_then(|t| t.webview.as_ref())
+    }
+
+    /// Ids of the tabs in the workspace on screen, in display order.
+    fn workspace_tabs(&self) -> Vec<u32> {
+        let ws = self.workspace;
+        self.tabs
+            .iter()
+            .filter(|t| t.workspace == ws)
+            .map(|t| t.id)
+            .collect()
     }
 
     /// Push the current state to the UI.
@@ -111,21 +248,38 @@ impl App {
         let tabs: Vec<_> = self
             .tabs
             .iter()
-            .map(|t| json!({"id": t.id, "title": t.title, "url": t.url, "loading": t.loading}))
+            .filter(|t| t.workspace == self.workspace)
+            .map(|t| {
+                json!({"id": t.id, "title": t.title, "url": t.url,
+                       "loading": t.loading, "private": t.private})
+            })
             .collect();
-        let active = self.tabs.get(self.active);
         let state = json!({
             "tabs": tabs,
-            "active": active.map(|t| t.id),
+            "active": self.active,
+            "workspace": self.workspace,
             "config": self.cfg,
             "settings": self.settings_open,
+            "shown": self.bar_shown() || self.settings_open,
+            "peek": self.peek,
+            "private": self.private_window,
             "mac": cfg!(target_os = "macos"),
+            "lights": self.overlay == Some(true),
         });
         let _ = self
             .chrome
             .evaluate_script(&format!("window.wisp && wisp.state({state})"));
-        let title = active.map(|t| t.title.as_str()).filter(|t| !t.is_empty());
-        self.window.set_title(title.unwrap_or("Wisp"));
+        let title = self.active_tab().map(|t| t.title.as_str()).unwrap_or("");
+        let app = if self.private_window {
+            "Wisp (Private)"
+        } else {
+            "Wisp"
+        };
+        self.window.set_title(&if title.is_empty() {
+            app.to_string()
+        } else {
+            format!("{title} - {app}")
+        });
     }
 
     fn apply_theme(&self) {
@@ -137,10 +291,7 @@ impl App {
             });
     }
 
-    fn new_tab(&mut self, url: &str) {
-        let id = self.next_id;
-        self.next_id += 1;
-        let (s, top) = (self.size(), self.chrome_height());
+    fn build_webview(&self, id: u32, url: &str, private: bool) -> Option<WebView> {
         let (p1, p2, p3, p4) = (
             self.proxy.clone(),
             self.proxy.clone(),
@@ -149,7 +300,8 @@ impl App {
         );
         let built = WebViewBuilder::new()
             .with_url(url)
-            .with_bounds(rect(0.0, top, s.width, s.height - top))
+            .with_bounds(self.rects().1)
+            .with_incognito(private)
             .with_back_forward_navigation_gestures(true)
             .with_initialization_script(keys_script(&self.cfg))
             // Pages are untrusted: the only message accepted from them is a hotkey press,
@@ -172,37 +324,65 @@ impl App {
             // target=_blank and window.open become tabs; popups to ad hosts are dropped.
             .with_new_window_req_handler(move |url, _| {
                 if !adblock::is_blocked(&url) {
-                    let _ = p4.send_event(UserEvent::NewTab(url));
+                    let _ = p4.send_event(UserEvent::NewTab(id, url));
                 }
                 NewWindowResponse::Deny
             })
             .build_as_child(&self.window);
-        let webview = match built {
-            Ok(w) => w,
-            Err(e) => return eprintln!("wisp: could not open tab: {e}"),
-        };
-        adblock::attach(&webview);
-        let zoom = self.cfg.behavior.default_zoom;
-        if zoom != 1.0 {
-            let _ = webview.zoom(zoom);
+        match built {
+            Ok(webview) => {
+                adblock::attach(&webview);
+                let zoom = self.cfg.behavior.default_zoom;
+                if zoom != 1.0 {
+                    let _ = webview.zoom(zoom);
+                }
+                Some(webview)
+            }
+            Err(e) => {
+                eprintln!("wisp: could not open tab: {e}");
+                None
+            }
         }
+    }
+
+    /// Open a tab in the current workspace and show it.
+    fn new_tab(&mut self, url: &str, private: bool) {
+        let id = self.next_id;
+        self.next_id += 1;
         self.tabs.push(Tab {
             id,
-            webview,
+            workspace: self.workspace,
+            private: private || self.private_window,
+            webview: None,
             title: String::new(),
             url: url.to_string(),
             loading: false,
-            zoom,
+            zoom: self.cfg.behavior.default_zoom,
         });
-        self.select(self.tabs.len() - 1);
+        self.select(id);
     }
 
-    fn select(&mut self, index: usize) {
-        self.active = index.min(self.tabs.len().saturating_sub(1));
+    fn select(&mut self, id: u32) {
+        let Some(tab) = self.tab(id) else { return };
+        let (ws, url, private, unloaded) = (
+            tab.workspace,
+            tab.url.clone(),
+            tab.private,
+            tab.webview.is_none(),
+        );
+        if unloaded {
+            let webview = self.build_webview(id, &url, private);
+            if let Some(tab) = self.tab_mut(id) {
+                tab.webview = webview;
+            }
+        }
+        self.workspace = ws;
+        self.active = Some(id);
+        self.last_active.insert(ws, id);
         self.settings_open = false;
         self.layout();
-        if let Some(tab) = self.tabs.get(self.active) {
-            let _ = tab.webview.focus();
+        if let Some(w) = self.active_webview() {
+            let _ = w.focus();
         }
         self.sync();
     }
@@ -211,20 +391,68 @@ impl App {
         let Some(pos) = self.tabs.iter().position(|t| t.id == id) else {
             return;
         };
-        if self.tabs.len() == 1 {
-            self.quit = true; // closing the last tab closes the window; it stays in the session
+        let ws = self.tabs.remove(pos).workspace;
+        if self.active == Some(id) {
+            // Show the nearest remaining tab of that workspace, or a fresh one.
+            let neighbor = self
+                .tabs
+                .iter()
+                .enumerate()
+                .filter(|(_, t)| t.workspace == ws)
+                .min_by_key(|(i, _)| i.abs_diff(pos))
+                .map(|(_, t)| t.id);
+            match neighbor {
+                Some(next) => self.select(next),
+                None => self.open_blank(),
+            }
+        } else {
+            self.sync();
+        }
+        self.save_session();
+    }
+
+    fn open_blank(&mut self) {
+        let url = self.cfg.behavior.new_tab_url.clone();
+        self.new_tab(&url, false);
+        self.focus_url();
+    }
+
+    fn select_workspace(&mut self, ws: u32) {
+        if !self.cfg.workspaces.iter().any(|w| w.id == ws) {
             return;
         }
-        self.tabs.remove(pos);
-        let next = if pos < self.active {
-            self.active - 1
-        } else {
-            self.active
-        };
-        self.select(next);
+        self.workspace = ws;
+        let remembered = self.last_active.get(&ws).copied();
+        let target = remembered
+            .filter(|&id| self.tab(id).is_some_and(|t| t.workspace == ws))
+            .or_else(|| self.workspace_tabs().first().copied());
+        match target {
+            Some(id) => self.select(id),
+            None => self.open_blank(),
+        }
+        self.save_session();
+    }
+
+    /// Move `step` places through `ids`, starting from `current`, wrapping around.
+    fn cycle(ids: &[u32], current: Option<u32>, step: isize) -> Option<u32> {
+        let n = ids.len() as isize;
+        if n == 0 {
+            return None;
+        }
+        let pos = current.and_then(|c| ids.iter().position(|&i| i == c));
+        let next = pos.map_or(0, |p| (p as isize + step).rem_euclid(n));
+        Some(ids[next as usize])
     }
 
     fn focus_url(&mut self) {
+        if self.settings_open {
+            self.set_settings_open(false);
+        }
+        if !self.bar_shown() {
+            self.peek = true; // the UI drops the peek again when the address bar loses focus
+            self.relayout();
+            self.sync();
+        }
         let _ = self.chrome.focus();
         let _ = self.chrome.evaluate_script("wisp.focusUrl()");
     }
@@ -232,43 +460,60 @@ impl App {
     fn set_settings_open(&mut self, open: bool) {
         self.settings_open = open;
         self.layout();
-        let _ = match self.tabs.get(self.active) {
-            Some(tab) if !open => tab.webview.focus(),
+        let _ = match self.active_webview() {
+            Some(w) if !open => w.focus(),
             _ => self.chrome.focus(),
         };
         self.sync();
     }
 
     fn action(&mut self, name: &str) {
-        let count = self.tabs.len();
         match name {
-            "new_tab" => {
+            "new_tab" => return self.open_blank(),
+            "new_private_tab" => {
                 let url = self.cfg.behavior.new_tab_url.clone();
-                self.new_tab(&url);
-                self.focus_url();
-                return;
-            }
-            "next_tab" if count > 0 => return self.select((self.active + 1) % count),
-            "prev_tab" if count > 0 => return self.select((self.active + count - 1) % count),
-            "focus_url" => {
-                if self.settings_open {
-                    self.set_settings_open(false);
-                }
+                self.new_tab(&url, true);
                 return self.focus_url();
             }
+            "private_window" => return open_private_window(),
+            "next_tab" | "prev_tab" => {
+                let step = if name == "next_tab" { 1 } else { -1 };
+                if let Some(id) = Self::cycle(&self.workspace_tabs(), self.active, step) {
+                    self.select(id);
+                }
+                return;
+            }
+            "next_workspace" | "prev_workspace" => {
+                let step = if name == "next_workspace" { 1 } else { -1 };
+                let ids: Vec<u32> = self.cfg.workspaces.iter().map(|w| w.id).collect();
+                if let Some(id) = Self::cycle(&ids, Some(self.workspace), step) {
+                    self.select_workspace(id);
+                }
+                return;
+            }
+            "toggle_bar" => {
+                self.cfg.layout.collapsed = !self.cfg.layout.collapsed;
+                self.peek = false;
+                self.cfg.save();
+                self.relayout();
+                return self.sync();
+            }
+            "focus_url" => return self.focus_url(),
             "settings" => return self.set_settings_open(!self.settings_open),
+            "close_tab" => {
+                if let Some(id) = self.active {
+                    self.close_tab(id);
+                }
+                return;
+            }
             _ => {}
         }
         let home = self.cfg.behavior.homepage.clone();
-        let Some(tab) = self.tabs.get_mut(self.active) else {
+        let Some(tab) = self.active.and_then(|id| self.tab_mut(id)) else {
             return;
         };
-        let w = &tab.webview;
+        let Some(w) = &tab.webview else { return };
         let _ = match name {
-            "close_tab" => {
-                let id = tab.id;
-                return self.close_tab(id);
-            }
             "reload" => w.reload(),
             "back" => w.go_back(),
             "forward" => w.go_forward(),
@@ -301,42 +546,95 @@ impl App {
         if old.hotkeys != self.cfg.hotkeys {
             let combos: Vec<&String> = self.cfg.hotkeys.values().collect();
             let js = format!("window.__wispKeys = new Set({})", json!(combos));
-            for w in self.tabs.iter().map(|t| &t.webview).chain([&self.chrome]) {
+            let pages = self.tabs.iter().filter_map(|t| t.webview.as_ref());
+            for w in pages.chain([&self.chrome]) {
                 let _ = w.evaluate_script(&js);
             }
         }
+        if old.workspaces != self.cfg.workspaces {
+            // Tabs of a deleted workspace move to the first one rather than vanish.
+            let ids: Vec<u32> = self.cfg.workspaces.iter().map(|w| w.id).collect();
+            for tab in &mut self.tabs {
+                if !ids.contains(&tab.workspace) {
+                    tab.workspace = ids[0];
+                }
+            }
+            if !ids.contains(&self.workspace) {
+                self.select_workspace(ids[0]);
+            }
+            self.save_session();
+        }
+        if !self.cfg.layout.collapsed {
+            self.peek = false;
+        }
         self.apply_theme();
-        self.layout();
+        self.relayout();
         self.sync();
     }
 
     fn start(&mut self) {
         self.started = true;
-        let mut urls = if self.cfg.behavior.restore_session {
+        let first_ws = self.cfg.workspaces[0].id;
+        self.workspace = first_ws;
+        if self.private_window {
+            return self.open_blank();
+        }
+        let session = if self.cfg.behavior.restore_session {
             config::load_session()
         } else {
-            Vec::new()
+            Session::default()
         };
-        if urls.is_empty() {
-            urls.push(self.cfg.behavior.homepage.clone());
+        let known = |ws: u32| self.cfg.workspaces.iter().any(|w| w.id == ws);
+        let start_ws = Some(session.workspace)
+            .filter(|&w| known(w))
+            .unwrap_or(first_ws);
+        for saved in session.tabs {
+            let workspace = Some(saved.workspace)
+                .filter(|&w| known(w))
+                .unwrap_or(first_ws);
+            let id = self.next_id;
+            self.next_id += 1;
+            if saved.active {
+                self.last_active.insert(workspace, id);
+            }
+            self.tabs.push(Tab {
+                id,
+                workspace,
+                private: false,
+                webview: None,
+                title: saved.title,
+                url: saved.url,
+                loading: false,
+                zoom: self.cfg.behavior.default_zoom,
+            });
         }
-        for url in urls {
-            self.new_tab(&url);
+        if self.tabs.is_empty() {
+            let home = self.cfg.behavior.homepage.clone();
+            self.new_tab(&home, false);
+        } else {
+            self.select_workspace(start_ws);
         }
     }
 
     fn save_session(&self) {
-        let urls: Vec<String> = self
+        if self.private_window || !self.started {
+            return;
+        }
+        let tabs = self
             .tabs
             .iter()
-            .filter(|t| t.url.starts_with("http"))
-            .map(|t| t.url.clone())
+            .filter(|t| !t.private && t.url.starts_with("http"))
+            .map(|t| SavedTab {
+                url: t.url.clone(),
+                title: t.title.clone(),
+                workspace: t.workspace,
+                active: self.last_active.get(&t.workspace) == Some(&t.id),
+            })
             .collect();
-        config::save_session(&urls);
-    }
-
-    fn tab_mut(&mut self, id: u32) -> Option<&mut Tab> {
-        self.tabs.iter_mut().find(|t| t.id == id)
+        config::save_session(&Session {
+            workspace: self.workspace,
+            tabs,
+        });
     }
 
     fn handle(&mut self, event: UserEvent) {
@@ -346,6 +644,7 @@ impl App {
                 Msg::Drag => {
                     let _ = self.window.drag_window();
                 }
+                Msg::Maximize => self.window.set_maximized(!self.window.is_maximized()),
                 Msg::Key { combo } => {
                     if let Some(action) = self.cfg.action_for(&combo).map(str::to_string) {
                         self.action(&action);
@@ -354,22 +653,28 @@ impl App {
                 Msg::Action { name } => self.action(&name),
                 Msg::Navigate { url } => {
                     let url = config::resolve_input(&url, &self.cfg.behavior.search_url);
-                    if let Some(tab) = self.tabs.get(self.active) {
-                        let _ = tab.webview.load_url(&url);
-                        let _ = tab.webview.focus();
+                    if let Some(w) = self.active_webview() {
+                        let _ = w.load_url(&url);
+                        let _ = w.focus();
                     }
                 }
-                Msg::SelectTab { id } => {
-                    if let Some(pos) = self.tabs.iter().position(|t| t.id == id) {
-                        self.select(pos);
-                    }
-                }
+                Msg::SelectTab { id } => self.select(id),
                 Msg::CloseTab { id } => self.close_tab(id),
-                Msg::SaveSettings { config } => self.apply_config(config),
+                Msg::SelectWorkspace { id } => self.select_workspace(id),
+                Msg::Peek { on } => {
+                    let on = on && self.cfg.layout.collapsed;
+                    if self.peek != on {
+                        self.peek = on;
+                        self.relayout();
+                        self.sync();
+                    }
+                }
+                Msg::SaveSettings { config } => self.apply_config(*config),
             },
             UserEvent::PageKey(id, combo) => {
-                // Background tabs cannot have keyboard focus, so a key from one is forged.
-                if self.tabs.get(self.active).is_some_and(|t| t.id == id) {
+                // A page can only have keyboard focus while it is the one on screen, so a
+                // key from a background tab, or while settings cover the page, is forged.
+                if self.active == Some(id) && !self.settings_open {
                     self.handle(UserEvent::Ui(Msg::Key { combo }));
                 }
             }
@@ -389,12 +694,16 @@ impl App {
                     }
                 }
             }
-            UserEvent::NewTab(url) => self.new_tab(&url),
+            UserEvent::NewTab(opener, url) => {
+                let private = self.tab(opener).is_some_and(|t| t.private);
+                self.new_tab(&url, private);
+            }
             UserEvent::AdblockReady => {
                 if !self.started {
                     self.start();
                 } else if adblock::REATTACH_AFTER_COMPILE {
-                    self.tabs.iter().for_each(|t| adblock::attach(&t.webview));
+                    let pages = self.tabs.iter().filter_map(|t| t.webview.as_ref());
+                    pages.for_each(adblock::attach);
                 }
             }
         }
@@ -438,6 +747,7 @@ fn install_menu() -> muda::Menu {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let private_window = std::env::args().any(|a| a == "--private");
     let cfg = Config::load();
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
@@ -448,12 +758,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_min_inner_size(LogicalSize::new(480.0, 320.0));
     #[cfg(target_os = "macos")]
     let builder = {
-        // Tabs live in the title bar area, next to the traffic lights.
+        // The window title is never drawn; whether the bar runs under the title bar
+        // is switched at runtime in `App::relayout`.
         use tao::platform::macos::WindowBuilderExtMacOS;
-        builder
-            .with_titlebar_transparent(true)
-            .with_fullsize_content_view(true)
-            .with_title_hidden(true)
+        builder.with_title_hidden(true)
     };
     let window = builder.build(&event_loop)?;
     #[cfg(target_os = "macos")]
@@ -481,14 +789,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         window,
         proxy,
         cfg,
-        active: 0,
+        active: None,
+        workspace: 0,
+        last_active: HashMap::new(),
         next_id: 1,
         settings_open: false,
+        peek: false,
+        private_window,
+        overlay: None,
         started: false,
         quit: false,
     };
     app.apply_theme();
-    app.layout();
+    app.relayout();
     app.recompile_adblock(); // tabs open once the block list is ready (AdblockReady)
 
     event_loop.run(move |event, _, control_flow| {
@@ -503,11 +816,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 event: WindowEvent::CloseRequested,
                 ..
             } => app.quit = true,
-            Event::LoopDestroyed if app.started => app.save_session(),
+            Event::LoopDestroyed => app.save_session(),
             _ => {}
         }
         if app.quit {
             *control_flow = ControlFlow::Exit;
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::App;
+
+    #[test]
+    fn cycling_wraps_and_survives_a_missing_current() {
+        let ids = [10, 20, 30];
+        assert_eq!(App::cycle(&ids, Some(10), 1), Some(20));
+        assert_eq!(App::cycle(&ids, Some(30), 1), Some(10));
+        assert_eq!(App::cycle(&ids, Some(10), -1), Some(30));
+        assert_eq!(App::cycle(&ids, Some(99), 1), Some(10));
+        assert_eq!(App::cycle(&ids, None, -1), Some(10));
+        assert_eq!(App::cycle(&[], Some(1), 1), None);
+    }
 }
