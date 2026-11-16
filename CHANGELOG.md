@@ -10,8 +10,9 @@ All notable changes to Wisp are recorded here. The format follows
 
 - Low-power mode (Settings > Behavior): solid surfaces instead of glass and no
   animation. Automatic, the default, turns it on in the system's power saving
-  mode, on a low battery, or on a computer with 4 GB of memory or less. The
-  system's "Reduce transparency" setting now turns glass off too.
+  mode, on a low battery, or on a computer with 4 GB of memory or less or two
+  cores or fewer. The system's "Reduce transparency" setting now turns glass
+  off too.
 
 ### Changed
 

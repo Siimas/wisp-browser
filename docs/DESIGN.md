@@ -150,7 +150,8 @@ wheel laid flat:
 
 ### Texture
 
-Textures are one fixed layer (`body::before`) over the paint: painted once,
+Textures are one layer (`body::before`, `position: absolute`, not `fixed`:
+fixed under a blend mode cost about 50 MB) over the paint: painted once,
 never animated, no layout. Grain is the default and the one presets use.
 
 **Grain** is a 128 × 128 tile generated at start-up (`grain()` in `ui.html`):

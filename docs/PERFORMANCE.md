@@ -75,7 +75,9 @@ its own (through custom CSS). Same machine and accounting as above; a short scri
 | Bar collapsed (second web view + cursor poll) | 199-201 MB | 149 MB | 0.8-1.3 % |
 
 The grain was the whole cost, and only because its layer was `position: fixed` under a blend
-mode: as `absolute` it draws the same pixels (largest difference 3 of 255) at no measurable cost,
+mode: as `absolute` it draws the same pixels (largest difference 3 of 255: two debug-build
+window captures, dark theme, `fixed` and `absolute`, compared per pixel with Pillow's
+`ImageChops.difference` over a patch of bare paint) at no measurable cost,
 so that is now the default. With it, and the cursor checked less often when far from the edge:
 
 | This branch | Whole tree | Interface web content | Idle CPU |
@@ -87,8 +89,8 @@ so that is now the default. With it, and the cursor checked less often when far 
 Low-power mode saves nothing at rest: what it removes (glass blur, animation frames, the page
 resizing frame by frame) costs only while something is shown or moving. The collapsed bar's
 second web view is about 30 MB; it is kept, because building it on demand would delay the
-reveal. About one run in six ended with Wisp quitting on its own before the sample, on both
-builds and with no crash report; those runs were dropped and the cause is not known.
+reveal. About one run in six was cut short because the owner closed the test window while
+working on the machine (not a crash); those runs were dropped.
 
 ## Machine
 

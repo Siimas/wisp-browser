@@ -1344,7 +1344,7 @@ function renderSettings() {
   const up = S.update;
   $('#about-version').textContent = S.version;
   $('#low-note').textContent = 'Solid surfaces instead of glass, and no animation: for slower computers and longer battery life'
-    + (cfg.behavior.low_power === 'auto' ? `. Automatic turns it on in the system's power saving mode, on a low battery, or with 4 GB of memory or less (${S.low ? 'on' : 'off'} now)` : '');
+    + (cfg.behavior.low_power === 'auto' ? `. Automatic turns it on in the system's power saving mode, on a low battery, or with 4 GB of memory or less or two cores or fewer (${S.low ? 'on' : 'off'} now)` : '');
   // The version sits at the top of Settings too, and leads to the About card.
   $('#about-jump').textContent = 'Wisp ' + S.version + (S.update.ready ? ' \u2192 ' + S.update.ready + ' ready' : '');
   $('#about-note').textContent = up.supported ? up.note : 'This copy was not installed from a release, so it does not update itself.';

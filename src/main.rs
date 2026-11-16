@@ -932,16 +932,22 @@ impl App {
             if let Some(f) = &self.floater {
                 let _ = f.set_bounds(self.inset_rect(self.float_insets));
                 let _ = f.set_visible(true);
-                if let Some(glass) = self.glass.as_ref().filter(|_| !self.solid) {
-                    let [l, t, r, b] = self.panel_insets;
-                    let s = self.size();
-                    let frame = [l, t, s.width - l - r, s.height - t - b];
-                    glass.show(&self.window, frame, self.panel_radius);
-                }
+                self.show_glass();
                 native::raise(f, &self.window);
             }
         }
         self.sync(); // the floater slides in, or slides out and reports `FloaterDone`
+    }
+
+    /// The frosted pane under the revealed bar, where there is one and glass is wanted.
+    /// Raise the floating bar right after, so the pane ends up beneath it.
+    fn show_glass(&self) {
+        if let Some(glass) = self.glass.as_ref().filter(|_| !self.solid) {
+            let [l, t, r, b] = self.panel_insets;
+            let s = self.size();
+            let frame = [l, t, s.width - l - r, s.height - t - b];
+            glass.show(&self.window, frame, self.panel_radius);
+        }
     }
 
     /// While the bar is collapsed: reveal it when the cursor reaches its window edge,
@@ -1221,6 +1227,10 @@ impl App {
         (self.low, self.solid) = (low, solid);
         if let Some(glass) = self.glass.as_ref().filter(|_| solid) {
             glass.hide();
+        } else if let Some(f) = self.floater.as_ref().filter(|_| self.peek) {
+            // Glass is back while the bar is out (plugged in, say): put the pane under it.
+            self.show_glass();
+            native::raise(f, &self.window);
         }
         true
     }
