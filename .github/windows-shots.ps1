@@ -57,6 +57,7 @@ foreach ($c in $cases) {
   $env:APPDATA = $data
   $env:WISP_JS = $js
   $env:WISP_PEEK = $(if ($peek) { "1" } else { "" })
+  [W]::SetCursorPos(500, 400) | Out-Null # away from edges that reveal a collapsed bar
   $p = Start-Process -FilePath $Exe -PassThru -NoNewWindow
   Start-Sleep -Seconds 2
   # The runner's screen is small: fit the window, with room around it for its shadow.
