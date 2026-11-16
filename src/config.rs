@@ -21,6 +21,7 @@ pub const MODES: [&str; 4] = [
     "top-relaxed",
     "top-compact",
 ];
+pub const LOW_POWER: [&str; 3] = ["auto", "on", "off"];
 pub const TEXTURES: [&str; 5] = ["none", "grain", "dots", "lines", "grid"];
 /// Everything the user can place in a toolbar area. `spacer` may appear many times.
 pub const ITEMS: [&str; 17] = [
@@ -146,6 +147,8 @@ pub struct Behavior {
     pub unload_after: u32,
     /// Pinned tabs may be unloaded too (by default they stay loaded).
     pub unload_pinned: bool,
+    /// Low-power mode: one of `LOW_POWER` ("auto" decides from the system, see main.rs).
+    pub low_power: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
@@ -208,6 +211,7 @@ impl Default for Behavior {
             keep_history: true,
             unload_after: 30,
             unload_pinned: false,
+            low_power: "auto".into(),
         }
     }
 }
@@ -273,6 +277,9 @@ impl Config {
         }
         self.behavior.default_zoom = clamp_zoom(self.behavior.default_zoom);
         self.behavior.unload_after = self.behavior.unload_after.min(24 * 60);
+        if !LOW_POWER.contains(&self.behavior.low_power.as_str()) {
+            self.behavior.low_power = LOW_POWER[0].into();
+        }
 
         let l = &mut self.layout;
         if !MODES.contains(&l.mode.as_str()) {

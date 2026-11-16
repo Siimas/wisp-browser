@@ -58,6 +58,40 @@ The 80 MB increase is all in the two web-content processes (81 → 156 MB), and 
 
 **Noise.** All of this was measured on the owner's laptop *while the owner was using it*, with their own Zen and Chrome open. Browser windows were opened in the background (`open -g`), but other work on the machine competes for CPU and memory. The ten sites are live and change between runs. Treat differences under about 10 % as noise.
 
+### What the interface's looks cost
+
+Measured 16 November 2026 for low-power mode, after the progress-bar fix: release build, one simple
+tab, whole tree 25 s after launch, idle CPU over 30 s, two runs each, each feature switched off on
+its own (through custom CSS). Same machine and accounting as above; a short script, not `bench.py`.
+
+| `main` (`a88dd6a`) | Whole tree | Interface web content | Idle CPU |
+|---|---|---|---|
+| As shipped | 163-212 MB | 118-145 MB | 0.1-0.5 % |
+| No grain texture | 116 MB | 67 MB | 0.2-0.3 % |
+| Flat paint instead of the gradient | 184-187 MB | 134 MB | 0.1 % |
+| Hairline-only shadows | 165-171 MB | 117 MB | 0.2 % |
+| All of these off | 116 MB | 67 MB | 0.1 % |
+| Grain layer `position: absolute` instead of `fixed` | 128 MB | 67 MB | 0.2 % |
+| Bar collapsed (second web view + cursor poll) | 199-201 MB | 149 MB | 0.8-1.3 % |
+
+The grain was the whole cost, and only because its layer was `position: fixed` under a blend
+mode: as `absolute` it draws the same pixels (largest difference 3 of 255: two debug-build
+window captures, dark theme, `fixed` and `absolute`, compared per pixel with Pillow's
+`ImageChops.difference` over a patch of bare paint) at no measurable cost,
+so that is now the default. With it, and the cursor checked less often when far from the edge:
+
+| This branch | Whole tree | Interface web content | Idle CPU |
+|---|---|---|---|
+| As shipped | 115-121 MB | 68 MB | 0.1-0.4 % |
+| Bar collapsed | 145-152 MB | 98 MB | 0.3-1.0 % |
+| Low-power mode on (either layout) | same as above | same | same |
+
+Low-power mode saves nothing at rest: what it removes (glass blur, animation frames, the page
+resizing frame by frame) costs only while something is shown or moving. The collapsed bar's
+second web view is about 30 MB; it is kept, because building it on demand would delay the
+reveal. About one run in six was cut short because the owner closed the test window while
+working on the machine (not a crash); those runs were dropped.
+
 ## Machine
 
 MacBook Pro (Mac16,1), Apple M4, 10 cores, 16 GB, macOS 26.5.2 (25F84). On mains power.
