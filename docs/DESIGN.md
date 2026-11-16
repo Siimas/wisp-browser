@@ -146,7 +146,7 @@ Rules:
 
 | Interaction | Animation |
 | --- | --- |
-| Collapsed bar revealed (cursor within 8 px of its window edge, checked 40 times a second) | The bar floats in over the page as a panel: slides 18 px from its edge, scales from 99%, fades in. `--d-3` `--ease-out` |
+| Collapsed bar revealed (cursor within the user's reveal distance of its window edge, 32 px by default, or past the edge; checked 40 times a second) | The bar floats in over the page as a panel: slides 18 px from its edge, scales from 99%, fades in. `--d-3` `--ease-out` |
 | Revealed bar let go (cursor away for 180 ms) | Slides back 11 px and fades. `--d-1` `--ease-in` |
 | Bar collapsed or pinned open, layout changed | The page card **glides** to its new size over `--d-3` with the same soft landing (driven natively, `PAGE_GLIDE` in `main.rs`) while the bar slides in over `--d-3` |
 | New tab / closed tab | Grows from / folds to zero height with a fade. `--d-2` in, `--d-1` out |

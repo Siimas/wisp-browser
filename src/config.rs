@@ -48,6 +48,8 @@ pub struct Layout {
     pub collapsed: bool,
     /// While collapsed, moving the mouse onto the strip shows the bar until it leaves.
     pub hover_expand: bool,
+    /// How close to that edge, in pixels, the mouse must come.
+    pub hover_zone: u16,
     pub sidebar_width: u16,
     pub areas: Areas,
 }
@@ -151,6 +153,7 @@ impl Default for Layout {
             mode: MODES[0].into(),
             collapsed: false,
             hover_expand: true,
+            hover_zone: 32,
             sidebar_width: 220,
             areas: Areas::default(),
         }
@@ -248,6 +251,7 @@ impl Config {
             l.mode = MODES[0].into();
         }
         l.sidebar_width = l.sidebar_width.clamp(150, 420);
+        l.hover_zone = l.hover_zone.clamp(4, 160);
         l.areas.sanitize();
 
         let a = &mut self.appearance;

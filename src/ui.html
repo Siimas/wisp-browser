@@ -433,6 +433,8 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
           <input type="checkbox" data-k="layout.collapsed"></label>
         <label class="row"><span>Show when the mouse comes near<small>While collapsed, moving the mouse to that edge floats the bar over the page until you leave</small></span>
           <input type="checkbox" data-k="layout.hover_expand"></label>
+        <label class="row"><span>Reveal distance<small>How close to the edge the mouse must come: further right reveals the bar sooner</small></span>
+          <input type="range" min="4" max="160" step="4" data-k="layout.hover_zone"></label>
         <label class="row">Sidebar width <input type="range" min="150" max="420" step="10" data-k="layout.sidebar_width"></label>
       </div>
 

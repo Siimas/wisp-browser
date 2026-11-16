@@ -31,8 +31,9 @@ use tao::{
 use wry::{NewWindowResponse, PageLoadEvent, Rect, WebView, WebViewBuilder};
 
 // Collapsed bar: how the cursor brings it back and lets it go again.
-/// Cursor this close to the bar's window edge reveals the bar.
-const NEAR: f64 = 8.0;
+/// Overshooting the window edge by up to this much still counts as reaching it, so
+/// the bar does not slip away when the window is not at the edge of the screen.
+const OVERSHOOT: f64 = 120.0;
 /// Cursor may stray this far past the bar before it counts as having left.
 const LEAVE_MARGIN: f64 = 36.0;
 /// How long the cursor must stay away before the bar hides again.
@@ -156,16 +157,17 @@ enum Zone {
     Away,
 }
 
-/// `x`,`y` are window coordinates, `w` the window width, `bar` the bar's thickness.
-fn zone(side: Side, x: f64, y: f64, w: f64, bar: f64) -> Zone {
+/// `x`,`y` are window coordinates, `w` the window width, `bar` the bar's thickness,
+/// `near` how close to the bar's window edge the cursor must come to reveal it.
+fn zone(side: Side, x: f64, y: f64, w: f64, bar: f64, near: f64) -> Zone {
     let dist = match side {
         Side::Top => y,
         Side::Left => x,
         Side::Right => w - x,
     };
     match dist {
-        d if d < 0.0 => Zone::Away,
-        d if d <= NEAR => Zone::Edge,
+        d if d < -OVERSHOOT => Zone::Away,
+        d if d <= near => Zone::Edge,
         d if d <= bar + LEAVE_MARGIN => Zone::Bar,
         _ => Zone::Away,
     }
@@ -678,9 +680,15 @@ impl App {
             Side::Left => s.width - r,
             Side::Right => s.width - l,
         };
-        let inside = (0.0..=s.width).contains(&x) && (0.0..=s.height).contains(&y);
+        // Along the bar's edge the cursor may be a little outside the window; across
+        // it, it must be within the window's span.
+        let inside = match side {
+            Side::Top => (0.0..=s.width).contains(&x),
+            _ => (0.0..=s.height).contains(&y),
+        };
+        let near = self.cfg.layout.hover_zone as f64;
         let zone = if inside {
-            zone(side, x, y, s.width, bar)
+            zone(side, x, y, s.width, bar, near)
         } else {
             Zone::Away
         };
@@ -1298,7 +1306,7 @@ mod tests {
     #[test]
     fn cursor_zones_around_a_collapsed_bar() {
         // 1000px-wide window, bar 260px thick once revealed.
-        let z = |side, x, y| zone(side, x, y, 1000.0, 260.0);
+        let z = |side, x, y| zone(side, x, y, 1000.0, 260.0, 30.0);
         assert_eq!(z(Side::Right, 995.0, 300.0), Zone::Edge);
         assert_eq!(z(Side::Right, 800.0, 300.0), Zone::Bar);
         assert_eq!(z(Side::Right, 720.0, 300.0), Zone::Bar); // within the leave margin
@@ -1307,6 +1315,9 @@ mod tests {
         assert_eq!(z(Side::Left, 400.0, 300.0), Zone::Away);
         assert_eq!(z(Side::Top, 500.0, 3.0), Zone::Edge);
         assert_eq!(z(Side::Top, 500.0, 600.0), Zone::Away);
+        assert_eq!(z(Side::Right, 975.0, 300.0), Zone::Edge); // inside the reveal distance
+        assert_eq!(z(Side::Right, 1060.0, 300.0), Zone::Edge); // overshot the window edge
+        assert_eq!(z(Side::Right, 1400.0, 300.0), Zone::Away); // long gone
     }
 
     #[test]
