@@ -1821,6 +1821,7 @@ function updateCard(card, m) {
   setFav(q('.fav'), host, m.private);
   q('.m-title').textContent = m.title || m.tab_title || host || 'Media';
   q('.m-sub').textContent = m.artist || host;
+  q('.m-head').title = 'Go to the tab: ' + (host || m.tab_title); // the real site, whatever the page calls itself
   if (!q('.m-x').firstChild) q('.m-x').append(svg('close'));
   setIcon(q('.m-prev'), 'm-prev', 'Previous');
   setIcon(q('.m-next'), 'm-next', 'Next');

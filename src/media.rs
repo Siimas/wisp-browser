@@ -63,9 +63,14 @@ fn clean(s: &str) -> String {
     out
 }
 
-/// Invisible characters that can reorder or hide text (bidi overrides, zero-width).
+/// Invisible characters that can reorder or hide text: bidi controls, zero-width and
+/// filler characters, variation selectors, tags (Unicode's default-ignorables).
 fn is_format(c: char) -> bool {
-    matches!(c, '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{2069}' | '\u{feff}')
+    matches!(c,
+        '\u{ad}' | '\u{34f}' | '\u{61c}' | '\u{115f}' | '\u{1160}' | '\u{17b4}' | '\u{17b5}'
+        | '\u{180b}'..='\u{180f}' | '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}'
+        | '\u{2060}'..='\u{206f}' | '\u{3164}' | '\u{fe00}'..='\u{fe0f}' | '\u{feff}'
+        | '\u{ffa0}' | '\u{fff0}'..='\u{fffb}' | '\u{e0000}'..='\u{e0fff}')
 }
 
 fn num(n: f64, max: f64) -> f64 {
@@ -224,7 +229,7 @@ mod tests {
         let long = "a".repeat(10_000);
         let m = report(&format!(r#"{{"title":"{long}","artist":"x"}}"#)).unwrap();
         assert_eq!(m.title.chars().count(), MAX_TEXT);
-        let json = "{\"title\":\"  <b>Song</b>\\n\\t\\u0000 \\u202eevil\\u200b \",\"artist\":\"\u{e9}\u{1f600}\"}";
+        let json = "{\"title\":\"  <b>Song</b>\\n\\t\\u0000 \\u202eevil\\u200b\\u00ad\\u3164 \",\"artist\":\"\u{e9}\u{1f600}\"}";
         let m = report(json).unwrap();
         // Markup stays as literal text (the interface never parses it); controls go.
         assert_eq!(m.title, "<b>Song</b> evil");
