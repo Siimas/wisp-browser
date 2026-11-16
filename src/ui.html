@@ -1,0 +1,273 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+:root {
+  --bg: #ececf0; --bar: #ffffff; --fg: #1d1d1f; --mute: #57575d;
+  --line: #00000018; --hover: #0000000f;
+  --accent: #6c8cff; --radius: 8px; --font: 13px;
+  --tabs-h: 40px; --bar-h: 44px;
+  color-scheme: light;
+}
+:root[data-theme=dark] {
+  --bg: #1b1b1f; --bar: #2a2a2f; --fg: #f2f2f4; --mute: #9a9aa2;
+  --line: #ffffff1c; --hover: #ffffff14;
+  color-scheme: dark;
+}
+:root[data-compact] { --tabs-h: 32px; --bar-h: 36px; }
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0; display: flex; flex-direction: column; overflow: hidden;
+  background: var(--bg); color: var(--fg);
+  font: var(--font) system-ui, -apple-system, "Segoe UI", sans-serif;
+  user-select: none; -webkit-user-select: none; cursor: default;
+}
+button { font: inherit; color: inherit; border: 0; background: none; border-radius: var(--radius); }
+button:hover { background: var(--hover); }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
+
+#tabs {
+  flex: none; height: var(--tabs-h); display: flex; align-items: flex-end;
+  gap: 2px; padding: 0 8px;
+}
+:root[data-mac] #tabs { padding-left: 82px; }
+.tab {
+  flex: 1 1 0; min-width: 0; max-width: 220px; height: calc(var(--tabs-h) - 6px);
+  display: flex; align-items: center; gap: 4px; padding: 0 6px 0 12px;
+  border-radius: var(--radius) var(--radius) 0 0; color: var(--mute);
+}
+.tab:hover { background: var(--hover); }
+.tab.active { background: var(--bar); color: var(--fg); }
+.tab span { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tab button { flex: none; width: 20px; height: 20px; padding: 0; line-height: 1; opacity: .6; }
+.tab button:hover { opacity: 1; }
+#new { flex: none; width: 28px; height: 28px; margin: 0 0 3px 2px; font-size: 18px; line-height: 1; }
+
+#bar {
+  flex: none; height: var(--bar-h); display: flex; align-items: center; gap: 2px;
+  padding: 0 8px; background: var(--bar); border-bottom: 1px solid var(--line);
+  position: relative;
+}
+#bar > button { flex: none; width: 30px; height: calc(var(--bar-h) - 14px); font-size: 16px; padding: 0; }
+#url {
+  flex: 1; min-width: 0; height: calc(var(--bar-h) - 14px); margin: 0 6px; padding: 0 12px;
+  border: 1px solid transparent; border-radius: var(--radius);
+  background: var(--bg); color: var(--fg); font: inherit; outline: none;
+}
+#url:focus { border-color: var(--accent); }
+#shield { opacity: .35; }
+#shield.on { opacity: 1; color: var(--accent); }
+#bar.loading::after {
+  content: ""; position: absolute; left: 0; bottom: -1px; height: 2px; width: 30%;
+  background: var(--accent); animation: load 1s linear infinite;
+}
+@keyframes load { from { left: -30%; } to { left: 100%; } }
+@media (prefers-reduced-motion: reduce) { #bar.loading::after { animation: none; width: 100%; } }
+
+#settings { display: none; flex: 1; overflow-y: auto; padding: 24px 16px 64px; }
+:root[data-settings] #settings { display: block; }
+#settings > div { max-width: 620px; margin: 0 auto; }
+#settings h1 { font-size: 22px; margin: 0 0 4px; display: flex; justify-content: space-between; align-items: center; }
+#settings h1 .btn { font-size: var(--font); font-weight: 500; }
+#settings h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--mute); margin: 28px 0 8px; }
+.card { background: var(--bar); border: 1px solid var(--line); border-radius: var(--radius); }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 14px; min-height: 44px; }
+.row + .row { border-top: 1px solid var(--line); }
+.row.col { flex-direction: column; align-items: stretch; gap: 6px; }
+.row small { display: block; color: var(--mute); margin-top: 2px; }
+.row input[type=text], .row input[type=number], .row select, .row textarea, .row .key, .btn {
+  font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 6px 10px;
+}
+.row input[type=text] { width: 300px; max-width: 55vw; }
+.row input[type=number] { width: 80px; }
+.row textarea { width: 100%; min-height: 90px; resize: vertical; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.row input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
+.row input[type=range] { accent-color: var(--accent); }
+.row .key { min-width: 130px; text-align: center; }
+.row .key.rec { border-color: var(--accent); color: var(--accent); }
+</style>
+<style id="user-css"></style>
+</head>
+<body>
+<div id="tabs"></div>
+<div id="bar">
+  <button data-act="back" title="Back" aria-label="Back">&#8249;</button>
+  <button data-act="forward" title="Forward" aria-label="Forward">&#8250;</button>
+  <button data-act="reload" title="Reload" aria-label="Reload">&#8635;</button>
+  <button data-act="home" title="Home" aria-label="Home">&#8962;</button>
+  <input id="url" type="text" placeholder="Search or enter address" aria-label="Address" spellcheck="false" autocomplete="off">
+  <button id="shield" title="Ad blocking" aria-label="Toggle ad blocking">&#9737;</button>
+  <button data-act="settings" title="Settings" aria-label="Settings">&#9881;</button>
+</div>
+
+<div id="settings"><div>
+  <h1>Settings <button class="btn" data-act="settings">Done</button></h1>
+
+  <h2>Appearance</h2>
+  <div class="card">
+    <label class="row">Theme
+      <select data-k="appearance.theme">
+        <option value="system">Match system</option><option value="light">Light</option><option value="dark">Dark</option>
+      </select></label>
+    <label class="row">Accent color <input type="color" data-k="appearance.accent"></label>
+    <label class="row">Compact toolbar <input type="checkbox" data-k="appearance.compact"></label>
+    <label class="row">Corner roundness <input type="range" min="0" max="20" data-k="appearance.radius"></label>
+    <label class="row">Interface text size <input type="number" min="10" max="20" data-k="appearance.font_size"></label>
+    <label class="row col"><span>Custom CSS<small>Restyle the tab strip and toolbar. Applies as you type.</small></span>
+      <textarea data-k="appearance.custom_css" spellcheck="false" placeholder="#bar { background: linear-gradient(90deg, #223, #435); }"></textarea></label>
+  </div>
+
+  <h2>Behavior</h2>
+  <div class="card">
+    <label class="row">Homepage <input type="text" data-k="behavior.homepage"></label>
+    <label class="row">New tab opens <input type="text" data-k="behavior.new_tab_url"></label>
+    <label class="row"><span>Search engine<small>URL with %s where the search goes</small></span>
+      <input type="text" data-k="behavior.search_url" list="engines"></label>
+    <datalist id="engines">
+      <option value="https://duckduckgo.com/?q=%s">DuckDuckGo</option>
+      <option value="https://www.google.com/search?q=%s">Google</option>
+      <option value="https://www.bing.com/search?q=%s">Bing</option>
+      <option value="https://search.brave.com/search?q=%s">Brave</option>
+      <option value="https://www.startpage.com/sp/search?query=%s">Startpage</option>
+    </datalist>
+    <label class="row">Reopen last session's tabs on start <input type="checkbox" data-k="behavior.restore_session"></label>
+    <label class="row">Default page zoom <input type="number" min="0.3" max="4" step="0.1" data-k="behavior.default_zoom"></label>
+  </div>
+
+  <h2>Ad blocking</h2>
+  <div class="card">
+    <label class="row">Block ads and trackers <input type="checkbox" data-k="adblock.enabled"></label>
+    <label class="row col"><span>Extra hosts to block<small>One per line, e.g. ads.example.com. Subdomains are included.</small></span>
+      <textarea data-k="adblock.extra_hosts" spellcheck="false"></textarea></label>
+  </div>
+
+  <h2>Hotkeys</h2>
+  <div class="card" id="hotkeys"></div>
+  <p><button class="btn" id="reset-keys">Reset hotkeys to defaults</button></p>
+</div></div>
+
+<script>
+const post = m => window.ipc.postMessage(JSON.stringify(m));
+const $ = s => document.querySelector(s);
+const root = document.documentElement;
+const dark = matchMedia('(prefers-color-scheme: dark)');
+const get = (o, k) => k.split('.').reduce((a, p) => a[p], o);
+const set = (o, k, v) => { const ps = k.split('.'), last = ps.pop(); ps.reduce((a, p) => a[p], o)[last] = v; };
+const save = () => post({ cmd: 'save_settings', config: cfg });
+const el = (tag, props, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+
+let S = null, cfg = null, shown = null;
+
+window.wisp = {
+  state(s) { S = s; cfg = s.config; render(); },
+  focusUrl() { $('#url').focus(); $('#url').select(); },
+};
+
+function applyLook() {
+  const a = cfg.appearance;
+  root.dataset.theme = a.theme === 'system' ? (dark.matches ? 'dark' : 'light') : a.theme;
+  root.toggleAttribute('data-compact', a.compact);
+  root.style.setProperty('--accent', a.accent);
+  root.style.setProperty('--radius', a.radius + 'px');
+  root.style.setProperty('--font', a.font_size + 'px');
+  $('#user-css').textContent = a.custom_css;
+}
+
+function render() {
+  applyLook();
+  root.toggleAttribute('data-mac', S.mac);
+  root.toggleAttribute('data-settings', S.settings);
+
+  $('#tabs').replaceChildren(...S.tabs.map(t => {
+    const close = el('button', { textContent: '×', title: 'Close tab', ariaLabel: 'Close tab' });
+    close.onclick = e => { e.stopPropagation(); post({ cmd: 'close_tab', id: t.id }); };
+    const tab = el('div', { className: 'tab' + (t.id === S.active ? ' active' : ''), title: t.title },
+      el('span', { textContent: t.title || 'New Tab' }), close);
+    tab.onclick = () => post({ cmd: 'select_tab', id: t.id });
+    tab.onauxclick = e => { if (e.button === 1) post({ cmd: 'close_tab', id: t.id }); };
+    return tab;
+  }), el('button', { id: 'new', textContent: '+', title: 'New tab', ariaLabel: 'New tab', onclick: () => act('new_tab') }));
+
+  const cur = S.tabs.find(t => t.id === S.active);
+  const key = cur ? cur.id + '|' + cur.url : '';
+  if (key !== shown) { shown = key; $('#url').value = !cur || cur.url === 'about:blank' ? '' : cur.url; }
+  $('#bar').classList.toggle('loading', !!cur && cur.loading);
+  $('#shield').classList.toggle('on', cfg.adblock.enabled);
+  $('#shield').title = 'Ad blocking is ' + (cfg.adblock.enabled ? 'on' : 'off');
+
+  for (const f of document.querySelectorAll('[data-k]')) {
+    if (f === document.activeElement) continue;
+    const v = get(cfg, f.dataset.k);
+    if (f.type === 'checkbox') f.checked = v; else f.value = Array.isArray(v) ? v.join('\n') : v;
+  }
+  if (!window.__wispRecording) renderHotkeys();
+}
+
+const pretty = combo => combo.split('+').map(p =>
+  p === 'Mod' ? (S.mac ? '⌘' : 'Ctrl') : p.replace(/^Bracket(Left|Right)$/, (_, s) => s === 'Left' ? '[' : ']')
+    .replace('Equal', '=').replace('Minus', '-').replace('Comma', ',').replace(/^Arrow/, '')).join(' + ');
+
+function renderHotkeys() {
+  $('#hotkeys').replaceChildren(...Object.entries(cfg.hotkeys).map(([action, combo]) => {
+    const b = el('button', { className: 'key', textContent: pretty(combo), title: 'Click, then press the new keys' });
+    b.onclick = () => record(action, b);
+    const name = action.replace(/_/g, ' ').replace(/^./, c => c.toUpperCase()).replace('url', 'address bar');
+    return el('div', { className: 'row' }, name, b);
+  }));
+}
+
+function record(action, button) {
+  window.__wispRecording = true;
+  button.classList.add('rec');
+  button.textContent = 'Press keys… (Esc cancels)';
+  const stop = () => { removeEventListener('keydown', onKey, true); window.__wispRecording = false; renderHotkeys(); };
+  const onKey = e => {
+    e.preventDefault(); e.stopImmediatePropagation();
+    if (e.key === 'Escape') return stop();
+    const combo = window.__wispCombo(e);
+    if (!combo) return; // modifier alone: keep waiting
+    const clash = Object.keys(cfg.hotkeys).find(a => a !== action && cfg.hotkeys[a] === combo);
+    if (clash) cfg.hotkeys[clash] = cfg.hotkeys[action]; // swap instead of leaving a duplicate
+    cfg.hotkeys[action] = combo;
+    stop(); save();
+  };
+  addEventListener('keydown', onKey, true);
+}
+
+function act(name) { post({ cmd: 'action', name }); }
+document.querySelectorAll('[data-act]').forEach(b => b.onclick = () => act(b.dataset.act));
+$('#shield').onclick = () => { cfg.adblock.enabled = !cfg.adblock.enabled; save(); };
+$('#reset-keys').onclick = () => { cfg.hotkeys = {}; save(); };
+$('#tabs').onmousedown = e => { if (e.target.id === 'tabs' && e.button === 0) post({ cmd: 'drag' }); };
+
+$('#url').onkeydown = e => {
+  if (e.key === 'Enter') post({ cmd: 'navigate', url: e.target.value });
+  if (e.key === 'Escape') { shown = null; render(); e.target.blur(); }
+};
+$('#url').onfocus = e => e.target.select();
+
+function onField(e) {
+  const f = e.target, k = f.dataset.k;
+  if (!k || !cfg) return;
+  let v = f.type === 'checkbox' ? f.checked : f.type === 'number' || f.type === 'range' ? Number(f.value) : f.value;
+  if (k === 'adblock.extra_hosts') v = v.split('\n').map(s => s.trim()).filter(Boolean);
+  set(cfg, k, v);
+  if (e.type === 'input') applyLook(); else save();
+}
+$('#settings').addEventListener('input', onField);   // live preview
+$('#settings').addEventListener('change', onField);  // persist
+
+addEventListener('keydown', e => {
+  if (e.key === 'Escape' && S && S.settings && !window.__wispRecording && !e.target.dataset.k) act('settings');
+});
+dark.addEventListener('change', () => cfg && applyLook());
+addEventListener('contextmenu', e => { if (!e.target.matches('input, textarea')) e.preventDefault(); });
+post({ cmd: 'ready' });
+</script>
+</body>
+</html>

@@ -1,0 +1,43 @@
+[package]
+name = "wisp"
+version = "0.1.0"
+edition = "2024"
+description = "A fast, lightweight, customizable web browser"
+license = "MIT"
+repository = "https://github.com/Siimas/wisp-browser"
+authors = ["Siimas"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tao = "0.37.2"
+wry = "0.57.2"
+
+# Versions below must match the ones wry itself depends on.
+[target.'cfg(target_os = "macos")'.dependencies]
+muda = { version = "0.21.2", default-features = false }
+block2 = "0.6"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSString", "NSError"] }
+objc2-web-kit = { version = "0.3", features = [
+    "WKContentRuleList",
+    "WKContentRuleListStore",
+    "WKUserContentController",
+    "block2",
+] }
+
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.39"
+windows-core = "0.62"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[package.metadata.packager]
+product-name = "Wisp"
+identifier = "io.github.siimas.wisp"
+category = "Productivity"
+icons = ["assets/icon.icns", "assets/icon.ico", "assets/icon.png"]
