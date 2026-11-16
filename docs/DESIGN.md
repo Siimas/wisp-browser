@@ -33,8 +33,13 @@ shouts; emphasis comes from spacing and from one accent color.
 ### Color roles
 
 - `--paint` is what the window is painted with: the user's gradient if they set
-  one, otherwise the theme background tinted 9% with the active workspace's
-  color (`--ws`). Switching workspace re-tints the whole window.
+  one, otherwise `--signature`, the brand sweep (see [BRAND.md](BRAND.md)): a
+  160° gradient from the workspace color (`--ws`) towards its neighbor 34°
+  further round the wheel, laid over the theme background at `--sig-a` /
+  `--sig-b` (9/13% light, 13/21% dark, since color reads weaker on
+  near-black). Switching workspace re-tints the whole window. Where the engine
+  lacks relative colors it falls back to a flat 9% tint.
+- `--tint` is the paint as one color (the average of its ends), for glass.
 - `--surface` is anything raised off the paint: the active tab, cards, the
   focused address bar.
 - `--field` is anything you type into at rest. `--hover` is pointer feedback.
@@ -67,8 +72,10 @@ Never add a one-off `box-shadow`; pick a level.
 Floating things are glass; docked things are solid. That is the whole rule.
 
 - **Glass**: the revealed (floating) bar and every menu or popover. Their
-  background is the theme color at 40–64% opacity over a blur of what lies
-  behind, with a hairline ring and a one-pixel top highlight.
+  background is the theme's own color (`--tint`, menus use `--bg`) at 40%
+  (light) or 80% (dark: a thinner dark glass turns gray over a white page)
+  over a blur of what lies behind, with a hairline ring and a one-pixel top
+  highlight.
 - **Solid**: the docked sidebar, the hotbar, the page card, sheets and cards.
 
 Menus blur with CSS `backdrop-filter` (they sit over the interface itself). The
@@ -110,6 +117,52 @@ wheel laid flat:
 - **Swatch row**: three pages of ready colors applied to the selected dot.
 - **Wave slider**: how strongly the colors cover the theme background.
 - **Dial**: texture strength; turning it up from zero switches grain on.
+- **Presets**: a row of swatches under the editor, each painted exactly as the
+  theme would be (paint, strength, grain) with its accent as a dot, and named
+  beneath. The one in use is ringed and its name is in `--fg`. Picking one sets
+  the colors, angle, strength, texture and accent; light or dark stays the
+  user's. The curated set and its intent is in `PRESETS` in `ui.html`.
+
+### Texture
+
+Textures are one fixed layer (`body::before`) over the paint: painted once,
+never animated, no layout. Grain is the default and the one presets use.
+
+**Grain** is a 128 × 128 tile generated at start-up (`grain()` in `ui.html`):
+seeded white noise minus its 3 × 3 local average, gray with a mean of exactly
+50%, blended with `overlay`. Why each part:
+
+- **One grain per device pixel.** The tile is shown at `128 / devicePixelRatio`
+  CSS pixels with `image-rendering: pixelated`, and regenerated if the density
+  changes, so grain is equally fine on a Retina and a 1× screen instead of
+  being scaled into soft blotches. Coarse grain reads as noise; pixel-fine
+  grain reads as material.
+- **High-passed.** Subtracting the local average removes the low frequencies
+  that make plain noise look blotchy and makes the 128 px repeat invisible:
+  close to the blue-noise character of a pre-rendered tile, without shipping
+  one.
+- **Monochrome, mean gray, overlay.** It changes brightness only, never hue,
+  and averages to zero, so turning it up does not darken or tint the paint
+  (measured: the mean color of a captured region moves by 0.1 / 255). Overlay
+  is strongest in the mid-tones and fades towards black and white, which is
+  where banding shows and where grain would look dirty, respectively.
+- **It dithers banding.** Down a dark sidebar gradient at 2×, without grain
+  the color steps in flat runs of up to 22 px; with grain at 40% no run is
+  longer than 3 px.
+
+**Cost**, measured in the debug build on macOS: generating the tile takes
+about 12 ms once at start-up (2.5 ms on a later density change) and it is a
+35 KB image. Drawing it is one tiled, static layer the compositor keeps; it
+never repaints unless the window resizes. The previous SVG turbulence filter
+was rasterized by the engine at an arbitrary scale and blurred on 1× screens.
+
+Considered and not taken: a pre-rendered blue-noise PNG (same look, but a
+binary asset in the repository and fixed to one density); grain strength
+varying across the gradient (overlay already does this by tone); a vignette
+or light falloff (it would compete with the user's gradient angle and darken
+the corner where the macOS window buttons sit).
+
+Dots, lines and grid stay available as plain CSS patterns in `--fg`.
 
 Text flips between light and dark automatically if the painted result would
 make the chosen one unreadable.
@@ -220,4 +273,5 @@ the user can rearrange in Customize mode: `hotbar`, `before_tabs`,
    saves a picture of the window after six seconds and quits (`WISP_PEEK=1`
    reveals a collapsed bar first, `WISP_ACT=settings` runs an action,
    `WISP_JS=...` runs a script in the interface). Look at it in both themes
-   and with a preset background.
+   and with a preset background. Screenshot runs never take focus, so
+   focus rings (`:focus-within`) do not show in them.
