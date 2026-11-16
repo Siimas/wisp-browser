@@ -1046,5 +1046,93 @@
     14.02
    ]
   }
+ },
+ "wisp_on_main": {
+  "note": "Wisp rebuilt from main at 6b110d9 (everything else in this file is 73f906f); size and onetab only.",
+  "size": {
+   "bundle_mb": 2.0,
+   "zip_mb": 0.98
+  },
+  "binary_mb": 1.69,
+  "onetab": {
+   "footprint_mb": {
+    "median": 268.6,
+    "min": 268.3,
+    "max": 268.9,
+    "runs": [
+     268.6,
+     268.3,
+     268.9
+    ]
+   },
+   "rss_mb": {
+    "median": 166.6,
+    "min": 162.0,
+    "max": 169.4,
+    "runs": [
+     166.6,
+     162.0,
+     169.4
+    ]
+   },
+   "processes": {
+    "median": 6,
+    "min": 6,
+    "max": 6,
+    "runs": [
+     6,
+     6,
+     6
+    ]
+   },
+   "cpu_percent_of_one_core": {
+    "median": 10.33,
+    "min": 10.29,
+    "max": 16.62,
+    "runs": [
+     16.62,
+     10.33,
+     10.29
+    ]
+   },
+   "wakeups_per_s": {
+    "median": 205.0,
+    "min": 200.1,
+    "max": 212.4,
+    "runs": [
+     200.1,
+     205.0,
+     212.4
+    ]
+   },
+   "by_kind_last_run": {
+    "wisp": {
+     "count": 1,
+     "footprint_mb": 24.0,
+     "rss_mb": 70.5
+    },
+    "com.apple.WebKit.GPU": {
+     "count": 1,
+     "footprint_mb": 75.4,
+     "rss_mb": 28.5
+    },
+    "com.apple.WebKit.Networking": {
+     "count": 1,
+     "footprint_mb": 8.0,
+     "rss_mb": 13.7
+    },
+    "com.apple.WebKit.WebContent": {
+     "count": 2,
+     "footprint_mb": 156.3,
+     "rss_mb": 49.1
+    },
+    "com.apple.audio.SandboxHelper": {
+     "count": 1,
+     "footprint_mb": 5.3,
+     "rss_mb": 7.9
+    }
+   }
+  },
+  "measured_at": "2026-11-16 21:32"
  }
 }

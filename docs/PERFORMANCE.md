@@ -17,6 +17,17 @@ Measured on 16 November 2026, on one machine, by `bench/bench.py`. Raw numbers: 
 
 Memory is the whole process tree's *physical footprint* (what Activity Monitor shows as "Memory"), helpers included. ¹ Wisp and Safari both run on the copy of WebKit that is part of macOS, which neither bundle includes. ² Chrome's folder is 2,195 MB because it keeps two older versions of its framework from past updates; 738 MB is the current version alone.
 
+**Since this was measured.** Everything above is Wisp at `73f906f`, the top of the `auto-update` stack. While the measurements ran, that whole stack and five more pull requests (history and bookmarks, page tools, tab basics, brand themes, spacing) were merged into `main` (`6b110d9`). Wisp rebuilt from `main` and re-measured (size and one tab only, three runs):
+
+| Wisp | `73f906f` | `main` (`6b110d9`) |
+|---|---|---|
+| App / binary | 1.8 MB / 1.52 MB | 2.0 MB / 1.69 MB |
+| Download (zip) | 0.91 MB | 0.98 MB |
+| Memory, one simple tab | 188 MB | 268 MB |
+| Idle CPU, one simple tab | 20.1 % | 10.3 % (runs 16.6, 10.3, 10.3) |
+
+The 80 MB increase is all in the two web-content processes (81 → 156 MB), and the page's own process was unchanged before, so it is the interface page that grew. The progress-bar animation is still in `main` (`src/ui.html`, `#progress::after`), so the idle cost is still there, though lower. Neither change was investigated further. With 268 MB, Wisp's one-tab memory is now *higher* than Chrome's 239 MB.
+
 **Where Wisp wins**
 
 - **Size.** Wisp is 250 to 300 times smaller to download than Zen or Chrome, and its app is under 2 MB. This is real, but only because the engine is the system's: the comparison is "Wisp + WebKit already on every Mac" against browsers that ship their own engine.
