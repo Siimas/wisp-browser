@@ -231,6 +231,9 @@ i.dot { display: block; width: 8px; height: 8px; border-radius: 50%; background:
 @keyframes bar-in { from { opacity: 0; transform: translateX(var(--from)); } }
 @keyframes bar-in-top { from { opacity: 0; transform: translateY(-12px); } }
 
+/* With the workspace switcher on screen, the header above the tabs would say it twice. */
+:root[data-ws-placed] #ws-head, :root[data-ws-placed]:not([data-private]) #sidebar > hr.sep { display: none !important; }
+
 /* macOS window buttons sit over the top-left corner: whatever is there makes room. */
 :root[data-lights=hotbar] #hotbar { padding-left: var(--lights); min-height: 38px; }
 :root[data-lights=tabs] #sidebar { padding-left: var(--lights); }
@@ -684,6 +687,7 @@ function renderAreas() {
   for (const [area, names] of Object.entries({ ...a, tray }))
     document.querySelector(`[data-area=${area}]`)?.replaceChildren(...names.filter(n => ITEMS[n]).map(itemEl));
   flag('hotbar-empty', !a.hotbar.length);
+  flag('ws-placed', used.includes('workspaces')); // the switcher already names the workspace
 }
 
 // ---------- tabs (keyed, so only new tabs animate in) ----------
