@@ -12,11 +12,11 @@ public static class W {
   [StructLayout(LayoutKind.Sequential)] public struct R { public int L, T, Rt, B; }
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out R r);
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+  [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr h, int x, int y, int w, int ht, bool paint);
   [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
 }
 "@
 [W]::SetProcessDPIAware() | Out-Null
-try { Set-DisplayResolution -Width 1600 -Height 1000 -Force } catch { Write-Host "resolution unchanged: $_" }
 $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 Write-Host "screen $($screen.Width)x$($screen.Height)"
 
@@ -58,14 +58,17 @@ foreach ($c in $cases) {
   $env:WISP_JS = $js
   $env:WISP_PEEK = $(if ($peek) { "1" } else { "" })
   $p = Start-Process -FilePath $Exe -PassThru -NoNewWindow
-  Start-Sleep -Seconds 9
+  Start-Sleep -Seconds 2
+  # The runner's screen is small: fit the window, with room around it for its shadow.
+  $p.Refresh()
+  [W]::MoveWindow($p.MainWindowHandle, 40, 30, 940, 640, $true) | Out-Null
+  Start-Sleep -Seconds 7
   if ($point) {
-    $p.Refresh()
     $r = New-Object W+R
     [W]::GetWindowRect($p.MainWindowHandle, [ref]$r) | Out-Null
     Write-Host "$name window $($r.L),$($r.T) - $($r.Rt),$($r.B)"
-    # Windows' own resize border lies outside the visible window; aim inside it.
-    $x = if ($point -eq "close") { $r.Rt - 40 } else { $r.Rt - 125 }
+    # The window rect includes its invisible side borders (8px): aim at the button centers.
+    $x = if ($point -eq "close") { $r.Rt - 31 } else { $r.Rt - 77 }
     [W]::SetCursorPos($x, $r.T + 18) | Out-Null
     Start-Sleep -Seconds 2
   }
