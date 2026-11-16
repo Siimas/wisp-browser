@@ -18,8 +18,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Read-only by default; only the publishing job may write (create the release and tag).
 permissions:
-  contents: write
+  contents: read
 
 # Two merges in quick succession must not race to create the same release.
 concurrency:
@@ -38,15 +39,30 @@ jobs:
       - id: read
         run: |
           version=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          # The version names the tag and the update files: accept nothing but a plain one.
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Cargo.toml version '$version' is not of the form 1.2.3" >&2
+            exit 1
+          fi
           tag="v$version"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          if git ls-remote --exit-code --tags origin "refs/tags/$tag" > /dev/null; then
+          # Releases are only ever cut from main, even on a manual run.
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
             echo "release=false" >> "$GITHUB_OUTPUT"
-            echo "$tag is already released: nothing to do."
-          else
-            echo "release=true" >> "$GITHUB_OUTPUT"
-            echo "$tag has not been released yet: building it."
+            echo "Not on main ($GITHUB_REF): nothing is released from here."
+            exit 0
           fi
+          # ls-remote exits 0 when the tag exists and 2 when it does not; anything
+          # else is a failed lookup, which must not be read as "not released yet".
+          set +e
+          git ls-remote --exit-code --tags origin "refs/tags/$tag" > /dev/null
+          found=$?
+          set -e
+          case "$found" in
+            0) echo "release=false" >> "$GITHUB_OUTPUT"; echo "$tag is already released: nothing to do." ;;
+            2) echo "release=true" >> "$GITHUB_OUTPUT"; echo "$tag has not been released yet: building it." ;;
+            *) echo "could not look up $tag (git ls-remote exited $found)" >&2; exit 1 ;;
+          esac
 
   build:
     name: ${{ matrix.name }}
@@ -103,6 +119,8 @@ jobs:
     name: Publish the release
     needs: [version, build]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     env:
       TAG: ${{ needs.version.outputs.tag }}
     steps:
@@ -113,6 +131,7 @@ jobs:
           merge-multiple: true
       - run: python3 .github/latest-json.py dist "$TAG" "$GITHUB_REPOSITORY"
       # Creating the release also creates the tag, at the commit that was built.
+      # (It refuses to run if a release for this tag already exists.)
       - run: gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Wisp $TAG" --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
