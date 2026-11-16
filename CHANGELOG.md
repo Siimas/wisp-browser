@@ -6,7 +6,7 @@ All notable changes to Wisp are recorded here. The format follows
 
 ## [Unreleased]
 
-Planned as 0.2.0.
+## [0.2.0] - 2026-11-16
 
 ### Added
 
@@ -77,5 +77,6 @@ First release.
 - Installers: `.dmg` for macOS (Apple Silicon and Intel) and a setup program
   for Windows.
 
-[Unreleased]: https://github.com/Siimas/wisp-browser/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Siimas/wisp-browser/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Siimas/wisp-browser/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Siimas/wisp-browser/releases/tag/v0.1.0
