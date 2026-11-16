@@ -1,7 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 //! Wisp: a small browser shell around the operating system's own web engine.
-//! One window holds a "chrome" webview (the sidebar or top bar, plus the settings
-//! page) and one webview per tab beside it.
+//!
+//! One window holds a "chrome" webview that fills the whole window and draws the
+//! interface (sidebar, hotbar, settings), and one webview per tab stacked above it.
+//! The interface decides where the page goes: it reports the gap it leaves for the
+//! page (`Msg::PageRect`) and the active tab's webview is placed exactly there.
 
 mod adblock;
 mod config;
@@ -9,7 +12,10 @@ mod config;
 use config::{Config, SavedTab, Session};
 use serde::Deserialize;
 use serde_json::json;
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant},
+};
 use tao::{
     dpi::{LogicalPosition, LogicalSize},
     event::{Event, WindowEvent},
@@ -18,8 +24,15 @@ use tao::{
 };
 use wry::{NewWindowResponse, PageLoadEvent, Rect, WebView, WebViewBuilder};
 
-/// Thickness of the strip left at the window edge while the bar is collapsed.
-const STRIP: f64 = 6.0;
+// Collapsed bar: how the cursor brings it back and lets it go again.
+/// Cursor this close to the bar's window edge reveals the bar.
+const NEAR: f64 = 14.0;
+/// Cursor may stray this far past the bar before it counts as having left.
+const LEAVE_MARGIN: f64 = 28.0;
+/// How long the cursor must stay away before the bar hides again.
+const LEAVE_DELAY: Duration = Duration::from_millis(350);
+/// How often the cursor is checked while the bar is collapsed.
+const POLL: Duration = Duration::from_millis(80);
 
 /// Messages from the UI (and, for `Key` only, from pages).
 #[derive(Deserialize)]
@@ -43,10 +56,29 @@ enum Msg {
     CloseTab {
         id: u32,
     },
+    MoveTab {
+        id: u32,
+        workspace: u32,
+    },
     SelectWorkspace {
         id: u32,
     },
-    /// Mouse entered or left the collapsed bar.
+    /// Space the interface leaves for the page, as distances from each window edge.
+    PageRect {
+        l: f64,
+        t: f64,
+        r: f64,
+        b: f64,
+    },
+    /// The interface needs the page area for itself (a menu or sheet is open).
+    Cover {
+        on: bool,
+    },
+    /// The user is typing in the bar; do not hide a revealed bar under them.
+    Busy {
+        on: bool,
+    },
+    /// Reveal the collapsed bar (the user clicked or touched its edge strip).
     Peek {
         on: bool,
     },
@@ -78,11 +110,36 @@ struct Tab {
     zoom: f64,
 }
 
-#[derive(PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 enum Side {
     Top,
     Left,
     Right,
+}
+
+/// Where the cursor is relative to a collapsed bar.
+#[derive(PartialEq, Debug)]
+enum Zone {
+    /// At the window edge the bar lives on: reveal it.
+    Edge,
+    /// Over (or just past) the revealed bar: keep it.
+    Bar,
+    Away,
+}
+
+/// `x`,`y` are window coordinates, `w` the window width, `bar` the bar's thickness.
+fn zone(side: Side, x: f64, y: f64, w: f64, bar: f64) -> Zone {
+    let dist = match side {
+        Side::Top => y,
+        Side::Left => x,
+        Side::Right => w - x,
+    };
+    match dist {
+        d if d < 0.0 => Zone::Away,
+        d if d <= NEAR => Zone::Edge,
+        d if d <= bar + LEAVE_MARGIN => Zone::Bar,
+        _ => Zone::Away,
+    }
 }
 
 struct App {
@@ -99,13 +156,19 @@ struct App {
     /// workspace id -> the tab last used there.
     last_active: HashMap<u32, u32>,
     next_id: u32,
+    /// Gap the interface leaves for the page: left, top, right, bottom. `None` until
+    /// the interface has laid itself out once.
+    insets: Option<[f64; 4]>,
     settings_open: bool,
-    /// The collapsed bar is temporarily shown (mouse over it, or typing an address).
+    /// A menu or sheet in the interface is using the page area.
+    cover: bool,
+    /// The collapsed bar is temporarily shown.
     peek: bool,
+    bar_busy: bool,
+    /// When the cursor left a revealed bar.
+    away_since: Option<Instant>,
     /// Started with `--private`: every tab is private and nothing is saved.
     private_window: bool,
-    /// macOS: whether the bar currently extends under the title bar.
-    overlay: Option<bool>,
     started: bool,
     quit: bool,
 }
@@ -142,79 +205,36 @@ impl App {
         }
     }
 
-    /// Thickness of the bar when shown. Must match the sizes in ui.html.
-    fn bar_size(&self) -> f64 {
-        match self.cfg.layout.mode.as_str() {
-            "top-compact" => 68.0,
-            "top-relaxed" => 84.0,
-            _ => self.cfg.layout.sidebar_width as f64,
-        }
-    }
-
-    fn bar_shown(&self) -> bool {
-        !self.cfg.layout.collapsed || self.peek
-    }
-
-    /// macOS: let the bar run under the title bar (traffic lights sit on top of it).
-    /// Only when the bar is on the lights' side; otherwise they would cover the page.
-    fn wants_overlay(&self) -> bool {
-        cfg!(target_os = "macos") && !self.cfg.layout.collapsed && self.side() != Side::Right
-    }
-
     fn size(&self) -> LogicalSize<f64> {
         self.window
             .inner_size()
             .to_logical(self.window.scale_factor())
     }
 
-    /// (bar, page) rectangles.
-    /// ponytail: a peeking bar pushes the page aside rather than floating over it,
-    /// so pages re-flow on hover. Upgrade path: raise the bar webview above the tab
-    /// webviews (native z-order per platform) and leave the page size alone.
-    fn rects(&self) -> (Rect, Rect) {
+    fn page_rect(&self) -> Rect {
         let s = self.size();
-        let (w, h) = (s.width, s.height);
-        let t = if self.bar_shown() {
-            self.bar_size()
-        } else {
-            STRIP
-        };
-        let (bar, page) = match self.side() {
-            Side::Top => (rect(0.0, 0.0, w, t), rect(0.0, t, w, h - t)),
-            Side::Left => (rect(0.0, 0.0, t, h), rect(t, 0.0, w - t, h)),
-            Side::Right => (rect(w - t, 0.0, t, h), rect(0.0, 0.0, w - t, h)),
-        };
-        if self.settings_open {
-            (rect(0.0, 0.0, w, h), page)
-        } else {
-            (bar, page)
-        }
+        let [l, t, r, b] = self.insets.unwrap_or_default();
+        rect(l, t, s.width - l - r, s.height - t - b)
     }
 
+    fn page_visible(&self) -> bool {
+        self.insets.is_some() && !self.settings_open && !self.cover
+    }
+
+    /// The interface fills the window; the active tab sits in the gap it leaves.
+    /// ponytail: tab webviews are stacked above the interface, so the bar cannot float
+    /// over a page: a revealed bar pushes the page aside (one re-flow). Upgrade path:
+    /// a second interface webview raised above the tabs for floating panels.
     fn layout(&self) {
-        let (bar, page) = self.rects();
-        let _ = self.chrome.set_bounds(bar);
+        let s = self.size();
+        let _ = self.chrome.set_bounds(rect(0.0, 0.0, s.width, s.height));
+        let page = self.page_rect();
         for tab in &self.tabs {
             if let Some(w) = &tab.webview {
                 let _ = w.set_bounds(page);
-                let _ = w.set_visible(self.active == Some(tab.id) && !self.settings_open);
+                let _ = w.set_visible(self.active == Some(tab.id) && self.page_visible());
             }
         }
-    }
-
-    /// `layout`, plus switching the macOS title bar style when the bar moved.
-    fn relayout(&mut self) {
-        let overlay = self.wants_overlay();
-        if self.overlay != Some(overlay) {
-            self.overlay = Some(overlay);
-            #[cfg(target_os = "macos")]
-            {
-                use tao::platform::macos::WindowExtMacOS;
-                self.window.set_fullsize_content_view(overlay);
-                self.window.set_titlebar_transparent(overlay);
-            }
-        }
-        self.layout();
     }
 
     fn tab(&self, id: u32) -> Option<&Tab> {
@@ -260,11 +280,9 @@ impl App {
             "workspace": self.workspace,
             "config": self.cfg,
             "settings": self.settings_open,
-            "shown": self.bar_shown() || self.settings_open,
             "peek": self.peek,
             "private": self.private_window,
             "mac": cfg!(target_os = "macos"),
-            "lights": self.overlay == Some(true),
         });
         let _ = self
             .chrome
@@ -300,7 +318,8 @@ impl App {
         );
         let built = WebViewBuilder::new()
             .with_url(url)
-            .with_bounds(self.rects().1)
+            .with_bounds(self.page_rect())
+            .with_visible(self.page_visible())
             .with_incognito(private)
             .with_back_forward_navigation_gestures(true)
             .with_initialization_script(keys_script(&self.cfg))
@@ -387,24 +406,52 @@ impl App {
         self.sync();
     }
 
+    /// The tab on screen went away (closed or moved): show the nearest remaining tab
+    /// of workspace `ws`, counting from list position `pos`, or a fresh one.
+    fn show_neighbor(&mut self, ws: u32, pos: usize) {
+        let neighbor = self
+            .tabs
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.workspace == ws)
+            .min_by_key(|(i, _)| i.abs_diff(pos))
+            .map(|(_, t)| t.id);
+        match neighbor {
+            Some(next) => self.select(next),
+            None => self.open_blank(),
+        }
+    }
+
     fn close_tab(&mut self, id: u32) {
         let Some(pos) = self.tabs.iter().position(|t| t.id == id) else {
             return;
         };
         let ws = self.tabs.remove(pos).workspace;
         if self.active == Some(id) {
-            // Show the nearest remaining tab of that workspace, or a fresh one.
-            let neighbor = self
-                .tabs
-                .iter()
-                .enumerate()
-                .filter(|(_, t)| t.workspace == ws)
-                .min_by_key(|(i, _)| i.abs_diff(pos))
-                .map(|(_, t)| t.id);
-            match neighbor {
-                Some(next) => self.select(next),
-                None => self.open_blank(),
+            self.show_neighbor(ws, pos);
+        } else {
+            self.sync();
+        }
+        self.save_session();
+    }
+
+    fn move_tab(&mut self, id: u32, to: u32) {
+        let known = self.cfg.workspaces.iter().any(|w| w.id == to);
+        let Some(pos) = self.tabs.iter().position(|t| t.id == id) else {
+            return;
+        };
+        let from = self.tabs[pos].workspace;
+        if !known || from == to {
+            return;
+        }
+        self.tabs[pos].workspace = to;
+        self.last_active.insert(to, id);
+        if self.active == Some(id) {
+            // It left the workspace on screen; hide it and show what remains here.
+            if let Some(w) = &self.tabs[pos].webview {
+                let _ = w.set_visible(false);
             }
+            self.show_neighbor(from, pos);
         } else {
             self.sync();
         }
@@ -444,14 +491,63 @@ impl App {
         Some(ids[next as usize])
     }
 
+    fn set_peek(&mut self, on: bool) {
+        let on = on && self.cfg.layout.collapsed;
+        self.away_since = None;
+        if self.peek != on {
+            self.peek = on;
+            self.sync(); // the interface animates the bar and reports the new page gap
+        }
+    }
+
+    /// While the bar is collapsed: reveal it when the cursor reaches its window edge,
+    /// hide it again once the cursor has been away for a moment.
+    fn poll_cursor(&mut self) {
+        if !self.cfg.layout.collapsed || self.settings_open {
+            return;
+        }
+        let (Ok(cursor), Ok(origin)) =
+            (self.window.cursor_position(), self.window.inner_position())
+        else {
+            return;
+        };
+        let scale = self.window.scale_factor();
+        let (x, y) = (
+            (cursor.x - origin.x as f64) / scale,
+            (cursor.y - origin.y as f64) / scale,
+        );
+        let s = self.size();
+        let side = self.side();
+        let [l, t, r, _] = self.insets.unwrap_or_default();
+        let bar = match side {
+            Side::Top => t,
+            Side::Left => l,
+            Side::Right => r,
+        };
+        let inside = (0.0..=s.width).contains(&x) && (0.0..=s.height).contains(&y);
+        let zone = if inside {
+            zone(side, x, y, s.width, bar)
+        } else {
+            Zone::Away
+        };
+        if !self.peek {
+            if zone == Zone::Edge && self.cfg.layout.hover_expand && !self.cover {
+                self.set_peek(true);
+            }
+        } else if zone != Zone::Away || self.bar_busy || self.cover {
+            self.away_since = None;
+        } else if self.away_since.get_or_insert_with(Instant::now).elapsed() >= LEAVE_DELAY {
+            self.set_peek(false);
+        }
+    }
+
     fn focus_url(&mut self) {
         if self.settings_open {
             self.set_settings_open(false);
         }
-        if !self.bar_shown() {
-            self.peek = true; // the UI drops the peek again when the address bar loses focus
-            self.relayout();
-            self.sync();
+        if self.cfg.layout.collapsed {
+            self.bar_busy = true; // until the interface reports the address bar lost focus
+            self.set_peek(true);
         }
         let _ = self.chrome.focus();
         let _ = self.chrome.evaluate_script("wisp.focusUrl()");
@@ -494,8 +590,8 @@ impl App {
             "toggle_bar" => {
                 self.cfg.layout.collapsed = !self.cfg.layout.collapsed;
                 self.peek = false;
+                self.away_since = None;
                 self.cfg.save();
-                self.relayout();
                 return self.sync();
             }
             "focus_url" => return self.focus_url(),
@@ -568,7 +664,6 @@ impl App {
             self.peek = false;
         }
         self.apply_theme();
-        self.relayout();
         self.sync();
     }
 
@@ -660,21 +755,30 @@ impl App {
                 }
                 Msg::SelectTab { id } => self.select(id),
                 Msg::CloseTab { id } => self.close_tab(id),
+                Msg::MoveTab { id, workspace } => self.move_tab(id, workspace),
                 Msg::SelectWorkspace { id } => self.select_workspace(id),
-                Msg::Peek { on } => {
-                    let on = on && self.cfg.layout.collapsed;
-                    if self.peek != on {
-                        self.peek = on;
-                        self.relayout();
-                        self.sync();
+                Msg::PageRect { l, t, r, b } => {
+                    let ok = [l, t, r, b].iter().all(|v| v.is_finite() && *v >= 0.0);
+                    if ok {
+                        self.insets = Some([l, t, r, b]);
+                        self.layout();
                     }
                 }
+                Msg::Cover { on } => {
+                    self.cover = on;
+                    self.layout();
+                    if on {
+                        let _ = self.chrome.focus();
+                    }
+                }
+                Msg::Busy { on } => self.bar_busy = on,
+                Msg::Peek { on } => self.set_peek(on),
                 Msg::SaveSettings { config } => self.apply_config(*config),
             },
             UserEvent::PageKey(id, combo) => {
                 // A page can only have keyboard focus while it is the one on screen, so a
-                // key from a background tab, or while settings cover the page, is forged.
-                if self.active == Some(id) && !self.settings_open {
+                // key from a background tab, or while the interface covers the page, is forged.
+                if self.active == Some(id) && self.page_visible() {
                     self.handle(UserEvent::Ui(Msg::Key { combo }));
                 }
             }
@@ -755,13 +859,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let builder = WindowBuilder::new()
         .with_title("Wisp")
         .with_inner_size(LogicalSize::new(1200.0, 800.0))
-        .with_min_inner_size(LogicalSize::new(480.0, 320.0));
+        .with_min_inner_size(LogicalSize::new(560.0, 360.0));
     #[cfg(target_os = "macos")]
     let builder = {
-        // The window title is never drawn; whether the bar runs under the title bar
-        // is switched at runtime in `App::relayout`.
+        // The interface runs under the title bar; the traffic lights sit on top of it
+        // (the interface always keeps the top-left corner for them).
         use tao::platform::macos::WindowBuilderExtMacOS;
-        builder.with_title_hidden(true)
+        builder
+            .with_titlebar_transparent(true)
+            .with_fullsize_content_view(true)
+            .with_title_hidden(true)
     };
     let window = builder.build(&event_loop)?;
     #[cfg(target_os = "macos")]
@@ -793,19 +900,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         workspace: 0,
         last_active: HashMap::new(),
         next_id: 1,
+        insets: None,
         settings_open: false,
+        cover: false,
         peek: false,
+        bar_busy: false,
+        away_since: None,
         private_window,
-        overlay: None,
         started: false,
         quit: false,
     };
     app.apply_theme();
-    app.relayout();
+    app.layout();
     app.recompile_adblock(); // tabs open once the block list is ready (AdblockReady)
 
     event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Wait;
         match event {
             Event::UserEvent(e) => app.handle(e),
             Event::WindowEvent {
@@ -816,18 +925,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 event: WindowEvent::CloseRequested,
                 ..
             } => app.quit = true,
+            Event::MainEventsCleared => app.poll_cursor(),
             Event::LoopDestroyed => app.save_session(),
             _ => {}
         }
-        if app.quit {
-            *control_flow = ControlFlow::Exit;
-        }
+        *control_flow = if app.quit {
+            ControlFlow::Exit
+        } else if app.cfg.layout.collapsed {
+            ControlFlow::WaitUntil(Instant::now() + POLL)
+        } else {
+            ControlFlow::Wait
+        };
     });
 }
 
 #[cfg(test)]
 mod tests {
-    use super::App;
+    use super::{App, Side, Zone, zone};
 
     #[test]
     fn cycling_wraps_and_survives_a_missing_current() {
@@ -838,5 +952,21 @@ mod tests {
         assert_eq!(App::cycle(&ids, Some(99), 1), Some(10));
         assert_eq!(App::cycle(&ids, None, -1), Some(10));
         assert_eq!(App::cycle(&[], Some(1), 1), None);
+    }
+
+    #[test]
+    fn cursor_zones_around_a_collapsed_bar() {
+        // 1000px-wide window, bar 260px thick once revealed.
+        let z = |side, x, y| zone(side, x, y, 1000.0, 260.0);
+        assert_eq!(z(Side::Right, 995.0, 300.0), Zone::Edge);
+        assert_eq!(z(Side::Right, 800.0, 300.0), Zone::Bar);
+        assert_eq!(z(Side::Right, 720.0, 300.0), Zone::Bar); // within the leave margin
+        assert_eq!(z(Side::Right, 500.0, 300.0), Zone::Away);
+        assert_eq!(z(Side::Left, 5.0, 300.0), Zone::Edge);
+        assert_eq!(z(Side::Left, 400.0, 300.0), Zone::Away);
+        assert_eq!(z(Side::Top, 500.0, 3.0), Zone::Edge);
+        assert_eq!(z(Side::Top, 500.0, 600.0), Zone::Away);
+        // Still collapsed (bar thickness ~0): only the edge counts.
+        assert_eq!(zone(Side::Right, 960.0, 300.0, 1000.0, 4.0), Zone::Away);
     }
 }

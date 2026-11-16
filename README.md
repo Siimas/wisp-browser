@@ -9,12 +9,15 @@ engine.
 
 ## Features
 
-- **Four layouts**: sidebar on the right (default) or left, or a top bar in
-  relaxed or compact size
-- **Collapsible bar**: tuck the sidebar or top bar away to a thin strip; it
-  comes back while the mouse is on that edge
-- **Workspaces**: your own named groups of tabs (Work, Shopping, ...), each
-  remembering its tabs
+- **Sidebar or top bar**: tabs in a sidebar on the right (default) or left with
+  a hotbar across the top for the address bar and buttons, or a classic top bar
+  in relaxed or compact size
+- **Customize toolbar**: drag the address bar, any button, the workspace
+  switcher and spacers between the hotbar and the sidebar, or remove them
+- **Collapsible bar**: tuck the bar away; it slides back when the mouse comes
+  near that window edge
+- **Workspaces**: named groups of tabs with their own icon and color; the bar
+  takes a tint of the active one, and tabs can be moved between them
 - **Private tabs and private windows**: nothing from them is kept on disk or
   saved in the session
 - **Theme editor**: presets, up to three background colors as a gradient,
@@ -22,9 +25,11 @@ engine.
 - Ad and tracker blocking inside the engine's network layer
 - Every hotkey can be rebound
 - Session restore, saved as you browse; restored tabs load only when opened
-- Double-click an empty part of the bar to expand the window; drag it to move
+- Double-click an empty part of the bar to expand the window, drag it to move,
+  right-click it for layout options
 
-Everything is in Settings (`Cmd/Ctrl + ,`) and applies live.
+Everything is in Settings (`Cmd/Ctrl + ,`) and applies live. The interface is
+built on a small design and motion system: see [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Install
 
@@ -99,8 +104,9 @@ the installers and publishes them.
 - Ad blocking is a host list (built-in plus your own). It does not yet read
   EasyList-style filter lists or hide leftover empty ad slots.
 - Linux builds are not provided, and network-level blocking is not wired up there.
-- Workspaces group tabs but share cookies and logins; tabs cannot be moved
-  between workspaces yet.
+- Workspaces group tabs but share cookies and logins.
+- A revealed bar pushes the page aside instead of floating over it, and a menu
+  that would overlap the page hides the page while it is open.
 - A private window runs as a second copy of the app, so it shows its own
   Dock or taskbar icon.
 - No bookmarks, history view, or find-in-page yet.

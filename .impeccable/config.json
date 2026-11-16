@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "clipped-overflow-container",
+        "value": "*",
+        "files": [
+          "src/ui.html"
+        ],
+        "createdAt": "2026-11-16T18:48:22.630Z",
+        "reason": "agent: the clips are intentional (sheets fill the page area; the progress sweep is clipped to its track); menus render in #pop at body level, outside any clip"
+      }
+    ]
+  }
+}

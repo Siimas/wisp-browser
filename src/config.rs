@@ -22,6 +22,22 @@ pub const MODES: [&str; 4] = [
     "top-compact",
 ];
 pub const TEXTURES: [&str; 5] = ["none", "grain", "dots", "lines", "grid"];
+/// Everything the user can place in a toolbar area. `spacer` may appear many times.
+pub const ITEMS: [&str; 13] = [
+    "collapse",
+    "back",
+    "forward",
+    "reload",
+    "home",
+    "url",
+    "workspaces",
+    "new_tab",
+    "private_tab",
+    "private_window",
+    "shield",
+    "settings",
+    "spacer",
+];
 
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
 #[serde(default)]
@@ -33,6 +49,56 @@ pub struct Layout {
     /// While collapsed, moving the mouse onto the strip shows the bar until it leaves.
     pub hover_expand: bool,
     pub sidebar_width: u16,
+    pub areas: Areas,
+}
+
+/// Which items sit where, in order. The tab list itself is fixed between
+/// `before_tabs` and `after_tabs` (above/below it in a sidebar, left/right in a top bar).
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
+#[serde(default)]
+pub struct Areas {
+    pub hotbar: Vec<String>,
+    pub before_tabs: Vec<String>,
+    pub after_tabs: Vec<String>,
+}
+
+impl Default for Areas {
+    fn default() -> Self {
+        let v = |items: &[&str]| items.iter().map(|s| s.to_string()).collect();
+        Self {
+            hotbar: v(&[
+                "collapse", "back", "forward", "reload", "home", "url", "shield",
+            ]),
+            before_tabs: v(&[]),
+            after_tabs: v(&[
+                "workspaces",
+                "private_tab",
+                "private_window",
+                "spacer",
+                "settings",
+            ]),
+        }
+    }
+}
+
+impl Areas {
+    /// Keep known items only, each at most once (spacers excepted), and make sure
+    /// the settings button exists somewhere so the user cannot lock themselves out.
+    fn sanitize(&mut self) {
+        let mut seen = std::collections::HashSet::new();
+        for area in [
+            &mut self.hotbar,
+            &mut self.before_tabs,
+            &mut self.after_tabs,
+        ] {
+            area.retain(|item| {
+                ITEMS.contains(&item.as_str()) && (item == "spacer" || seen.insert(item.clone()))
+            });
+        }
+        if !seen.contains("settings") {
+            self.after_tabs.push("settings".into());
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
@@ -75,6 +141,9 @@ pub struct Workspace {
     pub id: u32,
     pub name: String,
     pub color: String,
+    /// An emoji shown for the workspace; empty = its first letter.
+    #[serde(default)]
+    pub icon: String,
 }
 
 impl Default for Layout {
@@ -84,6 +153,7 @@ impl Default for Layout {
             collapsed: false,
             hover_expand: true,
             sidebar_width: 260,
+            areas: Areas::default(),
         }
     }
 }
@@ -177,6 +247,7 @@ impl Config {
             l.mode = MODES[0].into();
         }
         l.sidebar_width = l.sidebar_width.clamp(180, 420);
+        l.areas.sanitize();
 
         let a = &mut self.appearance;
         a.font_size = a.font_size.clamp(10, 20);
@@ -202,12 +273,15 @@ impl Config {
             if w.name.trim().is_empty() {
                 w.name = format!("Workspace {}", w.id);
             }
+            // The icon is shown as text; keep it to one short grapheme-ish chunk.
+            w.icon = w.icon.trim().chars().take(4).collect();
         }
         if self.workspaces.is_empty() {
             self.workspaces.push(Workspace {
                 id: 1,
                 name: "Personal".into(),
                 color: Appearance::default().accent,
+                icon: String::new(),
             });
         }
         self
@@ -359,6 +433,7 @@ mod tests {
             id,
             name: name.into(),
             color: "nope".into(),
+            icon: "  \u{1F6D2}toolong".into(),
         };
         c.workspaces = vec![ws(2, "Work"), ws(2, "Dup"), ws(0, "Zero"), ws(3, " ")];
         let c = c.sanitized();
@@ -371,6 +446,16 @@ mod tests {
         let names: Vec<_> = c.workspaces.iter().map(|w| w.name.as_str()).collect();
         assert_eq!(names, ["Work", "Workspace 3"]);
         assert_eq!(c.workspaces[0].color, "#6c8cff");
+        assert_eq!(c.workspaces[0].icon, "\u{1F6D2}too");
+
+        let mut c = Config::default();
+        c.layout.areas.hotbar = ["url", "bogus", "spacer", "url", "spacer", "back"]
+            .map(String::from)
+            .to_vec();
+        c.layout.areas.after_tabs = vec!["back".into()];
+        let a = c.sanitized().layout.areas;
+        assert_eq!(a.hotbar, ["url", "spacer", "spacer", "back"]);
+        assert_eq!(a.after_tabs, ["settings"]);
         assert_eq!(Config::default().sanitized().workspaces[0].name, "Personal");
     }
 }
