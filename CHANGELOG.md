@@ -6,6 +6,13 @@ All notable changes to Wisp are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Google is the default search engine and home page for new profiles. Existing
+  profiles keep what they have; change it in Settings > Behavior.
+- The sidebar is resized by dragging its inner edge (double-click to reset); the
+  width slider is gone from Settings.
+
 ## [0.2.1] - 2026-11-16
 
 ### Added
