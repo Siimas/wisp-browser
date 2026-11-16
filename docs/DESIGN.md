@@ -6,7 +6,7 @@ built from those tokens. The rule that keeps it a system:
 
 > **Components never use a raw color, size, or duration. They use a token.**
 
-Users can override any token in Settings > Theme > Custom CSS, for example
+Users can override any token in Settings > Appearance > Custom CSS, for example
 `:root { --d-3: 450ms; --gap: 10px; }`.
 
 ## The look in one paragraph
@@ -136,7 +136,7 @@ Workspace icons are picked from the same set and take the workspace's color.
 
 ### The theme editor
 
-Settings > Theme is a small instrument rather than a form, modelled on a color
+Settings > Appearance > Theme is a small instrument rather than a form, modelled on a color
 wheel laid flat:
 
 - **Canvas**: each color is a dot. Its direction from the center is the hue,
@@ -296,6 +296,7 @@ Rules:
 | Switching workspace | Tab list slides 16 px from that workspace's side, `--d-3`; the window tint changes with it |
 | Menu or workspace editor | Scales from 96% at its anchor, `--d-2` |
 | Settings / Customize / History / Bookmarks sheet | Rises 6 px and fades in, `--d-3` |
+| Settings section chosen | The new section rises 6 px and fades in, `--d-2`; the old one is gone at once |
 | Suggestions under the address bar | Scales from 96% at the bar, `--d-2`; the chosen row is raised (`--surface`, `--shadow-1`) |
 | Find bar opened (Mod+F) or closed | A row appears between the hotbar and the page: it drops 8 px and fades in over `--d-2` while the page card glides down to make room |
 | Address bar focus | Lifts to `--surface`, accent ring grows, `--d-2` |
@@ -344,11 +345,71 @@ Items (address bar, buttons, workspace switcher, spacers) live in three areas
 the user can rearrange in Customize mode: `hotbar`, `before_tabs`,
 `after_tabs`. The tab list itself is fixed between the last two.
 
+## Settings
+
+Settings is one sheet, modelled on a preferences window: a menu of sections down
+the side (a line icon and a name each, the current one raised like an active
+tab) and the chosen section beside it, under a "Find in Settings" box. Only one
+section shows at a time. When the page card is narrower than 720 px (a
+container query on the sheet, so it follows the card, not the window) the menu
+becomes a row of icon tabs above the content, and the section is headed by
+its name.
+
+Sections are grouped by what a person looks for, not by how the config is
+stored: Appearance (layout, theme), Workspaces, Tabs and browsing, Search,
+Privacy and security, Shortcuts, About and updates. The section in use is
+remembered while Wisp runs; `openSettings(name)` opens Settings at one.
+
+**Search** filters, across all sections, to the rows whose text or
+`data-keys` contain every word typed, shown under their section names. A
+section's or group's own name matching shows all of it. Escape empties the
+box, then closes Settings. Typing a letter anywhere outside a field starts a
+search, and Mod+F focuses the box.
+
+**Simple and Advanced.** A switch beside the search box (remembered in the
+config, `behavior.advanced_settings`; Simple by default). Simple is about
+choices, not parameters: the things a person picks from, drawn as tiles.
+Advanced shows everything, raw fields included. Both edit the same config. A
+row, group or section with class `adv` shows only in Advanced; a search in
+Simple still finds those and names them under the results, with a button to
+show them.
+
+**Tiles** are the one component for a pick-one choice: the layout, light or
+dark, text size, search engine, what opens at start and in a new tab, and the
+Simple/Advanced switch itself (`.seg`, the same component drawn as a segmented
+control). Each is a radio group: a small picture (a layout drawing, a line
+icon, or a plain lettermark for a search engine, never a copied logo) over its
+name, the chosen one outlined in `--accent`. Arrow keys move, Space or Enter
+chooses. A value set in Advanced that matches no tile shows as a checked
+"Custom" tile, which opens the advanced field rather than overwriting it.
+Choices live in `TILES` in `ui.html`.
+
+**Keyboard**: the menu is one tab stop; the arrow keys (either direction, so
+the same in the row of tabs), Home and End move through it.
+
+**Adding a setting**: drop a row into the card of the group it belongs to, in
+`src/ui.html` under the `SETTINGS` comment:
+
+```html
+<label class="row" data-keys="words people search for"><span>Label<small>What it does</small></span>
+  <input type="checkbox" data-k="section.key"></label>
+```
+
+Add `adv` to its class if only Advanced should show it. For a pick-one setting,
+add a tile row (`<div class="tiles" data-tiles="section.key" aria-label="…">`)
+and its choices in `TILES`, and keep the raw field as an `adv` row.
+`data-k` binds it to the config; the search reads the row's text and
+`data-keys` (add the words the label alone would miss: "dark mode",
+"ad blocker", "version"). A new group is a `.grp` (an `h2` and a card) inside a
+section; a new section is a `.sec` with `data-sec`, `data-name` and
+`data-icon`, and the menu is built from the sections.
+
 ## Direct manipulation before settings
 
 If something can be adjusted by touching the thing itself, intuitively and with
 no effort, it does not get a setting. The sidebar's width is set by dragging
-its inner edge (double-click resets it); tabs are reordered by dragging them;
+its inner edge (double-click resets it); the bar is collapsed with its own
+button, its hotkey or its right-click menu; tabs are reordered by dragging them;
 toolbar items are placed by dragging in Customize; a workspace is edited from
 its own icon. Settings are for choices that have no natural place to grab:
 defaults, privacy, power.

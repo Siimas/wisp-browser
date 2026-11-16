@@ -32,7 +32,8 @@ Private tabs show a fixed icon and make no such request.
 
 - **Pages you visit** are loaded by the system web engine, and those sites see
   what any browser shows them. A tab that was unloaded to save memory (Settings >
-  Behavior) loads its page again from the site when you come back to it.
+  Tabs and browsing > Performance) loads its page again from the site when you
+  come back to it.
 - **Searches**: text typed in the address bar that is not an address is sent to
   your search engine when you press Enter (Google by default, changeable in
   Settings). Nothing is sent while you type: the suggestions under the address
