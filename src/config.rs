@@ -23,7 +23,7 @@ pub const MODES: [&str; 4] = [
 ];
 pub const TEXTURES: [&str; 5] = ["none", "grain", "dots", "lines", "grid"];
 /// Everything the user can place in a toolbar area. `spacer` may appear many times.
-pub const ITEMS: [&str; 13] = [
+pub const ITEMS: [&str; 16] = [
     "collapse",
     "back",
     "forward",
@@ -36,6 +36,9 @@ pub const ITEMS: [&str; 13] = [
     "private_window",
     "shield",
     "settings",
+    "bookmark",
+    "history",
+    "bookmarks",
     "spacer",
 ];
 
@@ -69,8 +72,8 @@ impl Default for Areas {
         let v = |items: &[&str]| items.iter().map(|s| s.to_string()).collect();
         Self {
             hotbar: v(&[
-                "back", "forward", "reload", "spacer", "url", "spacer", "shield", "settings",
-                "collapse",
+                "back", "forward", "reload", "spacer", "url", "spacer", "bookmark", "shield",
+                "settings", "collapse",
             ]),
             before_tabs: v(&[]),
             after_tabs: v(&["workspaces"]),
@@ -225,6 +228,9 @@ pub fn default_hotkeys() -> BTreeMap<String, String> {
         ("zoom_out", "Mod+Minus".to_string()),
         ("zoom_reset", "Mod+0".to_string()),
         ("settings", "Mod+Comma".to_string()),
+        ("history", "Mod+Y".to_string()),
+        ("bookmarks", "Mod+Shift+O".to_string()),
+        ("bookmark_page", "Mod+D".to_string()),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
@@ -408,8 +414,13 @@ pub fn resolve_input(input: &str, search_url: &str) -> String {
             return format!("https://{s}");
         }
     }
+    search(s, search_url)
+}
+
+/// The search engine's address for `query`.
+pub fn search(query: &str, search_url: &str) -> String {
     let mut q = String::new();
-    for b in s.bytes() {
+    for b in query.bytes() {
         match b {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
                 q.push(b as char)

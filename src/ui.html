@@ -389,6 +389,37 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
 .grid8 button.on { background: var(--hover); box-shadow: inset 0 0 0 1.5px var(--accent); }
 .grid8 button.sw { width: 18px; height: 18px; margin: 4px auto; border-radius: 50%; background: var(--c); }
 .grid8 button.sw.on { background: var(--c); box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--c); }
+
+/* ================= LIBRARY: suggestions, history, bookmarks ================= */
+.ib.on[data-item=bookmark] svg { fill: currentColor; }
+:root[data-sheet=history] #history, :root[data-sheet=bookmarks] #bookmarks { display: block; }
+/* one row of a list: mark, title, address, a note, buttons that appear on hover */
+.lrow { display: flex; align-items: center; gap: var(--sp-2); height: var(--row); padding: 0 var(--sp-2); min-width: 0; border-radius: var(--r-md); transition: background var(--d-1); }
+.lrow:hover { background: var(--hover); }
+.lrow > svg { color: var(--mute); }
+.lrow .t, .lrow .u { overflow: hidden; white-space: nowrap; min-width: 0;
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent); }
+.lrow .t { flex: 0 1 auto; padding-right: 18px; } /* the fade falls on the padding unless the title is cut */
+.lrow .u { flex: 1 1 0; color: var(--mute); font-size: var(--text-sm); }
+.lrow .hint { flex: none; margin-left: auto; color: var(--mute); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
+.lrow .x { width: 22px; height: 22px; display: none; place-items: center; flex: none; border-radius: var(--r-sm); color: var(--mute); }
+.lrow:hover .x, .lrow:focus-within .x { display: grid; }
+.lrow .x:hover { color: var(--fg); }
+.lrow .x svg { width: 12px; height: 12px; }
+.lrow input { flex: 1; min-width: 0; height: calc(var(--ctl) - 4px); font: inherit; color: var(--fg); background: var(--field); border: 0; border-radius: var(--r-sm); padding: 0 var(--sp-2); }
+/* the list under the address bar: floating, so glass */
+.sug { position: fixed; z-index: 15; padding: var(--sp-1); border-radius: var(--r-lg); background: color-mix(in srgb, var(--bg) 64%, transparent);
+  -webkit-backdrop-filter: blur(28px) saturate(1.8); backdrop-filter: blur(28px) saturate(1.8); box-shadow: var(--shadow-pop); animation: pop-in var(--d-2) var(--ease-out); transform-origin: 50% 0; }
+.sug[hidden] { display: none; }
+.sug .lrow.sel { background: var(--surface); box-shadow: var(--shadow-1); }
+/* A floating top bar keeps its height when its view grows downwards to fit the list. */
+:root[data-floater][data-side=top] #app { bottom: auto; height: calc(var(--tabs-h) + var(--hotbar-h)); }
+/* the sheets */
+.sheet input.find { display: block; width: 100%; height: var(--ctl); margin: var(--sp-3) 0 0; padding: 0 var(--sp-3); font: inherit; color: var(--fg);
+  background: var(--field); border: 0; border-radius: var(--r-md); box-shadow: var(--shadow-0); }
+.sheet input.find::placeholder { color: var(--mute); }
+.sheet .list .card { padding: var(--sp-1); }
+.pop small { display: block; color: var(--mute); font-size: var(--text-xs); padding: 0 var(--sp-2) var(--sp-1); }
 </style>
 <style id="user-css"></style>
 </head>
@@ -513,9 +544,23 @@ input.wave:active::-webkit-slider-thumb { transform: scaleY(1.1); }
       <div class="card" id="hotkeys"></div>
       <p><button class="btn" id="reset-keys">Reset hotkeys to defaults</button></p>
     </div></section>
+
+    <!-- LIBRARY: the history and bookmarks sheets -->
+    <section id="history" class="sheet"><div>
+      <h1>History
+        <span class="chips"><button class="btn" id="hist-clear">Clear browsing data…</button><button class="btn primary" data-act="history">Done</button></span></h1>
+      <input class="find" type="text" placeholder="Search history" aria-label="Search history" spellcheck="false" autocomplete="off">
+      <div class="list"></div>
+    </div></section>
+    <section id="bookmarks" class="sheet"><div>
+      <h1>Bookmarks <button class="btn primary" data-act="bookmarks">Done</button></h1>
+      <input class="find" type="text" placeholder="Search bookmarks" aria-label="Search bookmarks" spellcheck="false" autocomplete="off">
+      <div class="list"></div>
+    </div></section>
   </main>
 </div>
 <div id="pop" class="pop" hidden></div>
+<div id="sug" class="sug" role="listbox" aria-label="Suggestions" hidden></div>
 
 <script>
 const post = m => window.ipc.postMessage(JSON.stringify(m));
@@ -654,7 +699,7 @@ const ITEMS = {
   spacer: { label: 'Flexible space' },
 };
 const AREAS = ['hotbar', 'before_tabs', 'after_tabs'];
-const DEFAULT_AREAS = { hotbar: ['back', 'forward', 'reload', 'spacer', 'url', 'spacer', 'shield', 'settings', 'collapse'],
+const DEFAULT_AREAS = { hotbar: ['back', 'forward', 'reload', 'spacer', 'url', 'spacer', 'bookmark', 'shield', 'settings', 'collapse'],
   before_tabs: [], after_tabs: ['workspaces'] };
 const itemEls = {};
 
@@ -665,11 +710,13 @@ function makeItem(name) {
   else if (name === 'url') {
     const input = el('input', { id: 'url', type: 'text', placeholder: 'Search or enter address', ariaLabel: 'Address', spellcheck: false, autocomplete: 'off' });
     input.onkeydown = ev => {
+      if (sugKey(ev)) return;
       if (ev.key === 'Enter') { post({ cmd: 'navigate', url: input.value }); input.blur(); }
       if (ev.key === 'Escape') input.blur();
     };
     input.onfocus = () => input.select();
-    input.onblur = () => { input.value = input.dataset.full || ''; };
+    input.onblur = () => { input.value = input.dataset.full || ''; sugClose(); };
+    input.oninput = () => sugAsk(input);
     e = el('div', { className: 'url' }, svg('link'), el('div', { className: 'show' }), input);
   } else if (name === 'workspaces') e = el('div', { className: 'wsbar' });
   else {
@@ -875,7 +922,7 @@ function closePop() {
 let covering = false;
 function updateCover() {
   if (FLOATER) return;
-  const want = customizing || popCovers;
+  const want = customizing || popCovers || libCovers();
   if (want !== covering) { covering = want; post({ cmd: 'cover', on: want }); }
 }
 
@@ -1063,7 +1110,7 @@ function renderHotkeys() {
     const b = el('button', { className: 'key', textContent: pretty(combo), title: 'Click, then press the new keys' });
     b.onclick = () => record(action, b);
     const name = action.replace(/_/g, ' ').replace(/^./, c => c.toUpperCase())
-      .replace('Focus url', 'Focus address bar').replace('Toggle bar', 'Collapse or show the bar');
+      .replace('Focus url', 'Focus address bar').replace('Bookmark page', 'Bookmark this page').replace('Toggle bar', 'Collapse or show the bar');
     return el('div', { className: 'row' }, name, b);
   }));
 }
@@ -1084,6 +1131,177 @@ function record(action, button) {
   };
   addEventListener('keydown', onKey, true);
 }
+
+// ================= LIBRARY: suggestions, history, bookmarks =================
+// The data lives in Rust (src/store.rs). This block asks for it over the message
+// channel and draws three things: the list under the address bar, and two sheets.
+Object.assign(ICON, {
+  bookmark: 'M4.500 2.500h7v11L8 10.800l-3.500 2.700z',
+  clock: 'M8 2.500a5.500 5.500 0 1 0 0 11 5.500 5.500 0 0 0 0-11M8 5v3l2 1.500',
+  search: 'M7 2.500a4.500 4.500 0 1 0 0 9 4.500 4.500 0 0 0 0-9M10.200 10.200l3.300 3.300',
+  edit: 'M3 13l.600-2.800 7.200-7.200 2.200 2.200-7.200 7.200zM9.600 4.200l2.200 2.200',
+});
+Object.assign(ITEMS, {
+  bookmark: { label: 'Bookmark this page', icon: 'bookmark', act: 'bookmark_page' },
+  history: { label: 'History', icon: 'clock', act: 'history' },
+  bookmarks: { label: 'Bookmarks', icon: 'book', act: 'bookmarks' },
+});
+const shortUrl = url => url.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '');
+
+// ---- suggestions while typing in the address bar ----
+// The list belongs to whichever copy of the interface holds the address bar. In the
+// main copy it lies over the page area, so the page is hidden while it is open (this
+// view cannot draw over a page). In a floating bar it floats: that view is above the
+// page, and grows downwards to make room.
+const sug = { input: null, rows: [], sel: -1, open: false };
+const SUG_ICON = { tab: 'window', bookmark: 'bookmark', history: 'clock', search: 'search' };
+function sugAsk(input) {
+  const query = input.value.trim();
+  sug.input = input;
+  if (query) post({ cmd: 'suggest', query }); else sugClose(true);
+}
+wisp.suggestions = (query, rows) => {
+  const i = sug.input; // not ours, or the text has moved on: drop it
+  if (!i || document.activeElement !== i || i.value.trim() !== query.trim()) return;
+  sug.rows = rows; sug.sel = -1;
+  const box = $('#sug');
+  box.replaceChildren(...rows.map((r, n) => {
+    const search = r.kind === 'search';
+    const row = el('div', { className: 'lrow', role: 'option' }, svg(SUG_ICON[r.kind]),
+      el('span', { className: 't', textContent: search ? 'Search for ' + r.title : r.title || shortUrl(r.url) }),
+      el('span', { className: 'u', textContent: search ? '' : shortUrl(r.url) }),
+      el('span', { className: 'hint', textContent: r.kind === 'tab' ? 'Switch to tab' : '' }));
+    row.onmousedown = e => { e.preventDefault(); sugAccept(n); }; // before the bar loses focus
+    return row;
+  }));
+  box.hidden = false;
+  // Under the bar, as wide as it (or wider if it is narrow), kept inside this view's frame.
+  const a = i.parentNode.getBoundingClientRect(), gap = 6;
+  const frame = FLOATER ? $('#app').getBoundingClientRect() : { left: 0, right: innerWidth };
+  const w = Math.min(Math.max(a.width, 420), frame.right - frame.left - 2 * gap);
+  const x = Math.max(frame.left + gap, Math.min(a.left, frame.right - w - gap));
+  Object.assign(box.style, { left: x + 'px', top: a.bottom + gap + 'px', width: w + 'px' });
+  if (!sug.open) { sug.open = true; if (FLOATER) post({ cmd: 'grow', on: true }); else updateCover(); }
+};
+function sugClose(keep) {
+  if (!keep) sug.input = null;
+  if (!sug.open) return;
+  sug.open = false; sug.rows = [];
+  $('#sug').hidden = true;
+  if (FLOATER) post({ cmd: 'grow', on: false }); else updateCover();
+}
+function sugAccept(n) {
+  const r = sug.rows[n], input = sug.input;
+  setSheet('');
+  if (r.kind === 'tab') post({ cmd: 'select_tab', id: r.tab }); else post({ cmd: 'navigate', url: r.url });
+  input.blur();
+}
+// Keys in the address bar; true = handled here.
+function sugKey(e) {
+  if (e.key === 'Enter' && (!sug.open || sug.sel < 0)) { setSheet(''); return false; } // goes to what was typed
+  if (!sug.open) return false;
+  const n = sug.rows.length, step = { ArrowDown: 1, ArrowUp: -1 }[e.key];
+  if (step) { // past either end is "nothing chosen": Enter then goes to what was typed
+    e.preventDefault();
+    sug.sel = (sug.sel + 1 + step + n + 1) % (n + 1) - 1;
+    [...$('#sug').children].forEach((row, k) => { row.classList.toggle('sel', k === sug.sel); row.setAttribute('aria-selected', k === sug.sel); });
+  } else if (e.key === 'Enter') sugAccept(sug.sel);
+  else if (e.key === 'Escape') sugClose(true); // once more leaves the bar
+  else return false;
+  return true;
+}
+
+// ---- the History and Bookmarks sheets ----
+// Like Customize, a sheet is this view's own business: it takes the page area and asks
+// the window to hide the page meanwhile (`cover`).
+let sheet = '', libActive = null, libMarked = false;
+const libCovers = () => sug.open || !!sheet;
+const sheetFind = () => $(`#${sheet} .find`);
+const sheetAsk = () => sheet && post({ cmd: sheet, query: sheetFind().value });
+function setSheet(name) {
+  if (FLOATER || name === sheet) return;
+  if (name && customizing) setCustomizing(false);
+  closePop();
+  sheet = name;
+  if (name) root.dataset.sheet = name; else delete root.dataset.sheet;
+  updateCover();
+  if (name) { sheetFind().value = ''; sheetAsk(); sheetFind().focus(); }
+}
+wisp.sheet = name => setSheet(sheet === name ? '' : name); // the actions `history` and `bookmarks`
+wisp.library = (kind, rows) => { if (kind === sheet) (kind === 'history' ? renderHistory : renderBookmarks)(rows); };
+function renderLibrary() { // with every state
+  const b = itemEls.bookmark, on = !!S.bookmarked;
+  if (b) {
+    b.classList.toggle('on', on); b.disabled = S.private;
+    b.title = b.ariaLabel = S.private ? 'Bookmarks are not saved in a private window' : on ? 'Remove this bookmark' : 'Bookmark this page';
+    b.setAttribute('aria-pressed', on);
+  }
+  // Anything else taking the page area, or another tab coming up, closes the sheet.
+  if (sheet && (S.settings || customizing || S.active !== libActive)) setSheet('');
+  if (sheet === 'bookmarks' && on !== libMarked) sheetAsk();
+  libActive = S.active; libMarked = on;
+  $('#hist-clear').hidden = S.private;
+}
+const rowBtn = (icon, label, fn) => el('button', { className: 'x', title: label, ariaLabel: label, onclick: e => { e.stopPropagation(); fn(); } }, svg(icon));
+function libRow(r, hint, ...buttons) {
+  const host = hostOf(r.url).replace(/^www\./, '');
+  const row = el('div', { className: 'lrow', role: 'link', tabIndex: 0 }, el('span', { className: 'fav', textContent: (host[0] || '•').toUpperCase() }),
+    el('span', { className: 't', textContent: r.title || host }), el('span', { className: 'u', textContent: shortUrl(r.url) }),
+    el('span', { className: 'hint', textContent: hint }), ...(S.private ? [] : buttons));
+  row.onclick = () => { setSheet(''); post({ cmd: 'navigate', url: r.url }); };
+  row.onkeydown = e => { if (e.key === 'Enter' && e.target === row) row.onclick(); };
+  return row;
+}
+const emptyNote = (rows, nothing) => rows.length ? [] : [el('p', { textContent: sheetFind().value.trim() ? 'Nothing matches.' : nothing })];
+function dayName(secs) {
+  const d = new Date(secs * 1000), start = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const ago = Math.round((start(new Date()) - start(d)) / 864e5);
+  return ago === 0 ? 'Today' : ago === 1 ? 'Yesterday' : d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+}
+function renderHistory(rows) { // latest first, so days come out in order
+  const out = [];
+  let day = null, card = null;
+  for (const r of rows) {
+    const name = dayName(r.last);
+    if (name !== day) { day = name; card = el('div', { className: 'card' }); out.push(el('h2', { textContent: name }), card); }
+    const time = new Date(r.last * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+    card.append(libRow(r, time, rowBtn('close', 'Delete from history', () => { post({ cmd: 'forget', url: r.url }); sheetAsk(); })));
+  }
+  $('#history .list').replaceChildren(...out, ...emptyNote(rows, 'Pages you visit will be listed here. Private tabs are never recorded.'));
+}
+function renderBookmarks(rows) {
+  const card = el('div', { className: 'card' }, ...rows.map(r => {
+    const row = libRow(r, '',
+      rowBtn('edit', 'Rename', () => {
+        const name = el('input', { type: 'text', value: r.title, ariaLabel: 'Bookmark name' });
+        name.onclick = e => e.stopPropagation();
+        name.onkeydown = e => { e.stopPropagation(); if (e.key === 'Escape') name.value = r.title; if (e.key === 'Enter' || e.key === 'Escape') name.blur(); };
+        name.onblur = () => { const title = name.value.trim(); if (title && title !== r.title) post({ cmd: 'rename_bookmark', url: r.url, title }); sheetAsk(); };
+        row.querySelector('.t').replaceWith(name);
+        name.focus(); name.select();
+      }),
+      rowBtn('close', 'Delete bookmark', () => { post({ cmd: 'remove_bookmark', url: r.url }); sheetAsk(); }));
+    return row;
+  }));
+  $('#bookmarks .list').replaceChildren(...(rows.length ? [el('h2', { textContent: rows.length === 1 ? '1 bookmark' : rows.length + ' bookmarks' }), card] : []),
+    ...emptyNote(rows, `No bookmarks yet. Press ${pretty(cfg.hotkeys.bookmark_page)} on a page to keep it here.`));
+}
+// "Clear browsing data": how far back, and whether cookies and site data go too.
+let clearSecs = 3600, clearSite = true;
+function clearMenu(anchor) {
+  const pick = (label, on, fn) => el('button', { className: 'mi', onclick: () => { fn(); clearMenu(anchor); } }, label, ...(on ? [el('span', { className: 'check', textContent: '✓' })] : []));
+  openPop(anchor, [el('label', { textContent: 'Clear history from' }),
+    ...[[3600, 'The last hour'], [86400, 'The last 24 hours'], [604800, 'The last 7 days'], [0, 'All time']].map(([secs, label]) => pick(label, clearSecs === secs, () => { clearSecs = secs; })),
+    el('hr'), pick('Cookies and site data', clearSite, () => { clearSite = !clearSite; }),
+    el('small', { textContent: 'All of it, whatever the time chosen. Signs you out of sites.' }), el('hr'),
+    mi('Clear browsing data', () => { post({ cmd: 'clear_data', secs: clearSecs, site_data: clearSite }); sheetAsk(); }, { danger: true })]);
+}
+$('#hist-clear').onclick = e => clearMenu(e.currentTarget);
+for (const f of document.querySelectorAll('.sheet input.find')) f.oninput = sheetAsk;
+addEventListener('keydown', e => { // Escape: first empties the search, then closes the sheet
+  if (e.key !== 'Escape' || !sheet || !$('#pop').hidden || e.target.id === 'url') return;
+  if (e.target === sheetFind() && e.target.value) { e.target.value = ''; sheetAsk(); } else setSheet('');
+});
 
 // ---------- frame ----------
 // Tell the window where things go, as distances from each window edge: the gap #page
@@ -1128,6 +1346,7 @@ function render() {
   renderAreas();
   renderTabs();
   renderDynamic();
+  renderLibrary();
   if (S.settings && !FLOATER) renderSettings();
   reportPage(true);
 }
