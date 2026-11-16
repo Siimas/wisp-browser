@@ -85,8 +85,9 @@ cargo build --release
 python3 bench/perf_check.py
 ```
 
-Your laptop is faster than the CI runner, so its numbers sit well under the
-budgets; the useful comparison is against your own run on `main`
+The budgets are set for the CI runner. A Mac differs from it (faster launch,
+often more memory on a big screen), so a local run can be over a budget
+that CI passes. The useful local comparison is against your own run on `main`
 (`--out main.json` there, then `--base main.json` on your branch).
 
 **Raising a budget.** If your change is worth its cost, raise the number in

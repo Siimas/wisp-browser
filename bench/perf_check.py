@@ -182,8 +182,9 @@ def stop(main):
         time.sleep(0.25)
     time.sleep(1)
     now = {pid: comm for pid, _, comm in ps()}
-    for pid, comm in pids.items():  # stragglers: same pid, same executable, still ours
-        if now.get(pid) == comm and pid != 1:
+    for pid, comm in pids.items():  # stragglers: same pid, same executable, still tied to ours
+        ours = pid == main or libc.responsibility_get_pid_responsible_for_pid(pid) == main
+        if now.get(pid) == comm and pid != 1 and ours:
             try:
                 os.kill(pid, signal.SIGKILL)
             except ProcessLookupError:
