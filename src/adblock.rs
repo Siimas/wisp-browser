@@ -20,7 +20,7 @@ use std::{
     io::Read,
     path::PathBuf,
     sync::{Mutex, RwLock, mpsc},
-    time::{Duration, SystemTime},
+    time::{Duration, Instant, SystemTime},
 };
 
 pub struct List {
@@ -125,6 +125,8 @@ static CFG: Mutex<Option<Adblock>> = Mutex::new(None);
 static NOTIFY: Mutex<Option<Box<dyn Fn() + Send>>> = Mutex::new(None);
 /// Wakes the list updater; `true` = fetch every list now ("Update now").
 static WAKE: Mutex<Option<mpsc::Sender<bool>>> = Mutex::new(None);
+/// When a fetch last failed, so a computer that is offline is not asked again and again.
+static LAST_FAILED: Mutex<Option<Instant>> = Mutex::new(None);
 /// The updater is working / the last problem it had, for Settings.
 static STATUS: Mutex<(bool, String)> = Mutex::new((false, String::new()));
 
@@ -410,7 +412,13 @@ fn update(all: bool) {
     let due =
         |l: &&List| all || checked(l.id).is_none_or(|t| t.elapsed().unwrap_or_default() > REFRESH);
     let lists: Vec<&List> = enabled_lists(&cfg).into_iter().filter(due).collect();
-    if lists.is_empty() {
+    // After a failed attempt (offline, say), wait a while before the next one, however
+    // often settings are saved; "Update now" still tries at once.
+    let resting = LAST_FAILED
+        .lock()
+        .unwrap()
+        .is_some_and(|t| t.elapsed() < Duration::from_secs(15 * 60));
+    if lists.is_empty() || resting && !all {
         return;
     }
     STATUS.lock().unwrap().0 = true;
@@ -422,6 +430,7 @@ fn update(all: bool) {
             Err(e) => problems.push(format!("{}: {e}", l.name)),
         }
     }
+    *LAST_FAILED.lock().unwrap() = (!problems.is_empty()).then(Instant::now);
     *STATUS.lock().unwrap() = (false, problems.join(". "));
     if changed {
         platform::lists_changed();

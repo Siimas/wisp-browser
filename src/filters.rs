@@ -139,7 +139,7 @@ fn parse_hide(doms: &str, rest: &str) -> Option<Hide> {
     if !safe_selector(selector) || selector.starts_with(['+', '^']) {
         return None;
     }
-    if EXTENDED.iter().any(|x| selector.contains(x)) || doms.contains('*') {
+    if EXTENDED.iter().any(|x| selector.contains(x)) || doms.contains('*') || hides_page(selector) {
         return None;
     }
     let (domains, not_domains) = domains(doms, ',')?;
@@ -148,6 +148,21 @@ fn parse_hide(doms: &str, rest: &str) -> Option<Hide> {
         selector: selector.to_string(),
         domains,
         not_domains,
+    })
+}
+
+/// A selector (or one of a list) naming only the page itself (`html`, `body`, `*`,
+/// `:root`): hiding it would blank every page the rule applies to.
+fn hides_page(selector: &str) -> bool {
+    selector.split(',').any(|part| {
+        let mut words = part
+            .split(|c: char| c.is_whitespace() || ">+~".contains(c))
+            .filter(|w| !w.is_empty())
+            .peekable();
+        words.peek().is_some()
+            && words.all(|w| {
+                ["html", "body", "head", "*", ":root"].contains(&w.to_ascii_lowercase().as_str())
+            })
     })
 }
 
@@ -281,12 +296,7 @@ fn parse_net(line: &str) -> Option<Net> {
     if body.len() != trimmed.len() {
         n.end = false;
     }
-    // A rule this short with no site to limit it would hit nearly everything
-    // (`*`, `|http`, `$script`): a typo or a hostile list, not a filter.
-    let literal = body.bytes().filter(|b| !b"*^".contains(b)).count();
-    let scheme_only = n.start
-        && ["http", "https", "ws", "wss"].contains(&body.trim_end_matches(['*', '^', ':', '/']));
-    if (literal < 3 || scheme_only) && n.domains.is_empty() {
+    if n.domains.is_empty() && too_broad(&n, body) {
         return None;
     }
     n.body = if n.case {
@@ -295,6 +305,39 @@ fn parse_net(line: &str) -> Option<Net> {
         body.to_ascii_lowercase()
     };
     Some(n)
+}
+
+/// Second levels under two-letter country domains that are public suffixes ("co.uk").
+const SECOND_LEVELS: [&str; 10] = [
+    "co", "com", "net", "org", "gov", "edu", "ac", "ne", "or", "go",
+];
+
+/// A rule with no site to limit it that would hit nearly every address: a typo or a
+/// hostile list, not a filter. `||host...` needs two labels (or a name of four letters
+/// or more followed by a dot: any top-level domain) and must not be a public suffix
+/// (`||com^`, `||co.uk^`); any other pattern needs four characters besides wildcards
+/// and a leading scheme (`*`, `://`, `|http`, `.js`, `$script` fail). Rules for pings
+/// only are let through: no page breaks without them.
+fn too_broad(n: &Net, body: &str) -> bool {
+    if n.types == PING {
+        return false;
+    }
+    if n.host {
+        let host = body.split(['/', '^', ':', '?', '|']).next().unwrap_or("");
+        let labels: Vec<&str> = host.split('.').filter(|l| !l.is_empty()).collect();
+        return match labels.as_slice() {
+            [] => true,
+            [name] => !(host.ends_with('.') && name.len() >= 4),
+            [sld, tld] => tld.len() == 2 && SECOND_LEVELS.contains(sld),
+            _ => false,
+        };
+    }
+    let mut rest = body.trim_start_matches(['*', '|']);
+    for scheme in ["https", "http", "wss", "ws", "://", ":", "//"] {
+        rest = rest.strip_prefix(scheme).unwrap_or(rest);
+    }
+    let literal = rest.bytes().filter(|b| !b"*^|".contains(b)).count();
+    literal < 4 || !rest.bytes().any(|b| b.is_ascii_alphanumeric())
 }
 
 /// The host name, when the rule is exactly `||host^` (or `||host`).
@@ -565,7 +608,7 @@ pub mod matcher {
 
     struct Req<'a> {
         url: &'a str,
-        lower: String,
+        lower: &'a str,
         host: (usize, usize),
         page: Option<&'a str>,
         third: bool,
@@ -595,15 +638,7 @@ pub mod matcher {
     pub fn site_of(host: &str) -> &str {
         let labels: Vec<&str> = host.rsplitn(4, '.').collect();
         let keep = match labels.as_slice() {
-            [tld, sld, ..]
-                if tld.len() == 2
-                    && [
-                        "co", "com", "net", "org", "gov", "edu", "ac", "ne", "or", "go",
-                    ]
-                    .contains(sld) =>
-            {
-                3
-            }
+            [tld, sld, ..] if tld.len() == 2 && SECOND_LEVELS.contains(sld) => 3,
             _ => 2,
         };
         match host.rmatch_indices('.').nth(keep - 1) {
@@ -638,7 +673,7 @@ pub mod matcher {
         {
             return false;
         }
-        let url = if n.case { r.url } else { &r.lower }.as_bytes();
+        let url = if n.case { r.url } else { r.lower }.as_bytes();
         let p = n.body.as_bytes();
         if n.host {
             let (hs, he) = r.host;
@@ -743,7 +778,7 @@ pub mod matcher {
                 page: page_host,
                 host,
                 kind,
-                lower: lower.clone(),
+                lower: &lower,
             };
             (host_listed(&self.hosts, req_host) || self.block.find(&r)) && !self.allow.find(&r)
         }
@@ -797,8 +832,14 @@ mod tests {
             "@@||example.com^$elemhide",
             "||example.com^$unknownoption",
             "||exämple.com^",
-            "*",                     // everything
-            "|http",                 // everything, almost
+            "*",     // everything
+            "|http", // everything, almost
+            "http",  // every address
+            "://",
+            ".js",
+            "||com^", // a whole top-level domain
+            "||co.uk^",
+            "@@||com^$document",
             "$script,third-party",   // every third-party script
             "ad$domain=*.example.*", // only entity domains: would widen to all sites
             "example.com#?#div:-abp-has(.ad)",
@@ -811,11 +852,33 @@ mod tests {
             "##[title=\"unclosed]",
             "##.ad)",
             "##@import url(x)",
+            "##html",
+            "##body",
+            "##*",
+            "##:root",
+            "example.com##html > body",
+            "##.ad, body",
         ] {
             assert_eq!(parse(line), None, "{line}");
         }
-        // Short patterns are fine when a site limits them.
+        // Short patterns are fine when a site limits them, and specific ones without.
         assert!(parse("$script,domain=example.com").is_some());
+        for ok in [
+            "||t.co^",
+            "||mkto-*.com^$third-party",
+            "||bbc.co.uk^",
+            "/ads/*",
+            "-banner-ad.",
+            "/ut.js?cb=",
+            "|https://r.i.ua^",
+            "||allsportsflix.",
+            "*$ping,third-party",
+            "##body > div.ad",
+            "##.ad-slot",
+            "example.com##html.ad",
+        ] {
+            assert!(parse(ok).is_some(), "{ok}");
+        }
     }
 
     #[test]
