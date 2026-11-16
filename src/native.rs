@@ -366,6 +366,152 @@ mod imp {
     use windows_core::{BOOL, HSTRING, Interface, PWSTR};
     use wry::WebViewExtWindows;
 
+    // ---- the maximize button, as the system sees it ----
+
+    use std::cell::{Cell, RefCell};
+    use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
+    use windows::Win32::Graphics::Gdi::ScreenToClient;
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        TME_LEAVE, TME_NONCLIENT, TRACKMOUSEEVENT, TrackMouseEvent,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DefWindowProcW, GetParent, HTMAXBUTTON, HTTOP, IsZoomed, PostMessageW,
+        RegisterClassW, WINDOW_EX_STYLE, WM_NCHITTEST, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP,
+        WM_NCMOUSELEAVE, WM_NCMOUSEMOVE, WNDCLASSW, WS_CHILD, WS_CLIPSIBLINGS, WS_VISIBLE,
+    };
+
+    type SnapSend = Option<Box<dyn Fn(&'static str)>>;
+    thread_local! {
+        static SNAP_SEND: RefCell<SnapSend> = const { RefCell::new(None) };
+        static SNAP_HOVER: Cell<bool> = const { Cell::new(false) };
+        static SNAP_PRESSED: Cell<bool> = const { Cell::new(false) };
+        /// It lies along the window's top edge (not on a floating bar further down).
+        static SNAP_AT_TOP: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// Windows 11 offers its snap layouts while the pointer rests on a window's maximize
+    /// button, which it finds by asking the window what lies under the pointer. The
+    /// interface draws that button inside a web view the system cannot ask, so this
+    /// small window, drawing nothing, lies over it and answers "the maximize button".
+    /// What happens on it (hover, press, leave, click) goes to `on`, for the interface
+    /// to show and the app to act on.
+    pub struct SnapButton(HWND);
+
+    impl SnapButton {
+        pub fn new(window: &Window, on: impl Fn(&'static str) + 'static) -> Option<Self> {
+            use tao::platform::windows::WindowExtWindows;
+            SNAP_SEND.set(Some(Box::new(on)));
+            let class = windows_core::w!("WispSnapButton");
+            // SAFETY: registering a class and creating a child of our own live window.
+            unsafe {
+                let instance = GetModuleHandleW(None).ok()?.into();
+                RegisterClassW(&WNDCLASSW {
+                    lpfnWndProc: Some(snap_proc),
+                    hInstance: instance,
+                    lpszClassName: class,
+                    ..Default::default()
+                });
+                let style = WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS;
+                let parent = HWND(window.hwnd() as _);
+                CreateWindowExW(
+                    WINDOW_EX_STYLE(0),
+                    class,
+                    None,
+                    style,
+                    0,
+                    0,
+                    0,
+                    0,
+                    Some(parent),
+                    None,
+                    Some(instance),
+                    None,
+                )
+                .ok()
+                .map(Self)
+            }
+        }
+
+        /// Lie over `rect` (left, top, width, height in logical pixels), above the web views.
+        pub fn place(&self, [l, t, w, h]: [f64; 4], scale: f64) {
+            let p = |v: f64| (v * scale).round() as i32;
+            let (x, y) = (p(l), p(t));
+            SNAP_AT_TOP.set(y == 0);
+            // SAFETY: plain Win32 call on our own live window.
+            let _ = unsafe {
+                SetWindowPos(
+                    self.0,
+                    Some(HWND_TOP),
+                    x,
+                    y,
+                    p(l + w) - x,
+                    p(t + h) - y,
+                    SWP_NOACTIVATE,
+                )
+            };
+        }
+    }
+
+    unsafe extern "system" fn snap_proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
+        let send = |what| SNAP_SEND.with_borrow(|f| f.as_ref().map(|f| f(what)));
+        // SAFETY (whole body): Win32 calls on this window and its parent, from its own thread.
+        unsafe {
+            match msg {
+                WM_NCHITTEST => {
+                    // Its top few pixels are still the window's top edge, as everywhere else
+                    // along the top (see #rim in ui.html), unless maximized or it is not
+                    // at the top (on a revealed top bar).
+                    let mut pt = POINT {
+                        x: (l.0 & 0xffff) as i16 as i32,
+                        y: ((l.0 >> 16) & 0xffff) as i16 as i32,
+                    };
+                    let _ = ScreenToClient(hwnd, &mut pt);
+                    let parent = GetParent(hwnd).unwrap_or_default();
+                    let rim = (5 * windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd)) as i32 / 96;
+                    let top = SNAP_AT_TOP.get() && pt.y < rim && !IsZoomed(parent).as_bool();
+                    LRESULT((if top { HTTOP } else { HTMAXBUTTON }) as isize)
+                }
+                WM_NCLBUTTONDOWN if w.0 == HTTOP as usize => {
+                    let parent = GetParent(hwnd).unwrap_or_default();
+                    let _ = PostMessageW(Some(parent), msg, w, l); // resize the window, not this
+                    LRESULT(0)
+                }
+                WM_NCMOUSEMOVE => {
+                    let mut track = TRACKMOUSEEVENT {
+                        cbSize: size_of::<TRACKMOUSEEVENT>() as u32,
+                        dwFlags: TME_LEAVE | TME_NONCLIENT,
+                        hwndTrack: hwnd,
+                        dwHoverTime: 0,
+                    };
+                    let _ = TrackMouseEvent(&mut track);
+                    if w.0 == HTMAXBUTTON as usize && !SNAP_HOVER.replace(true) {
+                        send("hover");
+                    } else if w.0 != HTMAXBUTTON as usize && SNAP_HOVER.replace(false) {
+                        send("leave");
+                    }
+                    LRESULT(0)
+                }
+                WM_NCMOUSELEAVE => {
+                    SNAP_HOVER.set(false);
+                    SNAP_PRESSED.set(false);
+                    send("leave");
+                    LRESULT(0)
+                }
+                WM_NCLBUTTONDOWN => {
+                    SNAP_PRESSED.set(true);
+                    send("press");
+                    LRESULT(0)
+                }
+                WM_NCLBUTTONUP if SNAP_PRESSED.replace(false) => {
+                    send("click");
+                    LRESULT(0)
+                }
+                _ => DefWindowProcW(hwnd, msg, w, l),
+            }
+        }
+    }
+
     // ponytail: square page corners on Windows. Upgrade path: SetWindowRgn with a
     // rounded region, re-applied on every resize.
     pub fn round_corners(_webview: &WebView, _radius: f64) {}
@@ -575,6 +721,8 @@ impl Glass {
 
 #[cfg(target_os = "macos")]
 pub use imp::Glass;
+#[cfg(windows)]
+pub use imp::SnapButton;
 pub use imp::{
     find, find_stop, media_busy, page_menu, raise, round_corners, set_background, take_private,
     user_agent,
