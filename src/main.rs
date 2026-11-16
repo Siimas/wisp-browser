@@ -1542,7 +1542,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.layout();
     app.recompile_adblock(); // tabs open once the block list is ready (AdblockReady)
 
-    #[cfg(all(target_os = "macos", debug_assertions))]
+    #[cfg(debug_assertions)]
     let launched = Instant::now();
     let mut next_update_check = Instant::now() + Duration::from_secs(5);
     event_loop.run(move |event, _, control_flow| {
@@ -1566,8 +1566,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Development: WISP_PEEK=1 reveals the collapsed bar after 3s and holds it;
                 // WISP_ACT=<action> runs an action after 3s; WISP_JS=<script> runs in the
                 // interface after 4s;
-                // WISP_SHOT=/path.png saves a picture of the window after 6s and quits.
-                #[cfg(all(target_os = "macos", debug_assertions))]
+                // WISP_SHOT=/path.png (macOS) saves a picture of the window after 6s and quits;
+                // on Windows, .github/workflows/windows-shots.yml captures the screen instead.
+                #[cfg(debug_assertions)]
                 {
                     let after = |secs| launched.elapsed() > Duration::from_secs(secs);
                     if std::env::var_os("WISP_PEEK").is_some() && after(3) && !app.hold_peek {
@@ -1584,6 +1585,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         unsafe { std::env::remove_var("WISP_JS") };
                         let _ = app.chrome.evaluate_script(&js);
                     }
+                    #[cfg(target_os = "macos")]
                     if let Some(path) = std::env::var_os("WISP_SHOT").filter(|_| after(6)) {
                         use tao::platform::macos::WindowExtMacOS;
                         let ok = debug_shot::save(app.window.ns_window(), &path.to_string_lossy());

@@ -1,0 +1,28 @@
+name: Windows screenshots
+
+# Pictures of Wisp running on Windows, for checking how it looks there without a
+# Windows machine: run it from the Actions tab, then `gh run download <run id>`.
+# Not a required check.
+on:
+  workflow_dispatch:
+  push:
+    branches: ['claude/windows-titlebar-*']
+
+permissions:
+  contents: read
+
+jobs:
+  shots:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build
+      - run: .github/windows-shots.ps1
+        shell: pwsh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-shots
+          path: shots
