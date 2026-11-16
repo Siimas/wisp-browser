@@ -319,8 +319,8 @@ the side (a line icon and a name each, the current one raised like an active
 tab) and the chosen section beside it, under a "Find in Settings" box. Only one
 section shows at a time. When the page card is narrower than 720 px (a
 container query on the sheet, so it follows the card, not the window) the menu
-becomes a row of tabs above the content: icons, with only the current one
-named.
+becomes a row of icon tabs above the content, and the section is headed by
+its name.
 
 Sections are grouped by what a person looks for, not by how the config is
 stored: Appearance (layout, theme), Workspaces, Tabs and browsing, Search,
@@ -354,7 +354,8 @@ section; a new section is a `.sec` with `data-sec`, `data-name` and
 
 If something can be adjusted by touching the thing itself, intuitively and with
 no effort, it does not get a setting. The sidebar's width is set by dragging
-its inner edge (double-click resets it); tabs are reordered by dragging them;
+its inner edge (double-click resets it); the bar is collapsed with its own
+button, its hotkey or its right-click menu; tabs are reordered by dragging them;
 toolbar items are placed by dragging in Customize; a workspace is edited from
 its own icon. Settings are for choices that have no natural place to grab:
 defaults, privacy, power.
