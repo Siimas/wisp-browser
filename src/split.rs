@@ -9,6 +9,7 @@
 
 use crate::{App, Kind, Tab, native, place_tab};
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
 
 /// Most tiles one split holds: past four, pages get too small to use.
 pub const MAX_TILES: usize = 4;
@@ -321,6 +322,35 @@ impl App {
         let webview = self.build_webview(id, &url, private);
         if let Some(tab) = self.tab_mut(id) {
             tab.webview = webview;
+            if let Some(wake) = &mut tab.wake {
+                wake.since = Some(Instant::now()); // an unloaded tab coming back
+            }
+        }
+    }
+
+    /// The tabs on screen changed (a tab was selected, a split joined or ended): those
+    /// that left are background tabs from now (unloading counts from here), those
+    /// shown are woken and in the foreground.
+    pub(crate) fn mark_shown(&mut self) {
+        let now = Instant::now();
+        let shown: Vec<u32> = self.targets().iter().map(|f| f.0).collect();
+        let before = std::mem::replace(&mut self.on_screen, shown.clone());
+        for id in before.into_iter().filter(|id| !shown.contains(id)) {
+            if let Some(tab) = self.tab_mut(id) {
+                tab.seen = now;
+                if let Some(w) = &tab.webview {
+                    native::set_background(w, true);
+                }
+            }
+        }
+        for &id in &shown {
+            self.ensure_webview(id);
+            if let Some(tab) = self.tab_mut(id) {
+                tab.seen = now;
+                if let Some(w) = &tab.webview {
+                    native::set_background(w, false);
+                }
+            }
         }
     }
 
@@ -349,6 +379,7 @@ impl App {
             self.groups.insert(g, rest);
         }
         self.layout_pages();
+        self.mark_shown();
         near
     }
 
@@ -412,6 +443,7 @@ impl App {
             }
             self.groups.remove(g);
             self.layout_pages();
+            self.mark_shown();
             self.sync();
         } else {
             let near = self.leave_split(id);
