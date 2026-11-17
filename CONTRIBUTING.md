@@ -72,8 +72,11 @@ when a number goes over its limit in [`bench/budget.json`](bench/budget.json):
 | `idle_cpu_pct` | CPU of that tree over 20 idle seconds, as % of one core (macOS) |
 | `*_collapsed` | The same with the bar collapsed, which adds the floating copy of the interface |
 
-Each value is the median of three launches on a clean throwaway profile, after
-one unrecorded warm-up launch. The job prints a table of measured values, the
+Each value is the median of three launches on a throwaway profile. One
+unrecorded warm-up launch first fills that profile the way a user's first launch
+does (it downloads the ad-block lists and compiles them); each measured launch
+starts from a copy of it, so the numbers are an every-day launch, without
+network. The job prints a table of measured values, the
 spread of the runs, the last result from `main` and the budget; the raw runs
 are attached to the job as `perf-macOS`. Windows checks the binary size only.
 

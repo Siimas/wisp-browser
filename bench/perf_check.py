@@ -7,7 +7,8 @@
     python3 bench/perf_check.py --base old.json    # also show the change against an earlier run
 
 Exits 1 when a metric is over its budget. On macOS it starts the release build
-`--runs` times on a clean throwaway profile with one local page, in two layouts:
+`--runs` times on a throwaway profile with one local page (a copy of one
+that has been launched once, so the ad-block lists are in place), in two layouts:
 the bar as it ships, and the bar collapsed (which also builds the floating copy of
 the interface). Each run records:
 
@@ -146,7 +147,7 @@ def bundle(tmp):
 
 def run(app, server, profile, config, token, idle):
     cfg = profile / "Library/Application Support/Wisp"
-    cfg.mkdir(parents=True)
+    cfg.mkdir(parents=True, exist_ok=True)
     (cfg / "config.json").write_text(json.dumps(config))
     url = f"http://127.0.0.1:{server.server_address[1]}/page?t={token}"
     (cfg / "session.json").write_text(json.dumps({"workspace": 1, "tabs": [{"url": url, "active": True}]}))
@@ -162,7 +163,16 @@ def run(app, server, profile, config, token, idle):
         raise RuntimeError("Wisp did not start")
     try:
         launch = server.wait(token, 60) - t0
-        if not idle:  # warm-up run
+        if not idle:  # warm-up run: let the ad-block lists download and compile
+            lists, deadline = cfg / "filters", time.monotonic() + 120
+            while time.monotonic() < deadline:
+                txt = {f.stem for f in lists.glob("*.txt")}
+                if txt and txt <= {f.stem for f in lists.glob("*.compiled")}:
+                    break
+                time.sleep(1)
+            else:
+                print("warning: ad-block lists not ready, measuring with the built-in list", flush=True)
+            time.sleep(2)
             return {}
         time.sleep(SETTLE)
         return {"launch_s": launch, "memory_mb": memory_mb(main), "idle_cpu_pct": idle_cpu(main, idle)}
@@ -202,12 +212,17 @@ def measure(args):
     with tempfile.TemporaryDirectory(prefix="wisp-perf-") as tmp:
         tmp = pathlib.Path(tmp).resolve()  # /var is /private/var; ps reports the real path
         app = bundle(tmp)
-        # Unrecorded: the first launch on a machine fills system caches (it was 2x slower
-        # and 30% heavier than the next ones on the CI runner).
-        run(app, server, tmp / "warmup", {}, "warmup", 0)
+        # Unrecorded: the first launch fills system caches (2x slower and 30% heavier on
+        # the CI runner) and the profile: it downloads the ad-block lists and compiles them
+        # into WebKit rules, which on the runner holds ~370 MB while it lasts. Each measured
+        # run starts from a copy of that profile, as a user's every-day launch does, and
+        # needs no network (lists are refreshed only when days old).
+        seed = tmp / "seed"
+        run(app, server, seed, {}, "warmup", 0)
         for i in range(args.runs):
             for suffix, config in LAYOUTS.items():  # interleaved, so drift hits both alike
                 name = f"run{i}{suffix}"
+                shutil.copytree(seed, tmp / name, symlinks=True)
                 r = run(app, server, tmp / name, config, name, args.idle)
                 print(f"{name}: " + ", ".join(f"{k} {v:.2f}" for k, v in r.items()), flush=True)
                 for k, v in r.items():
