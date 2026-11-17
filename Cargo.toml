@@ -50,6 +50,10 @@ windows = { version = "0.62", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 
+# Windows version information, icon and manifest for wisp.exe (see build.rs).
+[target.'cfg(windows)'.build-dependencies]
+winresource = { version = "0.1.34", default-features = false }
+
 [profile.release]
 lto = true
 codegen-units = 1

@@ -135,9 +135,47 @@ jobs:
             dist/*.sig
           if-no-files-found: error
 
+  # Nothing is published if Microsoft Defender flags the Windows program or installer,
+  # in a scan or while a copy of Wisp updates itself to this installer (see
+  # .github/defender-check.ps1). Defender's machine-learning verdicts are not
+  # deterministic, so the check runs on several fresh runners at once. Each builds its
+  # own rehearsal copy (a debug build with a throwaway update key), which stays on
+  # that runner; the release key is not used here.
+  defender:
+    name: Microsoft Defender check ${{ matrix.run }}
+    needs: [version, build]
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        run: [1, 2, 3, 4, 5]
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: defender
+      - run: cargo install cargo-packager --locked --version 0.11.8
+      - name: Build the update rehearsal copy
+        shell: pwsh
+        run: |
+          cargo packager signer generate --path "$env:RUNNER_TEMP\rehearsal.key" --password '' --ci -f
+          $env:WISP_UPDATE_PUBKEY = (Get-Content "$env:RUNNER_TEMP\rehearsal.key.pub" -Raw).Trim()
+          cargo build
+      - uses: actions/download-artifact@v8
+        with:
+          name: x86_64-pc-windows-msvc
+          path: release-files
+      - name: Check
+        shell: pwsh
+        run: |
+          $setup = (Get-Item release-files/*-Setup.exe).FullName
+          7z x $setup "-o$env:RUNNER_TEMP\installed-files" wisp.exe | Out-Null
+          ./.github/defender-check.ps1 -Exe "$env:RUNNER_TEMP\installed-files\wisp.exe" -Installer $setup -Launcher target/debug/wisp.exe -Key "$env:RUNNER_TEMP\rehearsal.key"
+
   publish:
     name: Publish the release
-    needs: [version, build]
+    needs: [version, build, defender]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -149,7 +187,11 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      # Windows gets an entry only when the repository variable WISP_WINDOWS_UPDATES
+      # is "on" (see docs/WINDOWS-SECURITY.md).
       - run: python3 .github/latest-json.py dist "$TAG" "$GITHUB_REPOSITORY"
+        env:
+          WISP_WINDOWS_UPDATES: ${{ vars.WISP_WINDOWS_UPDATES }}
       # Creating the release also creates the tag, at the commit that was built.
       # (It refuses to run if a release for this tag already exists.)
       - name: Say which file is for whom

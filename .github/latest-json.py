@@ -17,11 +17,15 @@ base = sys.argv[4] if len(sys.argv) > 4 else f"https://github.com/{repo}/release
 RULES = [
     ("macos-aarch64", "-macOS-Apple-Silicon.update.tar.gz", "app"),
     ("macos-x86_64", "-macOS-Intel.update.tar.gz", "app"),
-    # Windows is left out on purpose: Windows Defender quarantined Wisp when 0.2.1
-    # updated itself (docs: CHANGELOG 0.3.0). Put this line back once the fixed update
-    # path has been shown to pass on a Windows machine with real-time protection on.
-    # ("windows-x86_64", "-Windows-x64-Setup.exe", "nsis"),
 ]
+# Windows automatic updates are off unless WISP_WINDOWS_UPDATES is "on" (a repository
+# variable the release workflow passes in). Defender quarantined Wisp when 0.2.0
+# updated itself to 0.2.1; see docs/WINDOWS-SECURITY.md for what to check on a real
+# Windows PC before turning this on. Off, installed Windows copies find no update.
+if os.environ.get("WISP_WINDOWS_UPDATES") == "on":
+    RULES.append(("windows-x86_64", "-Windows-x64-Setup.exe", "nsis"))
+else:
+    print("Windows automatic updates are off (WISP_WINDOWS_UPDATES is not \"on\")")
 
 platforms = {}
 for target, ending, kind in RULES:

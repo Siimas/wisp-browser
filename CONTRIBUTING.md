@@ -83,6 +83,11 @@ Release workflow sees a version with no tag, builds the installers, signs the
 update files, and publishes the release (which creates the tag). Ordinary merges
 publish nothing. Installed copies then update themselves.
 
+The Windows build is checked with Microsoft Defender before anything is published,
+including a rehearsed automatic update; if Defender flags it, the release stops.
+See [docs/WINDOWS-SECURITY.md](docs/WINDOWS-SECURITY.md) for what to do then,
+how to report a false positive to Microsoft, and code signing.
+
 To build an installer by hand:
 
 ```bash
