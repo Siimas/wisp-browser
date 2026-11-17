@@ -8,6 +8,15 @@ All notable changes to Wisp are recorded here. The format follows
 
 ### Fixed
 
+- Windows: after updating itself, Wisp could be blocked by Microsoft Defender as
+  `Trojan:Win32/Bearfoos.A!ml` (a false positive from its machine-learning
+  model; seen after the 0.2.0 to 0.2.1 update). `wisp.exe` now carries its name,
+  version, publisher, icon and an application manifest, which stopped the
+  detection in testing, and updates start the installer directly instead of
+  through a hidden PowerShell window (saved as `Wisp-<version>-Setup.exe`, with
+  its own progress window). Every Windows release is now checked with Defender,
+  including a rehearsed self-update, before it is published. Automatic updates on
+  Windows stay off until a maintainer turns them on (`WISP_WINDOWS_UPDATES`).
 - Ad blocking: a page could keep another site's blocking state when a navigation
   to a site with blocking turned off never showed its page (it failed, was
   cancelled, or became a download). The switch now happens only once a

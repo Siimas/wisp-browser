@@ -111,7 +111,9 @@ step:
   ```
 
 - **Windows**: on the SmartScreen prompt choose **More info**, then
-  **Run anyway**.
+  **Run anyway**. If Microsoft Defender ever reports Wisp as a threat, see
+  [Wisp and Windows antivirus](docs/WINDOWS-SECURITY.md); please don't turn
+  protection off.
 
 Installed copies update themselves: a new version downloads in
 the background and is in place the next time you open Wisp. Every update file
