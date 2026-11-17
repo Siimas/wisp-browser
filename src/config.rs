@@ -158,6 +158,10 @@ pub struct Behavior {
 pub struct Adblock {
     pub enabled: bool,
     pub extra_hosts: Vec<String>,
+    /// Filter lists in use, by id (see `adblock::LISTS`).
+    pub lists: Vec<String>,
+    /// Sites (host names) where blocking is turned off from the shield button.
+    pub off_sites: Vec<String>,
 }
 
 /// A named group of tabs the user creates ("Work", "Shopping", ...).
@@ -224,6 +228,8 @@ impl Default for Adblock {
         Self {
             enabled: true,
             extra_hosts: Vec::new(),
+            lists: vec!["easylist".into(), "easyprivacy".into()],
+            off_sites: Vec::new(),
         }
     }
 }
@@ -281,6 +287,15 @@ impl Config {
             self.hotkeys.entry(action).or_insert(combo);
         }
         self.behavior.default_zoom = clamp_zoom(self.behavior.default_zoom);
+        // adblock: sites switched off are host names with a dot (never "com" alone).
+        let host = |h: &String| {
+            h.contains('.')
+                && !h.starts_with('.')
+                && h.bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"-.".contains(&b))
+        };
+        self.adblock.off_sites.retain(host);
+        self.adblock.off_sites.dedup();
         self.behavior.unload_after = self.behavior.unload_after.min(24 * 60);
         if !LOW_POWER.contains(&self.behavior.low_power.as_str()) {
             self.behavior.low_power = LOW_POWER[0].into();

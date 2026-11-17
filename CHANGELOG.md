@@ -6,8 +6,39 @@ All notable changes to Wisp are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Ad blocking: a page could keep another site's blocking state when a navigation
+  to a site with blocking turned off never showed its page (it failed, was
+  cancelled, or became a download). The switch now happens only once a
+  navigation is allowed, and is undone when the page does not show.
+- Ad blocking: filter-list rules that would block nearly every address
+  (`||*.*^`, `||a*.com^`, `.com^`) or hide whole pages (`body:not(.x)`,
+  `html[lang]`, `:is(html)`, `body > *`) are now refused, as are exceptions for
+  all pings. No rule in today's default lists is affected beyond one each.
+
+## [0.3.0] - 2026-11-16
+
+On Windows this version does not update itself: Windows Defender quarantined Wisp
+when 0.2.1 installed an update, and automatic updates stay off there until the fixed
+update path has been checked on Windows. Install 0.3.0 with the Setup file.
+
 ### Added
 
+- Ad blocking with real filter lists: EasyList and EasyPrivacy by default, and
+  the EasyList Cookie List, Fanboy's Annoyance List and Peter Lowe's List to
+  choose from in Settings > Privacy and security (Advanced). Lists are downloaded from their
+  publishers, refreshed every four days in the background (or with Update
+  now), and checked before use: a download that is not a filter list, is too
+  large, or is much shorter than the copy in use is refused and the old copy
+  kept. The built-in host list stays in use alongside, so pages are never
+  loaded unblocked while a list is prepared, or if one cannot be used.
+- Empty ad slots are hidden (element-hiding rules), on macOS.
+- The shield button turns blocking off, or back on, for the site in the
+  current tab, and shows whether blocking is on there. The choice is applied
+  before each page of the site starts loading, so pages are not loaded twice.
+  Sites turned off are listed in Settings > Privacy and security. Not offered
+  in private tabs, and not for local addresses.
 - Split view: show two to four tabs of a workspace side by side, in rows and
   columns. Drag a tab from the list onto any side of the page (the tiles make
   room to show where it lands), choose "Split with current tab" in a tab's menu,
@@ -33,7 +64,7 @@ All notable changes to Wisp are recorded here. The format follows
   History, Bookmarks, Downloads, Find in page, zoom, and quick switches for ad
   blocking, light or dark, and collapsing the bar, each with its hotkey.
 - Menus now float over the page on glass instead of hiding it while open.
-- Low-power mode (Settings > Behavior): solid surfaces instead of glass and no
+- Low-power mode (Settings > Tabs and browsing > Performance): solid surfaces instead of glass and no
   animation. Automatic, the default, turns it on in the system's power saving
   mode, on a low battery, or on a computer with 4 GB of memory or less or two
   cores or fewer. The system's "Reduce transparency" setting now turns glass
@@ -47,6 +78,10 @@ All notable changes to Wisp are recorded here. The format follows
 
 ### Changed
 
+- On macOS, block rules are compiled once per list version and stored by the
+  web engine, instead of at every launch.
+- Wisp now downloads its ad-blocking lists itself; see PRIVACY.md for the
+  hosts and how often.
 - Settings opens as a tab of its own, which you can leave and come back to.
   It is not restored after a restart.
 - The interface uses about 50 MB less memory: the background texture is drawn
@@ -163,7 +198,8 @@ First release.
 - Installers: `.dmg` for macOS (Apple Silicon and Intel) and a setup program
   for Windows.
 
-[Unreleased]: https://github.com/Siimas/wisp-browser/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/Siimas/wisp-browser/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Siimas/wisp-browser/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/Siimas/wisp-browser/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Siimas/wisp-browser/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Siimas/wisp-browser/releases/tag/v0.1.0

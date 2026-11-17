@@ -1134,5 +1134,1145 @@
    }
   },
   "measured_at": "2026-11-16 21:32"
+ },
+ "followup_fix_idle_cpu": {
+  "note": "fix-idle-cpu (d404afd, PR #19) against main (6b110d9), Wisp only, release builds, same method as onetab/tentabs.",
+  "fix": {
+   "onetab": {
+    "footprint_mb": {
+     "median": 166.6,
+     "min": 166.2,
+     "max": 166.8,
+     "runs": [
+      166.2,
+      166.6,
+      166.8
+     ]
+    },
+    "rss_mb": {
+     "median": 143.3,
+     "min": 142.9,
+     "max": 150.8,
+     "runs": [
+      150.8,
+      142.9,
+      143.3
+     ]
+    },
+    "processes": {
+     "median": 6,
+     "min": 6,
+     "max": 6,
+     "runs": [
+      6,
+      6,
+      6
+     ]
+    },
+    "cpu_percent_of_one_core": {
+     "median": 0.01,
+     "min": 0.01,
+     "max": 0.04,
+     "runs": [
+      0.01,
+      0.01,
+      0.04
+     ]
+    },
+    "wakeups_per_s": {
+     "median": 0.9,
+     "min": 0.9,
+     "max": 0.9,
+     "runs": [
+      0.9,
+      0.9,
+      0.9
+     ]
+    },
+    "by_kind_last_run": {
+     "wisp": {
+      "count": 1,
+      "footprint_mb": 21.2,
+      "rss_mb": 64.8
+     },
+     "com.apple.WebKit.GPU": {
+      "count": 1,
+      "footprint_mb": 16.7,
+      "rss_mb": 18.8
+     },
+     "com.apple.WebKit.Networking": {
+      "count": 1,
+      "footprint_mb": 8.0,
+      "rss_mb": 12.0
+     },
+     "com.apple.WebKit.WebContent": {
+      "count": 2,
+      "footprint_mb": 117.9,
+      "rss_mb": 39.8
+     },
+     "com.apple.audio.SandboxHelper": {
+      "count": 1,
+      "footprint_mb": 3.0,
+      "rss_mb": 7.9
+     }
+    }
+   },
+   "tentabs": {
+    "wisp_all_loaded": {
+     "footprint_mb": {
+      "median": 2392.9,
+      "min": 2308.3,
+      "max": 2414.8,
+      "runs": [
+       2414.8,
+       2308.3,
+       2392.9
+      ]
+     },
+     "rss_mb": {
+      "median": 686.0,
+      "min": 636.7,
+      "max": 731.5,
+      "runs": [
+       686.0,
+       636.7,
+       731.5
+      ]
+     },
+     "processes": {
+      "median": 18,
+      "min": 18,
+      "max": 20,
+      "runs": [
+       20,
+       18,
+       18
+      ]
+     },
+     "cpu_percent_of_one_core": {
+      "median": 11.72,
+      "min": 7.71,
+      "max": 15.25,
+      "runs": [
+       11.72,
+       15.25,
+       7.71
+      ]
+     },
+     "wakeups_per_s": {
+      "median": 236.5,
+      "min": 178.2,
+      "max": 250.4,
+      "runs": [
+       236.5,
+       250.4,
+       178.2
+      ]
+     },
+     "by_kind_last_run": {
+      "wisp": {
+       "count": 1,
+       "footprint_mb": 36.7,
+       "rss_mb": 87.5
+      },
+      "com.apple.WebKit.GPU": {
+       "count": 1,
+       "footprint_mb": 108.2,
+       "rss_mb": 42.3
+      },
+      "com.apple.WebKit.Networking": {
+       "count": 1,
+       "footprint_mb": 57.2,
+       "rss_mb": 19.1
+      },
+      "com.apple.WebKit.WebContent": {
+       "count": 14,
+       "footprint_mb": 2183.9,
+       "rss_mb": 471.8
+      },
+      "com.apple.audio.SandboxHelper": {
+       "count": 1,
+       "footprint_mb": 3.0,
+       "rss_mb": 7.8
+      }
+     }
+    },
+    "wisp_restored_not_shown": {
+     "footprint_mb": {
+      "median": 259.8,
+      "min": 237.4,
+      "max": 262.4,
+      "runs": [
+       262.4,
+       259.8,
+       237.4
+      ]
+     },
+     "rss_mb": {
+      "median": 210.7,
+      "min": 204.9,
+      "max": 217.8,
+      "runs": [
+       210.7,
+       217.8,
+       204.9
+      ]
+     },
+     "processes": {
+      "median": 6,
+      "min": 6,
+      "max": 6,
+      "runs": [
+       6,
+       6,
+       6
+      ]
+     },
+     "cpu_percent_of_one_core": {
+      "median": 0.24,
+      "min": 0.2,
+      "max": 0.74,
+      "runs": [
+       0.24,
+       0.74,
+       0.2
+      ]
+     },
+     "wakeups_per_s": {
+      "median": 27.0,
+      "min": 22.2,
+      "max": 30.1,
+      "runs": [
+       27.0,
+       30.1,
+       22.2
+      ]
+     },
+     "by_kind_last_run": {
+      "wisp": {
+       "count": 1,
+       "footprint_mb": 23.3,
+       "rss_mb": 73.9
+      },
+      "com.apple.WebKit.GPU": {
+       "count": 1,
+       "footprint_mb": 22.1,
+       "rss_mb": 22.0
+      },
+      "com.apple.WebKit.Networking": {
+       "count": 1,
+       "footprint_mb": 15.1,
+       "rss_mb": 14.5
+      },
+      "com.apple.WebKit.WebContent": {
+       "count": 2,
+       "footprint_mb": 173.9,
+       "rss_mb": 86.6
+      },
+      "com.apple.audio.SandboxHelper": {
+       "count": 1,
+       "footprint_mb": 3.0,
+       "rss_mb": 7.8
+      }
+     }
+    }
+   }
+  },
+  "main": {
+   "onetab": {
+    "footprint_mb": {
+     "median": 268.2,
+     "min": 266.9,
+     "max": 274.3,
+     "runs": [
+      274.3,
+      268.2,
+      266.9
+     ]
+    },
+    "rss_mb": {
+     "median": 153.1,
+     "min": 146.6,
+     "max": 156.8,
+     "runs": [
+      156.8,
+      153.1,
+      146.6
+     ]
+    },
+    "processes": {
+     "median": 6,
+     "min": 5,
+     "max": 7,
+     "runs": [
+      7,
+      6,
+      5
+     ]
+    },
+    "cpu_percent_of_one_core": {
+     "median": 13.81,
+     "min": 13.23,
+     "max": 14.95,
+     "runs": [
+      13.81,
+      13.23,
+      14.95
+     ]
+    },
+    "wakeups_per_s": {
+     "median": 215.7,
+     "min": 202.4,
+     "max": 232.4,
+     "runs": [
+      232.4,
+      202.4,
+      215.7
+     ]
+    },
+    "by_kind_last_run": {
+     "wisp": {
+      "count": 1,
+      "footprint_mb": 22.4,
+      "rss_mb": 66.9
+     },
+     "com.apple.WebKit.GPU": {
+      "count": 1,
+      "footprint_mb": 79.8,
+      "rss_mb": 23.9
+     },
+     "com.apple.WebKit.Networking": {
+      "count": 1,
+      "footprint_mb": 8.1,
+      "rss_mb": 12.7
+     },
+     "com.apple.WebKit.WebContent": {
+      "count": 2,
+      "footprint_mb": 156.7,
+      "rss_mb": 43.5
+     }
+    }
+   },
+   "tentabs": {
+    "wisp_all_loaded": {
+     "footprint_mb": {
+      "median": 2439.9,
+      "min": 2370.9,
+      "max": 2468.9,
+      "runs": [
+       2439.9,
+       2468.9,
+       2370.9
+      ]
+     },
+     "rss_mb": {
+      "median": 457.5,
+      "min": 182.6,
+      "max": 689.9,
+      "runs": [
+       457.5,
+       689.9,
+       182.6
+      ]
+     },
+     "processes": {
+      "median": 18,
+      "min": 18,
+      "max": 19,
+      "runs": [
+       18,
+       18,
+       19
+      ]
+     },
+     "cpu_percent_of_one_core": {
+      "median": 33.68,
+      "min": 3.61,
+      "max": 36.34,
+      "runs": [
+       33.68,
+       36.34,
+       3.61
+      ]
+     },
+     "wakeups_per_s": {
+      "median": 466.6,
+      "min": 94.0,
+      "max": 535.9,
+      "runs": [
+       466.6,
+       535.9,
+       94.0
+      ]
+     },
+     "by_kind_last_run": {
+      "wisp": {
+       "count": 1,
+       "footprint_mb": 37.1,
+       "rss_mb": 38.9
+      },
+      "com.apple.WebKit.GPU": {
+       "count": 1,
+       "footprint_mb": 67.0,
+       "rss_mb": 16.3
+      },
+      "com.apple.WebKit.Networking": {
+       "count": 1,
+       "footprint_mb": 57.4,
+       "rss_mb": 11.5
+      },
+      "com.apple.WebKit.WebContent": {
+       "count": 14,
+       "footprint_mb": 2192.5,
+       "rss_mb": 93.9
+      },
+      "com.apple.audio.SandboxHelper": {
+       "count": 1,
+       "footprint_mb": 3.0,
+       "rss_mb": 7.6
+      },
+      "MTLCompilerService": {
+       "count": 1,
+       "footprint_mb": 12.9,
+       "rss_mb": 2.8
+      }
+     }
+    },
+    "wisp_restored_not_shown": {
+     "footprint_mb": {
+      "median": 368.3,
+      "min": 362.6,
+      "max": 374.3,
+      "runs": [
+       374.3,
+       362.6,
+       368.3
+      ]
+     },
+     "rss_mb": {
+      "median": 187.5,
+      "min": 177.5,
+      "max": 192.0,
+      "runs": [
+       177.5,
+       192.0,
+       187.5
+      ]
+     },
+     "processes": {
+      "median": 6,
+      "min": 6,
+      "max": 6,
+      "runs": [
+       6,
+       6,
+       6
+      ]
+     },
+     "cpu_percent_of_one_core": {
+      "median": 16.27,
+      "min": 9.9,
+      "max": 17.66,
+      "runs": [
+       16.27,
+       17.66,
+       9.9
+      ]
+     },
+     "wakeups_per_s": {
+      "median": 240.5,
+      "min": 166.6,
+      "max": 250.5,
+      "runs": [
+       240.5,
+       250.5,
+       166.6
+      ]
+     },
+     "by_kind_last_run": {
+      "wisp": {
+       "count": 1,
+       "footprint_mb": 25.5,
+       "rss_mb": 78.7
+      },
+      "com.apple.WebKit.GPU": {
+       "count": 1,
+       "footprint_mb": 85.9,
+       "rss_mb": 29.2
+      },
+      "com.apple.WebKit.Networking": {
+       "count": 1,
+       "footprint_mb": 14.9,
+       "rss_mb": 12.0
+      },
+      "com.apple.WebKit.WebContent": {
+       "count": 2,
+       "footprint_mb": 236.7,
+       "rss_mb": 60.2
+      },
+      "com.apple.audio.SandboxHelper": {
+       "count": 1,
+       "footprint_mb": 5.4,
+       "rss_mb": 7.7
+      }
+     }
+    }
+   }
+  },
+  "collapsed_bar_fix_60s_tree_pct": {
+   "default": [
+    0.12,
+    0.06
+   ],
+   "collapsed": [
+    0.88,
+    0.87
+   ]
+  }
+ },
+ "followup_interface_memory": {
+  "note": "bench/interface_memory.py: one simple tab, 40 s after load; interface = first WebContent; graphics = footprint tool category \"Owned physical footprint (unmapped) (graphics)\". Labels are merge commits on main, or main/fix with a config.json.",
+  "configs": {
+   "tex_none": {
+    "appearance": {
+     "texture": "none"
+    }
+   },
+   "tex_dots": {
+    "appearance": {
+     "texture": "dots"
+    }
+   },
+   "flat": {
+    "appearance": {
+     "background": [
+      "#26282e"
+     ]
+    }
+   },
+   "bgblend": {
+    "appearance": {
+     "custom_css": "body::before{display:none} body{background:var(--tex),var(--paint);background-blend-mode:overlay,normal}"
+    }
+   }
+  },
+  "runs": {
+   "bb84f62": [
+    {
+     "tree_mb": 109.6,
+     "interface_mb": 31.4,
+     "graphics_mb": 16.0,
+     "webkit_malloc_mb": 8.2,
+     "top": {
+      "TOTAL": 31.0,
+      "Owned physical footprint (unmapped) (graphics)": 16.0,
+      "WebKit malloc": 8.2,
+      "MALLOC_SMALL": 2.6,
+      "__DATA_DIRTY": 1.2,
+      "__DATA": 0.6
+     }
+    },
+    {
+     "tree_mb": 177.5,
+     "interface_mb": 45.7,
+     "graphics_mb": 29.0,
+     "webkit_malloc_mb": 8.5,
+     "top": {
+      "TOTAL": 46.0,
+      "Owned physical footprint (unmapped) (graphics)": 29.0,
+      "WebKit malloc": 8.5,
+      "MALLOC_SMALL": 2.7,
+      "untagged (VM_ALLOCATE)": 2.1,
+      "__DATA_DIRTY": 1.2
+     }
+    },
+    {
+     "tree_mb": 183.2,
+     "interface_mb": 46.0,
+     "graphics_mb": 29.0,
+     "webkit_malloc_mb": 8.7,
+     "top": {
+      "TOTAL": 46.0,
+      "Owned physical footprint (unmapped) (graphics)": 29.0,
+      "WebKit malloc": 8.7,
+      "MALLOC_SMALL": 2.7,
+      "untagged (VM_ALLOCATE)": 2.1,
+      "__DATA_DIRTY": 1.2
+     }
+    }
+   ],
+   "581201f": [
+    {
+     "tree_mb": 180.4,
+     "interface_mb": 43.9,
+     "graphics_mb": 26.0,
+     "webkit_malloc_mb": 8.7,
+     "top": {
+      "TOTAL": 44.0,
+      "Owned physical footprint (unmapped) (graphics)": 26.0,
+      "WebKit malloc": 8.7,
+      "MALLOC_SMALL": 2.7,
+      "untagged (VM_ALLOCATE)": 2.1,
+      "__DATA_DIRTY": 1.2
+     }
+    },
+    {
+     "tree_mb": 184.5,
+     "interface_mb": 46.0,
+     "graphics_mb": 29.0,
+     "webkit_malloc_mb": 8.6,
+     "top": {
+      "TOTAL": 46.0,
+      "Owned physical footprint (unmapped) (graphics)": 29.0,
+      "WebKit malloc": 8.6,
+      "MALLOC_SMALL": 2.7,
+      "untagged (VM_ALLOCATE)": 2.1,
+      "__DATA_DIRTY": 1.2
+     }
+    },
+    {
+     "tree_mb": 178.9,
+     "interface_mb": 44.0,
+     "graphics_mb": 26.0,
+     "webkit_malloc_mb": 8.7,
+     "top": {
+      "TOTAL": 44.0,
+      "Owned physical footprint (unmapped) (graphics)": 26.0,
+      "WebKit malloc": 8.7,
+      "MALLOC_SMALL": 2.7,
+      "untagged (VM_ALLOCATE)": 2.1,
+      "__DATA_DIRTY": 1.2
+     }
+    }
+   ],
+   "fa83afb": [
+    {
+     "tree_mb": 177.6,
+     "interface_mb": 44.2,
+     "graphics_mb": 26.0,
+     "webkit_malloc_mb": 8.9,
+     "top": {
+      "TOTAL": 44.0,
+      "Owned physical footprint (unmapped) (graphics)": 26.0,
+      "WebKit malloc": 8.9,
+      "MALLOC_SMALL": 2.7,
+      "untagged (VM_ALLOCATE)": 2.1,
+      "__DATA_DIRTY": 1.2
+     }
+    },
+    {
+     "tree_mb": 192.8,
+     "interface_mb": 52.4,
+     "graphics_mb": 35.0,
+     "webkit_malloc_mb": 9.1,
+     "top": {
+      "TOTAL": 52.0,
+      "Owned physical footprint (unmapped) (graphics)": 35.0,
+      "WebKit malloc": 9.1,
+      "MALLOC_SMALL": 2.7,
+      "untagged (VM_ALLOCATE)": 2.1,
+      "__DATA_DIRTY": 1.2
+     }
+    },
+    {
+     "tree_mb": 183.7,
+     "interface_mb": 50.4,
+     "graphics_mb": 33.0,
+     "webkit_malloc_mb": 9.0,
+     "top": {
+      "TOTAL": 50.0,
+      "Owned physical footprint (unmapped) (graphics)": 33.0,
+      "WebKit malloc": 9.0,
+      "MALLOC_SMALL": 2.7,
+      "untagged (VM_ALLOCATE)": 2.1,
+      "__DATA_DIRTY": 1.2
+     }
+    }
+   ],
+   "35f96c8": [
+    {
+     "tree_mb": 186.8,
+     "interface_mb": 50.4,
+     "graphics_mb": 33.0,
+     "webkit_malloc_mb": 9.0,
+     "top": {
+      "TOTAL": 50.0,
+      "Owned physical footprint (unmapped) (graphics)": 33.0,
+      "WebKit malloc": 9.0,
+      "MALLOC_SMALL": 2.7,
+      "untagged (VM_ALLOCATE)": 2.1,
+      "__DATA_DIRTY": 1.2
+     }
+    },
+    {
+     "tree_mb": 194.1,
+     "interface_mb": 50.5,
+     "graphics_mb": 33.0,
+     "webkit_malloc_mb": 9.1,
+     "top": {
+      "TOTAL": 50.0,
+      "Owned physical footprint (unmapped) (graphics)": 33.0,
+      "WebKit malloc": 9.1,
+      "MALLOC_SMALL": 2.7,
+      "untagged (VM_ALLOCATE)": 2.1,
+      "__DATA_DIRTY": 1.2
+     }
+    },
+    {
+     "tree_mb": 186.8,
+     "interface_mb": 50.5,
+     "graphics_mb": 33.0,
+     "webkit_malloc_mb": 9.1,
+     "top": {
+      "TOTAL": 51.0,
+      "Owned physical footprint (unmapped) (graphics)": 33.0,
+      "WebKit malloc": 9.1,
+      "MALLOC_SMALL": 2.7,
+      "untagged (VM_ALLOCATE)": 2.1,
+      "__DATA_DIRTY": 1.2
+     }
+    }
+   ],
+   "c7df944": [
+    {
+     "tree_mb": 284.4,
+     "interface_mb": 146.5,
+     "graphics_mb": 128.0,
+     "webkit_malloc_mb": 9.5,
+     "top": {
+      "TOTAL": 147.0,
+      "Owned physical footprint (unmapped) (graphics)": 128.0,
+      "WebKit malloc": 9.5,
+      "MALLOC_SMALL": 2.7,
+      "untagged (VM_ALLOCATE)": 1.7,
+      "__DATA_DIRTY": 1.2
+     }
+    },
+    {
+     "tree_mb": 268.5,
+     "interface_mb": 129.0,
+     "graphics_mb": 110.0,
+     "webkit_malloc_mb": 10.0,
+     "top": {
+      "TOTAL": 129.0,
+      "Owned physical footprint (unmapped) (graphics)": 110.0,
+      "WebKit malloc": 10.0,
+      "MALLOC_SMALL": 2.8,
+      "untagged (VM_ALLOCATE)": 1.7,
+      "__DATA_DIRTY": 1.2
+     }
+    },
+    {
+     "tree_mb": 268.5,
+     "interface_mb": 128.9,
+     "graphics_mb": 110.0,
+     "webkit_malloc_mb": 10.0,
+     "top": {
+      "TOTAL": 129.0,
+      "Owned physical footprint (unmapped) (graphics)": 110.0,
+      "WebKit malloc": 10.0,
+      "MALLOC_SMALL": 2.7,
+      "untagged (VM_ALLOCATE)": 1.7,
+      "__DATA_DIRTY": 1.2
+     }
+    }
+   ],
+   "main": [
+    {
+     "tree_mb": 270.3,
+     "interface_mb": 129.1,
+     "graphics_mb": 110.0,
+     "webkit_malloc_mb": 10.0,
+     "top": {
+      "TOTAL": 129.0,
+      "Owned physical footprint (unmapped) (graphics)": 110.0,
+      "WebKit malloc": 10.0,
+      "MALLOC_SMALL": 2.7,
+      "untagged (VM_ALLOCATE)": 1.8,
+      "__DATA_DIRTY": 1.2
+     }
+    },
+    {
+     "tree_mb": 273.8,
+     "interface_mb": 129.2,
+     "graphics_mb": 110.0,
+     "webkit_malloc_mb": 10.0,
+     "top": {
+      "TOTAL": 129.0,
+      "Owned physical footprint (unmapped) (graphics)": 110.0,
+      "WebKit malloc": 10.0,
+      "MALLOC_SMALL": 2.8,
+      "untagged (VM_ALLOCATE)": 1.8,
+      "__DATA_DIRTY": 1.2
+     }
+    },
+    {
+     "tree_mb": 272.9,
+     "interface_mb": 129.3,
+     "graphics_mb": 110.0,
+     "webkit_malloc_mb": 10.0,
+     "top": {
+      "TOTAL": 129.0,
+      "Owned physical footprint (unmapped) (graphics)": 110.0,
+      "WebKit malloc": 10.0,
+      "MALLOC_SMALL": 2.7,
+      "untagged (VM_ALLOCATE)": 1.8,
+      "__DATA_DIRTY": 1.2
+     }
+    }
+   ],
+   "main_tex_none": [
+    {
+     "tree_mb": 190.2,
+     "interface_mb": 58.4,
+     "graphics_mb": 40.0,
+     "webkit_malloc_mb": 9.2,
+     "top": {
+      "TOTAL": 58.0,
+      "Owned physical footprint (unmapped) (graphics)": 40.0,
+      "WebKit malloc": 9.2,
+      "MALLOC_SMALL": 2.6,
+      "untagged (VM_ALLOCATE)": 2.1,
+      "__DATA_DIRTY": 1.2
+     }
+    },
+    {
+     "tree_mb": 204.2,
+     "interface_mb": 62.4,
+     "graphics_mb": 45.0,
+     "webkit_malloc_mb": 9.1,
+     "top": {
+      "TOTAL": 62.0,
+      "Owned physical footprint (unmapped) (graphics)": 45.0,
+      "WebKit malloc": 9.1,
+      "MALLOC_SMALL": 2.7,
+      "untagged (VM_ALLOCATE)": 2.1,
+      "__DATA_DIRTY": 1.2
+     }
+    },
+    {
+     "tree_mb": 203.2,
+     "interface_mb": 58.4,
+     "graphics_mb": 40.0,
+     "webkit_malloc_mb": 9.1,
+     "top": {
+      "TOTAL": 58.0,
+      "Owned physical footprint (unmapped) (graphics)": 40.0,
+      "WebKit malloc": 9.1,
+      "MALLOC_SMALL": 2.7,
+      "untagged (VM_ALLOCATE)": 2.1,
+      "__DATA_DIRTY": 1.2
+     }
+    }
+   ],
+   "main_tex_dots": [
+    {
+     "tree_mb": 252.6,
+     "interface_mb": 112.0,
+     "graphics_mb": 94.0,
+     "webkit_malloc_mb": 9.3,
+     "top": {
+      "TOTAL": 112.0,
+      "Owned physical footprint (unmapped) (graphics)": 94.0,
+      "WebKit malloc": 9.3,
+      "MALLOC_SMALL": 2.7,
+      "untagged (VM_ALLOCATE)": 1.8,
+      "__DATA_DIRTY": 1.2
+     }
+    },
+    {
+     "tree_mb": 256.5,
+     "interface_mb": 111.9,
+     "graphics_mb": 94.0,
+     "webkit_malloc_mb": 9.2,
+     "top": {
+      "TOTAL": 112.0,
+      "Owned physical footprint (unmapped) (graphics)": 94.0,
+      "WebKit malloc": 9.2,
+      "MALLOC_SMALL": 2.7,
+      "untagged (VM_ALLOCATE)": 1.8,
+      "__DATA_DIRTY": 1.2
+     }
+    },
+    {
+     "tree_mb": 269.3,
+     "interface_mb": 129.8,
+     "graphics_mb": 112.0,
+     "webkit_malloc_mb": 9.2,
+     "top": {
+      "TOTAL": 130.0,
+      "Owned physical footprint (unmapped) (graphics)": 112.0,
+      "WebKit malloc": 9.2,
+      "MALLOC_SMALL": 2.7,
+      "untagged (VM_ALLOCATE)": 1.8,
+      "__DATA_DIRTY": 1.2
+     }
+    }
+   ],
+   "main_flat": [
+    {
+     "tree_mb": 266.6,
+     "interface_mb": 127.7,
+     "graphics_mb": 110.0,
+     "webkit_malloc_mb": 10.0,
+     "top": {
+      "TOTAL": 128.0,
+      "Owned physical footprint (unmapped) (graphics)": 110.0,
+      "WebKit malloc": 10.0,
+      "MALLOC_SMALL": 2.7,
+      "__DATA_DIRTY": 1.2,
+      "__DATA": 0.6
+     }
+    },
+    {
+     "tree_mb": 288.0,
+     "interface_mb": 146.9,
+     "graphics_mb": 128.0,
+     "webkit_malloc_mb": 10.0,
+     "top": {
+      "TOTAL": 147.0,
+      "Owned physical footprint (unmapped) (graphics)": 128.0,
+      "WebKit malloc": 10.0,
+      "MALLOC_SMALL": 2.7,
+      "untagged (VM_ALLOCATE)": 1.8,
+      "__DATA_DIRTY": 1.2
+     }
+    },
+    {
+     "tree_mb": 268.7,
+     "interface_mb": 128.9,
+     "graphics_mb": 110.0,
+     "webkit_malloc_mb": 9.7,
+     "top": {
+      "TOTAL": 129.0,
+      "Owned physical footprint (unmapped) (graphics)": 110.0,
+      "WebKit malloc": 9.7,
+      "MALLOC_SMALL": 2.7,
+      "untagged (VM_ALLOCATE)": 1.8,
+      "__DATA_DIRTY": 1.2
+     }
+    }
+   ],
+   "main_flat_none": [
+    {
+     "tree_mb": 190.4,
+     "interface_mb": 58.5,
+     "graphics_mb": 40.0,
+     "webkit_malloc_mb": 9.2,
+     "top": {
+      "TOTAL": 58.0,
+      "Owned physical footprint (unmapped) (graphics)": 40.0,
+      "WebKit malloc": 9.2,
+      "MALLOC_SMALL": 2.6,
+      "untagged (VM_ALLOCATE)": 2.1,
+      "__DATA_DIRTY": 1.2
+     }
+    },
+    {
+     "tree_mb": 203.4,
+     "interface_mb": 62.6,
+     "graphics_mb": 45.0,
+     "webkit_malloc_mb": 9.2,
+     "top": {
+      "TOTAL": 63.0,
+      "Owned physical footprint (unmapped) (graphics)": 45.0,
+      "WebKit malloc": 9.2,
+      "MALLOC_SMALL": 2.7,
+      "untagged (VM_ALLOCATE)": 2.1,
+      "__DATA_DIRTY": 1.2
+     }
+    },
+    {
+     "tree_mb": 192.8,
+     "interface_mb": 58.4,
+     "graphics_mb": 40.0,
+     "webkit_malloc_mb": 9.2,
+     "top": {
+      "TOTAL": 58.0,
+      "Owned physical footprint (unmapped) (graphics)": 40.0,
+      "WebKit malloc": 9.2,
+      "MALLOC_SMALL": 2.7,
+      "untagged (VM_ALLOCATE)": 2.1,
+      "__DATA_DIRTY": 1.2
+     }
+    }
+   ],
+   "fix": [
+    {
+     "tree_mb": 173.4,
+     "interface_mb": 90.8,
+     "graphics_mb": 75.0,
+     "webkit_malloc_mb": 9.2,
+     "top": {
+      "TOTAL": 91.0,
+      "Owned physical footprint (unmapped) (graphics)": 75.0,
+      "WebKit malloc": 9.2,
+      "MALLOC_SMALL": 2.6,
+      "__DATA_DIRTY": 1.2,
+      "__DATA": 0.6
+     }
+    },
+    {
+     "tree_mb": 173.2,
+     "interface_mb": 91.0,
+     "graphics_mb": 75.0,
+     "webkit_malloc_mb": 9.4,
+     "top": {
+      "TOTAL": 91.0,
+      "Owned physical footprint (unmapped) (graphics)": 75.0,
+      "WebKit malloc": 9.4,
+      "MALLOC_SMALL": 2.5,
+      "__DATA_DIRTY": 1.2,
+      "__DATA": 0.6
+     }
+    },
+    {
+     "tree_mb": 167.8,
+     "interface_mb": 90.9,
+     "graphics_mb": 75.0,
+     "webkit_malloc_mb": 9.2,
+     "top": {
+      "TOTAL": 91.0,
+      "Owned physical footprint (unmapped) (graphics)": 75.0,
+      "WebKit malloc": 9.2,
+      "MALLOC_SMALL": 2.5,
+      "__DATA_DIRTY": 1.2,
+      "__DATA": 0.6
+     }
+    }
+   ],
+   "fix_tex_none": [
+    {
+     "tree_mb": 117.0,
+     "interface_mb": 39.6,
+     "graphics_mb": 24.0,
+     "webkit_malloc_mb": 8.7,
+     "top": {
+      "TOTAL": 40.0,
+      "Owned physical footprint (unmapped) (graphics)": 24.0,
+      "WebKit malloc": 8.7,
+      "MALLOC_SMALL": 2.5,
+      "__DATA_DIRTY": 1.2,
+      "__DATA": 0.6
+     }
+    },
+    {
+     "tree_mb": 121.8,
+     "interface_mb": 39.6,
+     "graphics_mb": 24.0,
+     "webkit_malloc_mb": 8.7,
+     "top": {
+      "TOTAL": 40.0,
+      "Owned physical footprint (unmapped) (graphics)": 24.0,
+      "WebKit malloc": 8.7,
+      "MALLOC_SMALL": 2.6,
+      "__DATA_DIRTY": 1.2,
+      "__DATA": 0.6
+     }
+    },
+    {
+     "tree_mb": 121.6,
+     "interface_mb": 39.6,
+     "graphics_mb": 24.0,
+     "webkit_malloc_mb": 8.7,
+     "top": {
+      "TOTAL": 40.0,
+      "Owned physical footprint (unmapped) (graphics)": 24.0,
+      "WebKit malloc": 8.7,
+      "MALLOC_SMALL": 2.6,
+      "__DATA_DIRTY": 1.2,
+      "__DATA": 0.6
+     }
+    }
+   ],
+   "fix_bgblend": [
+    {
+     "tree_mb": 129.5,
+     "interface_mb": 40.7,
+     "graphics_mb": 24.0,
+     "webkit_malloc_mb": 9.6,
+     "top": {
+      "TOTAL": 41.0,
+      "Owned physical footprint (unmapped) (graphics)": 24.0,
+      "WebKit malloc": 9.6,
+      "MALLOC_SMALL": 2.5,
+      "__DATA_DIRTY": 1.2,
+      "__DATA": 0.6
+     }
+    },
+    {
+     "tree_mb": 118.0,
+     "interface_mb": 40.7,
+     "graphics_mb": 24.0,
+     "webkit_malloc_mb": 9.6,
+     "top": {
+      "TOTAL": 41.0,
+      "Owned physical footprint (unmapped) (graphics)": 24.0,
+      "WebKit malloc": 9.6,
+      "MALLOC_SMALL": 2.6,
+      "__DATA_DIRTY": 1.2,
+      "__DATA": 0.6
+     }
+    },
+    {
+     "tree_mb": 122.1,
+     "interface_mb": 40.5,
+     "graphics_mb": 24.0,
+     "webkit_malloc_mb": 9.4,
+     "top": {
+      "TOTAL": 40.0,
+      "Owned physical footprint (unmapped) (graphics)": 24.0,
+      "WebKit malloc": 9.4,
+      "MALLOC_SMALL": 2.5,
+      "__DATA_DIRTY": 1.2,
+      "__DATA": 0.6
+     }
+    }
+   ],
+   "main_bgblend": [
+    {
+     "tree_mb": 220.8,
+     "interface_mb": 59.5,
+     "graphics_mb": 40.0,
+     "webkit_malloc_mb": 10.0,
+     "top": {
+      "TOTAL": 59.0,
+      "Owned physical footprint (unmapped) (graphics)": 40.0,
+      "WebKit malloc": 10.0,
+      "MALLOC_SMALL": 2.7,
+      "untagged (VM_ALLOCATE)": 2.1,
+      "__DATA_DIRTY": 1.2
+     }
+    },
+    {
+     "tree_mb": 194.5,
+     "interface_mb": 59.5,
+     "graphics_mb": 40.0,
+     "webkit_malloc_mb": 10.0,
+     "top": {
+      "TOTAL": 59.0,
+      "Owned physical footprint (unmapped) (graphics)": 40.0,
+      "WebKit malloc": 10.0,
+      "MALLOC_SMALL": 2.8,
+      "untagged (VM_ALLOCATE)": 2.1,
+      "__DATA_DIRTY": 1.2
+     }
+    },
+    {
+     "tree_mb": 212.6,
+     "interface_mb": 59.5,
+     "graphics_mb": 40.0,
+     "webkit_malloc_mb": 10.0,
+     "top": {
+      "TOTAL": 59.0,
+      "Owned physical footprint (unmapped) (graphics)": 40.0,
+      "WebKit malloc": 10.0,
+      "MALLOC_SMALL": 2.7,
+      "untagged (VM_ALLOCATE)": 2.1,
+      "__DATA_DIRTY": 1.2
+     }
+    }
+   ]
+  }
  }
 }

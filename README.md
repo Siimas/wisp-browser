@@ -68,9 +68,12 @@ Every keyboard shortcut can be changed too.
 
 - **Nothing phones home.** No telemetry, no analytics, no account, no Wisp
   server. The app itself only asks GitHub whether there is an update (you can
-  turn that off) and asks the sites in your tabs for their icons.
-- **Ads and trackers are blocked** from a built-in list of known hosts, checked
-  on your computer. You can add your own.
+  turn that off), fetches its ad-blocking lists from their publishers, and
+  asks the sites in your tabs for their icons.
+- **Ads and trackers are blocked** with EasyList and EasyPrivacy, the lists
+  most ad blockers use (more in Settings), and the empty slots ads leave are
+  hidden. On macOS this happens inside the web engine itself. The shield
+  button turns blocking off for a site that breaks under it.
 - **Private tabs and private windows** keep nothing on disk.
 - **History and bookmarks stay on your computer.** Address bar suggestions come
   only from your own tabs, bookmarks and history. Nothing is sent while you
@@ -176,8 +179,8 @@ Wisp is young. Things you may miss today:
 
 - Extensions, sync, and importing from another browser.
 - Bookmark folders. Bookmarks are one flat list.
-- Filter-list ad blocking. Blocking is by host, so some ads get through and
-  empty ad slots are not hidden.
+- On Windows, empty ad slots are not hidden (ads and trackers are still
+  blocked).
 - Separate logins per workspace. Workspaces group tabs but share cookies.
 - Linux builds.
 - On Windows, the page card has square corners and the floating sidebar is
