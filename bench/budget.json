@@ -1,0 +1,31 @@
+{
+ "_about": "Limits for bench/perf_check.py on the GitHub-hosted runners, checked against the median of 3 runs. 'measured' is the runner's typical median when the limits were set (17 Nov 2026, main at 215a50e, macos-latest, 3 runs, ad-block lists compiled). Headroom: memory +35-40% over the highest run median (medians 106-111 MB, collapsed 149-159; the Nov 2026 interface regression was +80 MB); idle CPU a couple of points (it reads 0.1-0.4%, the hidden progress-bar bug read 12%); launch is noisy on shared runners, so its limit only catches a gross stall; binary size +5%, so growth is a decision. Raising one: CONTRIBUTING.md, Performance budget.",
+ "darwin": {
+  "max": {
+   "binary_kb": 2760,
+   "launch_s": 5,
+   "memory_mb": 150,
+   "idle_cpu_pct": 3,
+   "launch_s_collapsed": 5,
+   "memory_mb_collapsed": 215,
+   "idle_cpu_pct_collapsed": 2
+  },
+  "measured": {
+   "binary_kb": 2626,
+   "launch_s": 1.8,
+   "memory_mb": 107,
+   "idle_cpu_pct": 0.15,
+   "launch_s_collapsed": 2.1,
+   "memory_mb_collapsed": 151,
+   "idle_cpu_pct_collapsed": 0.42
+  }
+ },
+ "win32": {
+  "max": {
+   "binary_kb": 2670
+  },
+  "measured": {
+   "binary_kb": 2540
+  }
+ }
+}

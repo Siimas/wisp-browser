@@ -58,6 +58,47 @@ HOME=/tmp/wisp-home WISP_ACT=settings WISP_SHOT=/tmp/wisp.png target/debug/wisp
 `WISP_ACT` runs an action first (here: open Settings), the throwaway `HOME`
 keeps your own profile out of it, and the app quits after six seconds.
 
+## Performance budget
+
+Wisp's point is being small and light, so every pull request is measured. The
+`perf` CI job builds a release and runs `bench/perf_check.py`, which fails
+when a number goes over its limit in [`bench/budget.json`](bench/budget.json):
+
+| Metric | What it is |
+|---|---|
+| `binary_kb` | Size of the release binary (macOS and Windows) |
+| `launch_s` | Start to a local page's `load` event (macOS) |
+| `memory_mb` | Memory ("physical footprint") of the whole process tree, WebKit's helper processes included, after the page has settled (macOS) |
+| `idle_cpu_pct` | CPU of that tree over 20 idle seconds, as % of one core (macOS) |
+| `*_collapsed` | The same with the bar collapsed, which adds the floating copy of the interface |
+
+Each value is the median of three launches on a throwaway profile. One
+unrecorded warm-up launch first fills that profile the way a user's first launch
+does (it downloads the ad-block lists and compiles them); each measured launch
+starts from a copy of it, so the numbers are an every-day launch, without
+network. The job prints a table of measured values, the
+spread of the runs, the last result from `main` and the budget; the raw runs
+are attached to the job as `perf-macOS`. Windows checks the binary size only.
+
+Run the same check on a Mac (about four minutes; Wisp windows open in the
+background, so leave them alone):
+
+```bash
+cargo build --release
+python3 bench/perf_check.py
+```
+
+The budgets are set for the CI runner. A Mac differs from it (faster launch,
+often more memory on a big screen), so a local run can be over a budget
+that CI passes. The useful local comparison is against your own run on `main`
+(`--out main.json` there, then `--base main.json` on your branch).
+
+**Raising a budget.** If your change is worth its cost, raise the number in
+`bench/budget.json` in the same pull request and say in the description which
+metric, by how much, and why. A reviewer should be able to accept the cost on
+purpose rather than find it later. Lowering a budget after an improvement is
+just as welcome.
+
 ## Dependencies and license notices
 
 Wisp ships the license text of every crate it is built from in
