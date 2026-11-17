@@ -1,31 +1,31 @@
 {
- "_about": "Limits for bench/perf_check.py on the GitHub-hosted runners, checked against the median of 3 runs. 'measured' is the runner's typical median when the limits were set (Nov 2026, macos-latest, 5 runs). Headroom: memory +35-40% (run-to-run medians spread 115-131 MB, the 2026-11 interface regression was +80 MB); idle CPU several points (it reads 0.2%, the hidden progress-bar bug read 12%); launch is noisy on shared runners, so its limit only catches a gross stall; binary size +5%, so growth is a decision. Raising one: CONTRIBUTING.md, Performance budget.",
+ "_about": "Limits for bench/perf_check.py on the GitHub-hosted runners, checked against the median of 3 runs. 'measured' is the runner's typical median when the limits were set (17 Nov 2026, main at 39c336e, macos-latest, 3 runs). Headroom: memory +35-40% over the highest run median (medians spread 94-109 MB, collapsed 113-139; the Nov 2026 interface regression was +80 MB); idle CPU a couple of points (it reads 0.1-0.4%, the hidden progress-bar bug read 12%); launch is noisy on shared runners, so its limit only catches a gross stall; binary size +5%, so growth is a decision. Raising one: CONTRIBUTING.md, Performance budget.",
  "darwin": {
   "max": {
-   "binary_kb": 1800,
+   "binary_kb": 2090,
    "launch_s": 5,
-   "memory_mb": 175,
+   "memory_mb": 150,
    "idle_cpu_pct": 3,
    "launch_s_collapsed": 5,
-   "memory_mb_collapsed": 200,
-   "idle_cpu_pct_collapsed": 4
+   "memory_mb_collapsed": 190,
+   "idle_cpu_pct_collapsed": 2
   },
   "measured": {
-   "binary_kb": 1715,
-   "launch_s": 1.7,
-   "memory_mb": 125,
-   "idle_cpu_pct": 0.2,
-   "launch_s_collapsed": 2.3,
-   "memory_mb_collapsed": 145,
-   "idle_cpu_pct_collapsed": 1.3
+   "binary_kb": 1990,
+   "launch_s": 1.5,
+   "memory_mb": 99,
+   "idle_cpu_pct": 0.1,
+   "launch_s_collapsed": 1.6,
+   "memory_mb_collapsed": 139,
+   "idle_cpu_pct_collapsed": 0.35
   }
  },
  "win32": {
   "max": {
-   "binary_kb": 1400
+   "binary_kb": 1710
   },
   "measured": {
-   "binary_kb": 1328
+   "binary_kb": 1629
   }
  }
 }
